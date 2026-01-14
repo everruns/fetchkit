@@ -1,0 +1,20 @@
+[package]
+name = "webfetch-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "MCP server for the WebFetch tool"
+
+[[bin]]
+name = "webfetch-mcp"
+path = "src/main.rs"
+
+[dependencies]
+webfetch = { path = "../webfetch" }
+tokio = { workspace = true, features = ["io-std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
