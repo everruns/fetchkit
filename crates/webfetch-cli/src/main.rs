@@ -13,7 +13,7 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// URL to fetch (for direct fetch mode)
+    /// URL to fetch
     #[arg(long)]
     url: Option<String>,
 
@@ -42,28 +42,6 @@ struct Cli {
 enum Commands {
     /// Run as MCP (Model Context Protocol) server over stdio
     Mcp,
-    /// Fetch a URL (default command)
-    Fetch {
-        /// URL to fetch
-        #[arg(long)]
-        url: String,
-
-        /// HTTP method (GET or HEAD)
-        #[arg(long, default_value = "GET")]
-        method: String,
-
-        /// Convert HTML to markdown
-        #[arg(long)]
-        as_markdown: bool,
-
-        /// Convert HTML to plain text
-        #[arg(long)]
-        as_text: bool,
-
-        /// Custom User-Agent
-        #[arg(long)]
-        user_agent: Option<String>,
-    },
 }
 
 #[tokio::main]
@@ -80,17 +58,8 @@ async fn main() {
         Some(Commands::Mcp) => {
             mcp::run_server().await;
         }
-        Some(Commands::Fetch {
-            url,
-            method,
-            as_markdown,
-            as_text,
-            user_agent,
-        }) => {
-            run_fetch(&url, &method, as_markdown, as_text, user_agent).await;
-        }
         None => {
-            // Default: fetch mode if URL is provided
+            // Fetch mode
             if let Some(url) = cli.url {
                 run_fetch(
                     &url,
@@ -103,7 +72,6 @@ async fn main() {
             } else {
                 eprintln!("Error: Missing required parameter: url");
                 eprintln!("Usage: webfetch --url <URL>");
-                eprintln!("   or: webfetch fetch --url <URL>");
                 eprintln!("   or: webfetch mcp");
                 std::process::exit(1);
             }
