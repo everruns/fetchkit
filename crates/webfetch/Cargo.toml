@@ -1,0 +1,25 @@
+[package]
+name = "webfetch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AI-friendly webfetch library for fetching and converting web content"
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+url = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio-test = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
