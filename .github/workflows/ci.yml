@@ -68,11 +68,6 @@ jobs:
         with:
           name: webfetch-cli-linux
           path: target/release/webfetch
-      - name: Upload MCP server artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: webfetch-mcp-linux
-          path: target/release/webfetch-mcp
 
   doc:
     name: Documentation

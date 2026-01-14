@@ -1,6 +1,4 @@
-//! WebFetch MCP Server - Model Context Protocol server for WebFetch
-//!
-//! This server implements the MCP protocol over stdio, exposing the WebFetch tool.
+//! MCP (Model Context Protocol) server implementation
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -77,7 +75,7 @@ impl McpServer {
 
     async fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         match request.method.as_str() {
-            "initialize" => self.handle_initialize(request.id, request.params),
+            "initialize" => self.handle_initialize(request.id),
             "tools/list" => self.handle_tools_list(request.id),
             "tools/call" => self.handle_tools_call(request.id, request.params).await,
             "notifications/initialized" => {
@@ -92,7 +90,7 @@ impl McpServer {
         }
     }
 
-    fn handle_initialize(&self, id: Option<Value>, _params: Value) -> JsonRpcResponse {
+    fn handle_initialize(&self, id: Option<Value>) -> JsonRpcResponse {
         JsonRpcResponse::success(
             id,
             json!({
@@ -101,7 +99,7 @@ impl McpServer {
                     "tools": {}
                 },
                 "serverInfo": {
-                    "name": "webfetch-mcp",
+                    "name": "webfetch",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }),
@@ -171,17 +169,8 @@ impl McpServer {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    // Initialize tracing to stderr
-    tracing_subscriber::fmt()
-        .with_writer(io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
-        )
-        .init();
-
+/// Run the MCP server over stdio
+pub async fn run_server() {
     let server = McpServer::new();
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -190,7 +179,7 @@ async fn main() {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                tracing::error!("Error reading stdin: {}", e);
+                eprintln!("Error reading stdin: {}", e);
                 continue;
             }
         };
