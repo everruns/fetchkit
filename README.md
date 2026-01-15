@@ -17,13 +17,13 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 ### From Git (recommended)
 
 ```bash
-cargo install --git https://github.com/anthropics/webfetch webfetch-cli
+cargo install --git https://github.com/everruns/webfetch webfetch-cli
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/anthropics/webfetch
+git clone https://github.com/everruns/webfetch
 cd webfetch
 cargo install --path crates/webfetch-cli
 ```
@@ -81,7 +81,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-webfetch = { git = "https://github.com/anthropics/webfetch" }
+webfetch = { git = "https://github.com/everruns/webfetch" }
 ```
 
 ### Basic Fetch
