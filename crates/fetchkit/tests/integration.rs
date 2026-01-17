@@ -1,6 +1,6 @@
-//! Integration tests for WebFetch using wiremock
+//! Integration tests for FetchKit using wiremock
 
-use webfetch::{fetch, HttpMethod, Tool, WebFetchRequest};
+use fetchkit::{fetch, HttpMethod, Tool, FetchRequest};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -18,7 +18,7 @@ async fn test_simple_get() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
@@ -43,7 +43,7 @@ async fn test_head_request() {
         .await;
 
     let req =
-        WebFetchRequest::new(format!("{}/file.pdf", mock_server.uri())).method(HttpMethod::Head);
+        FetchRequest::new(format!("{}/file.pdf", mock_server.uri())).method(HttpMethod::Head);
     let resp = fetch(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
@@ -81,7 +81,7 @@ async fn test_html_to_markdown() {
         .await;
 
     let tool = Tool::default();
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
     let resp = tool.execute(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
@@ -114,7 +114,7 @@ async fn test_html_to_text() {
         .await;
 
     let tool = Tool::default();
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri())).as_text();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_text();
     let resp = tool.execute(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
@@ -141,7 +141,7 @@ async fn test_binary_content() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/image.png", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/image.png", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
@@ -166,7 +166,7 @@ async fn test_4xx_status() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/not-found", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/not-found", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     // 4xx is still a success response (not a tool error)
@@ -188,7 +188,7 @@ async fn test_5xx_status() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/error", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/error", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     // 5xx is still a success response (not a tool error)
@@ -211,7 +211,7 @@ async fn test_content_disposition_filename() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/download", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/download", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     assert_eq!(resp.filename, Some("report.txt".to_string()));
@@ -231,7 +231,7 @@ async fn test_filename_from_url() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/path/to/document.pdf", mock_server.uri()))
+    let req = FetchRequest::new(format!("{}/path/to/document.pdf", mock_server.uri()))
         .method(HttpMethod::Head);
     let resp = fetch(req).await.unwrap();
 
@@ -254,7 +254,7 @@ async fn test_size_for_text_content() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     // Size should equal bytes read from body
@@ -276,7 +276,7 @@ async fn test_url_prefix_allow_list() {
         .allow_prefix("https://allowed.example.com")
         .build();
 
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let result = tool.execute(req).await;
 
     assert!(result.is_err());
@@ -299,7 +299,7 @@ async fn test_url_prefix_block_list() {
     // Create tool with block list that includes localhost
     let tool = Tool::builder().block_prefix("http://127.0.0.1").build();
 
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let result = tool.execute(req).await;
 
     assert!(result.is_err());
@@ -311,7 +311,7 @@ async fn test_url_prefix_block_list() {
 
 #[tokio::test]
 async fn test_invalid_url_scheme() {
-    let req = WebFetchRequest::new("ftp://example.com/file.txt");
+    let req = FetchRequest::new("ftp://example.com/file.txt");
     let result = fetch(req).await;
 
     assert!(result.is_err());
@@ -323,7 +323,7 @@ async fn test_invalid_url_scheme() {
 
 #[tokio::test]
 async fn test_missing_url() {
-    let req = WebFetchRequest::new("");
+    let req = FetchRequest::new("");
     let result = fetch(req).await;
 
     assert!(result.is_err());
@@ -343,7 +343,7 @@ async fn test_entity_decoding_in_html() {
         .await;
 
     let tool = Tool::default();
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri())).as_text();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_text();
     let resp = tool.execute(req).await.unwrap();
 
     let content = resp.content.unwrap();
@@ -370,7 +370,7 @@ async fn test_non_html_with_conversion_flags() {
         .await;
 
     let tool = Tool::default();
-    let req = WebFetchRequest::new(format!("{}/api/data", mock_server.uri())).as_markdown();
+    let req = FetchRequest::new(format!("{}/api/data", mock_server.uri())).as_markdown();
     let resp = tool.execute(req).await.unwrap();
 
     // Non-HTML should return raw even with as_markdown flag
@@ -396,7 +396,7 @@ async fn test_html_detection_by_body() {
         .await;
 
     let tool = Tool::default();
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
     let resp = tool.execute(req).await.unwrap();
 
     // Should detect HTML by body content and convert
@@ -415,7 +415,7 @@ async fn test_custom_user_agent() {
 
     let tool = Tool::builder().user_agent("CustomBot/1.0").build();
 
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let resp = tool.execute(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
@@ -437,7 +437,7 @@ async fn test_excessive_newlines_filtered() {
         .mount(&mock_server)
         .await;
 
-    let req = WebFetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let resp = fetch(req).await.unwrap();
 
     // Should have at most 2 consecutive newlines

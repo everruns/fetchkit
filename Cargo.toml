@@ -7,8 +7,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Everruns"]
-repository = "https://github.com/everruns/webfetch"
-description = "AI-friendly webfetch tool, CLI, MCP server, and library"
+repository = "https://github.com/everruns/fetchkit"
+description = "AI-friendly fetchkit tool, CLI, MCP server, and library"
 
 [workspace.dependencies]
 # Async runtime

@@ -1,18 +1,18 @@
 [package]
-name = "webfetch-cli"
+name = "fetchkit-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "CLI for the WebFetch tool"
+description = "CLI for the FetchKit tool"
 
 [[bin]]
-name = "webfetch"
+name = "fetchkit"
 path = "src/main.rs"
 
 [dependencies]
-webfetch = { path = "../webfetch" }
+fetchkit = { path = "../fetchkit" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

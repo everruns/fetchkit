@@ -1,13 +1,13 @@
-//! WebFetch CLI - Command-line interface for fetching web content
+//! FetchKit CLI - Command-line interface for fetching web content
 
 mod mcp;
 
 use clap::{Parser, Subcommand};
-use webfetch::{HttpMethod, Tool, WebFetchRequest, TOOL_LLMTXT};
+use fetchkit::{HttpMethod, Tool, FetchRequest, TOOL_LLMTXT};
 
-/// WebFetch - AI-friendly web content fetching tool
+/// FetchKit - AI-friendly web content fetching tool
 #[derive(Parser, Debug)]
-#[command(name = "webfetch")]
+#[command(name = "fetchkit")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -102,9 +102,9 @@ async fn main() {
                 .await;
             } else {
                 eprintln!("Error: Missing required parameter: url");
-                eprintln!("Usage: webfetch --url <URL>");
-                eprintln!("   or: webfetch fetch --url <URL>");
-                eprintln!("   or: webfetch mcp");
+                eprintln!("Usage: fetchkit --url <URL>");
+                eprintln!("   or: fetchkit fetch --url <URL>");
+                eprintln!("   or: fetchkit mcp");
                 std::process::exit(1);
             }
         }
@@ -129,7 +129,7 @@ async fn run_fetch(
     };
 
     // Build request
-    let mut request = WebFetchRequest::new(url).method(method);
+    let mut request = FetchRequest::new(url).method(method);
 
     if as_markdown {
         request = request.as_markdown();

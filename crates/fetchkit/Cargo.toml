@@ -1,11 +1,11 @@
 [package]
-name = "webfetch"
+name = "fetchkit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "AI-friendly webfetch library for fetching and converting web content"
+description = "AI-friendly fetchkit library for fetching and converting web content"
 
 [dependencies]
 tokio = { workspace = true }

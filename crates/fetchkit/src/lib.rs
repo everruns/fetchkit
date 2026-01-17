@@ -1,4 +1,4 @@
-//! WebFetch - AI-friendly web content fetching library
+//! FetchKit - AI-friendly web content fetching library
 //!
 //! This crate provides a reusable library API for fetching web content,
 //! with optional HTML to markdown/text conversion.
@@ -13,10 +13,10 @@ pub use client::fetch;
 pub use convert::{html_to_markdown, html_to_text};
 pub use error::FetchError;
 pub use tool::{Tool, ToolBuilder, ToolStatus};
-pub use types::{HttpMethod, WebFetchRequest, WebFetchResponse};
+pub use types::{HttpMethod, FetchRequest, FetchResponse};
 
 /// Default User-Agent string
-pub const DEFAULT_USER_AGENT: &str = "Everruns WebFetch/1.0";
+pub const DEFAULT_USER_AGENT: &str = "Everruns FetchKit/1.0";
 
 /// Tool description for LLM consumption
 pub const TOOL_DESCRIPTION: &str = r#"Fetches content from a URL and optionally converts HTML to markdown or text.
@@ -27,7 +27,7 @@ pub const TOOL_DESCRIPTION: &str = r#"Fetches content from a URL and optionally 
 - Strict timeouts for reliability"#;
 
 /// Extended documentation for LLM consumption (llmtxt)
-pub const TOOL_LLMTXT: &str = r#"# WebFetch Tool
+pub const TOOL_LLMTXT: &str = r#"# FetchKit Tool
 
 Fetches content from a URL and optionally converts HTML to markdown or text.
 

@@ -1,8 +1,8 @@
-//! HTTP client for WebFetch
+//! HTTP client for FetchKit
 
 use crate::convert::{filter_excessive_newlines, html_to_markdown, html_to_text, is_html};
 use crate::error::FetchError;
-use crate::types::{HttpMethod, WebFetchRequest, WebFetchResponse};
+use crate::types::{HttpMethod, FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -52,15 +52,15 @@ pub struct FetchOptions {
 }
 
 /// Fetch a URL and return the response
-pub async fn fetch(req: WebFetchRequest) -> Result<WebFetchResponse, FetchError> {
+pub async fn fetch(req: FetchRequest) -> Result<FetchResponse, FetchError> {
     fetch_with_options(req, FetchOptions::default()).await
 }
 
 /// Fetch a URL with custom options
 pub async fn fetch_with_options(
-    req: WebFetchRequest,
+    req: FetchRequest,
     options: FetchOptions,
-) -> Result<WebFetchResponse, FetchError> {
+) -> Result<FetchResponse, FetchError> {
     // Validate URL
     if req.url.is_empty() {
         return Err(FetchError::MissingUrl);
@@ -154,7 +154,7 @@ pub async fn fetch_with_options(
 
     // Handle HEAD request
     if method == HttpMethod::Head {
-        return Ok(WebFetchResponse {
+        return Ok(FetchResponse {
             url: req.url,
             status_code,
             content_type,
@@ -169,7 +169,7 @@ pub async fn fetch_with_options(
     // Check for binary content
     if let Some(ref ct) = content_type {
         if is_binary_content_type(ct) {
-            return Ok(WebFetchResponse {
+            return Ok(FetchResponse {
                 url: req.url,
                 status_code,
                 content_type,
@@ -213,7 +213,7 @@ pub async fn fetch_with_options(
         final_content.push_str(TIMEOUT_MESSAGE);
     }
 
-    Ok(WebFetchResponse {
+    Ok(FetchResponse {
         url: req.url,
         status_code,
         content_type,

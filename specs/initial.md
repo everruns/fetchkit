@@ -1,14 +1,14 @@
 # Decisions:
-# - Spec mirrors current WebFetch tool behavior (no new features) unless noted below.
+# - Spec mirrors current FetchKit tool behavior (no new features) unless noted below.
 # - Rust is the source of truth: library + CLI + MCP server + Python bindings.
 # - HTML conversion is built-in (no external HTML conversion deps).
-# - `WebFetchRequest` and `WebFetchResponse` are defined in this crate (no external dependency).
+# - `FetchRequest` and `FetchResponse` are defined in this crate (no external dependency).
 
-# WebFetch Specification
+# FetchKit Specification
 
 ## Abstract
 
-Define a standalone Rust crate named `webfetch` that implements the existing WebFetch tool
+Define a standalone Rust crate named `fetchkit` that implements the existing FetchKit tool
 behavior: fetch URL content, optional HTML conversion, strict timeouts, and metadata-only
 responses for binary content. The crate also ships a CLI, an MCP server, and Python bindings
 that expose the same tool contract.
@@ -28,8 +28,8 @@ that expose the same tool contract.
 
 The library defines a tool contract that can be exposed via CLI, MCP, and Python bindings.
 
-- Input schema (args schema): JSON schema equivalent of `WebFetchRequest`.
-- Output schema: JSON schema equivalent of `WebFetchResponse`.
+- Input schema (args schema): JSON schema equivalent of `FetchRequest`.
+- Output schema: JSON schema equivalent of `FetchResponse`.
 - Schemas are derived programmatically at runtime and reflect tool builder options
   (disabled options are omitted).
 - Async executor: accepts input and produces output.
@@ -51,14 +51,14 @@ Provide a builder to configure tool options, including:
 
 #### Types
 
-- `WebFetchRequest`
+- `FetchRequest`
   - `url: String` (required)
   - `method: HttpMethod` (optional, default GET)
   - `as_markdown: bool` (optional, feature-gated)
   - `as_text: bool` (optional, feature-gated)
 - `HttpMethod` enum: `Get`, `Head`
   - Case-insensitive parser accepts only GET/HEAD.
-- `WebFetchResponse`
+- `FetchResponse`
   - `url: String`
   - `status_code: u16`
   - `content_type: Option<String>`
@@ -84,12 +84,12 @@ Provide a builder to configure tool options, including:
 
 #### Function
 
-- `async fn fetch(req: WebFetchRequest) -> Result<WebFetchResponse, FetchError>`
+- `async fn fetch(req: FetchRequest) -> Result<FetchResponse, FetchError>`
   - Used by the tool executor implementation.
 
 ### CLI
 
-- Binary name: `webfetch`.
+- Binary name: `fetchkit`.
 - CLI provides a convenient interface that matches this spec (args map to the tool input schema).
 - Flags:
   - `--url <URL>` (required)
@@ -99,7 +99,7 @@ Provide a builder to configure tool options, including:
   - `--help` (standard help)
   - `--llmtxt` (full help with examples and tool details)
   - `--user-agent <UA>` (optional, overrides default User-Agent)
-- Output: JSON-serialized `WebFetchResponse` to stdout.
+- Output: JSON-serialized `FetchResponse` to stdout.
 - Exit code: non-zero for `FetchError`.
 - `--llmtxt` outputs the tool `docs/llmtxt` content and exits.
 
@@ -126,7 +126,7 @@ Provide a builder to configure tool options, including:
 ### HTTP Behavior
 
 - User-Agent: configurable via tool builder or CLI/MCP/Python options
-  (default `Everruns WebFetch/1.0`).
+  (default `Everruns FetchKit/1.0`).
 - Accept header:
   - Markdown: `text/html, text/markdown, text/plain, */*;q=0.8`
   - Text: `text/html, text/plain, */*;q=0.8`
