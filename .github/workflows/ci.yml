@@ -66,8 +66,8 @@ jobs:
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: webfetch-cli-linux
-          path: target/release/webfetch
+          name: fetchkit-cli-linux
+          path: target/release/fetchkit
 
   doc:
     name: Documentation

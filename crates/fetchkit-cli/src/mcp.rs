@@ -1,9 +1,9 @@
 //! MCP (Model Context Protocol) server implementation
 
+use fetchkit::{FetchRequest, Tool, TOOL_DESCRIPTION};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
-use webfetch::{Tool, WebFetchRequest, TOOL_DESCRIPTION};
 
 /// JSON-RPC 2.0 request
 #[derive(Debug, Deserialize)]
@@ -99,7 +99,7 @@ impl McpServer {
                     "tools": {}
                 },
                 "serverInfo": {
-                    "name": "webfetch",
+                    "name": "fetchkit",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }),
@@ -113,7 +113,7 @@ impl McpServer {
             id,
             json!({
                 "tools": [{
-                    "name": "webfetch",
+                    "name": "fetchkit",
                     "description": TOOL_DESCRIPTION,
                     "inputSchema": input_schema
                 }]
@@ -127,14 +127,14 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
 
-        if tool_name != "webfetch" {
+        if tool_name != "fetchkit" {
             return JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name));
         }
 
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
         // Parse request
-        let request: WebFetchRequest = match serde_json::from_value(arguments) {
+        let request: FetchRequest = match serde_json::from_value(arguments) {
             Ok(req) => req,
             Err(e) => {
                 return JsonRpcResponse::error(id, -32602, format!("Invalid arguments: {}", e));

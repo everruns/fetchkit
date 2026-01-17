@@ -1,28 +1,28 @@
-//! Python bindings for WebFetch
+//! Python bindings for FetchKit
 //!
-//! This module exposes the WebFetch tool contract to Python.
+//! This module exposes the FetchKit tool contract to Python.
 
 // Allow false positive clippy warning from pyo3 macro expansion
 #![allow(clippy::useless_conversion)]
 
+use fetchkit::{FetchError, FetchRequest, FetchResponse, HttpMethod, Tool, ToolBuilder};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use webfetch::{FetchError, HttpMethod, Tool, ToolBuilder, WebFetchRequest, WebFetchResponse};
 
 /// Convert FetchError to PyErr
 fn to_py_err(e: FetchError) -> PyErr {
     PyValueError::new_err(e.to_string())
 }
 
-/// Python wrapper for WebFetchRequest
-#[pyclass(name = "WebFetchRequest")]
+/// Python wrapper for FetchRequest
+#[pyclass(name = "FetchRequest")]
 #[derive(Clone)]
-pub struct PyWebFetchRequest {
-    inner: WebFetchRequest,
+pub struct PyFetchRequest {
+    inner: FetchRequest,
 }
 
 #[pymethods]
-impl PyWebFetchRequest {
+impl PyFetchRequest {
     /// Create a new request
     #[new]
     #[pyo3(signature = (url, method=None, as_markdown=None, as_text=None))]
@@ -32,7 +32,7 @@ impl PyWebFetchRequest {
         as_markdown: Option<bool>,
         as_text: Option<bool>,
     ) -> PyResult<Self> {
-        let mut req = WebFetchRequest::new(url);
+        let mut req = FetchRequest::new(url);
 
         if let Some(m) = method {
             req.method = Some(m.parse::<HttpMethod>().map_err(PyValueError::new_err)?);
@@ -76,21 +76,21 @@ impl PyWebFetchRequest {
     /// Create from JSON string
     #[staticmethod]
     fn from_json(json: &str) -> PyResult<Self> {
-        let inner: WebFetchRequest =
+        let inner: FetchRequest =
             serde_json::from_str(json).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
 }
 
-/// Python wrapper for WebFetchResponse
-#[pyclass(name = "WebFetchResponse")]
+/// Python wrapper for FetchResponse
+#[pyclass(name = "FetchResponse")]
 #[derive(Clone)]
-pub struct PyWebFetchResponse {
-    inner: WebFetchResponse,
+pub struct PyFetchResponse {
+    inner: FetchResponse,
 }
 
 #[pymethods]
-impl PyWebFetchResponse {
+impl PyFetchResponse {
     #[getter]
     fn url(&self) -> &str {
         &self.inner.url
@@ -153,21 +153,21 @@ impl PyWebFetchResponse {
 
     fn __repr__(&self) -> String {
         format!(
-            "WebFetchResponse(url={:?}, status_code={})",
+            "FetchResponse(url={:?}, status_code={})",
             self.inner.url, self.inner.status_code
         )
     }
 }
 
-/// Python wrapper for WebFetch Tool
-#[pyclass(name = "WebFetchTool")]
-pub struct PyWebFetchTool {
+/// Python wrapper for FetchKit Tool
+#[pyclass(name = "FetchKitTool")]
+pub struct PyFetchKitTool {
     inner: Tool,
     runtime: tokio::runtime::Runtime,
 }
 
 #[pymethods]
-impl PyWebFetchTool {
+impl PyFetchKitTool {
     /// Create a new tool with default options
     #[new]
     #[pyo3(signature = (enable_markdown=true, enable_text=true, user_agent=None, allow_prefixes=None, block_prefixes=None))]
@@ -235,10 +235,10 @@ impl PyWebFetchTool {
     }
 
     /// Execute a fetch request
-    fn execute(&self, request: PyWebFetchRequest) -> PyResult<PyWebFetchResponse> {
+    fn execute(&self, request: PyFetchRequest) -> PyResult<PyFetchResponse> {
         let result = self.runtime.block_on(self.inner.execute(request.inner));
         match result {
-            Ok(response) => Ok(PyWebFetchResponse { inner: response }),
+            Ok(response) => Ok(PyFetchResponse { inner: response }),
             Err(e) => Err(to_py_err(e)),
         }
     }
@@ -251,8 +251,8 @@ impl PyWebFetchTool {
         method: Option<String>,
         as_markdown: Option<bool>,
         as_text: Option<bool>,
-    ) -> PyResult<PyWebFetchResponse> {
-        let request = PyWebFetchRequest::new(url, method, as_markdown, as_text)?;
+    ) -> PyResult<PyFetchResponse> {
+        let request = PyFetchRequest::new(url, method, as_markdown, as_text)?;
         self.execute(request)
     }
 }
@@ -265,17 +265,17 @@ fn fetch(
     method: Option<String>,
     as_markdown: Option<bool>,
     as_text: Option<bool>,
-) -> PyResult<PyWebFetchResponse> {
-    let tool = PyWebFetchTool::new(true, true, None, None, None)?;
+) -> PyResult<PyFetchResponse> {
+    let tool = PyFetchKitTool::new(true, true, None, None, None)?;
     tool.fetch(url, method, as_markdown, as_text)
 }
 
 /// Python module definition
 #[pymodule]
-fn webfetch_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyWebFetchRequest>()?;
-    m.add_class::<PyWebFetchResponse>()?;
-    m.add_class::<PyWebFetchTool>()?;
+fn fetchkit_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyFetchRequest>()?;
+    m.add_class::<PyFetchResponse>()?;
+    m.add_class::<PyFetchKitTool>()?;
     m.add_function(wrap_pyfunction!(fetch, m)?)?;
     Ok(())
 }

@@ -1,4 +1,4 @@
-//! Core types for WebFetch
+//! Core types for FetchKit
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ impl std::fmt::Display for HttpMethod {
 
 /// Request to fetch a URL
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct WebFetchRequest {
+pub struct FetchRequest {
     /// The URL to fetch (required, must be http:// or https://)
     pub url: String,
 
@@ -55,7 +55,7 @@ pub struct WebFetchRequest {
     pub as_text: Option<bool>,
 }
 
-impl WebFetchRequest {
+impl FetchRequest {
     /// Create a new request with the given URL
     pub fn new(url: impl Into<String>) -> Self {
         Self {
@@ -100,7 +100,7 @@ impl WebFetchRequest {
 
 /// Response from a fetch operation
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct WebFetchResponse {
+pub struct FetchResponse {
     /// The fetched URL
     pub url: String,
 
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_request_builder() {
-        let req = WebFetchRequest::new("https://example.com")
+        let req = FetchRequest::new("https://example.com")
             .method(HttpMethod::Head)
             .as_markdown();
 
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn test_request_effective_method() {
-        let req = WebFetchRequest::new("https://example.com");
+        let req = FetchRequest::new("https://example.com");
         assert_eq!(req.effective_method(), HttpMethod::Get);
 
         let req = req.method(HttpMethod::Head);
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_request_serialization() {
-        let req = WebFetchRequest::new("https://example.com").as_markdown();
+        let req = FetchRequest::new("https://example.com").as_markdown();
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"url\":\"https://example.com\""));
         assert!(json.contains("\"as_markdown\":true"));
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_response_serialization() {
-        let resp = WebFetchResponse {
+        let resp = FetchResponse {
             url: "https://example.com".to_string(),
             status_code: 200,
             content: Some("Hello".to_string()),

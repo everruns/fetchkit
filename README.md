@@ -1,4 +1,4 @@
-# webfetch
+# fetchkit
 
 AI-friendly web content fetching tool designed for LLM consumption. Rust library with CLI, MCP server, and Python bindings.
 
@@ -17,37 +17,37 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 ### From Git (recommended)
 
 ```bash
-cargo install --git https://github.com/everruns/webfetch webfetch-cli
+cargo install --git https://github.com/everruns/fetchkit fetchkit-cli
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/everruns/webfetch
-cd webfetch
-cargo install --path crates/webfetch-cli
+git clone https://github.com/everruns/fetchkit
+cd fetchkit
+cargo install --path crates/fetchkit-cli
 ```
 
 ## CLI Usage
 
 ```bash
 # Basic fetch
-webfetch --url https://example.com
+fetchkit --url https://example.com
 
 # Convert to markdown
-webfetch --url https://example.com --as-markdown
+fetchkit --url https://example.com --as-markdown
 
 # Convert to plain text
-webfetch --url https://example.com --as-text
+fetchkit --url https://example.com --as-text
 
 # HEAD request (metadata only)
-webfetch --url https://example.com --method HEAD
+fetchkit --url https://example.com --method HEAD
 
 # Custom user agent
-webfetch --url https://example.com --user-agent "MyBot/1.0"
+fetchkit --url https://example.com --user-agent "MyBot/1.0"
 
 # Show full documentation
-webfetch --llmtxt
+fetchkit --llmtxt
 ```
 
 Output is JSON to stdout:
@@ -70,10 +70,10 @@ Output is JSON to stdout:
 Run as a Model Context Protocol server:
 
 ```bash
-webfetch mcp
+fetchkit mcp
 ```
 
-Exposes `webfetch` as a tool over JSON-RPC 2.0 stdio transport. Compatible with Claude Desktop and other MCP clients.
+Exposes `fetchkit` as a tool over JSON-RPC 2.0 stdio transport. Compatible with Claude Desktop and other MCP clients.
 
 ## Library Usage
 
@@ -81,17 +81,17 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-webfetch = { git = "https://github.com/everruns/webfetch" }
+fetchkit = { git = "https://github.com/everruns/fetchkit" }
 ```
 
 ### Basic Fetch
 
 ```rust
-use webfetch::{fetch, WebFetchRequest};
+use fetchkit::{fetch, FetchRequest};
 
 #[tokio::main]
 async fn main() {
-    let request = WebFetchRequest {
+    let request = FetchRequest {
         url: "https://example.com".to_string(),
         method: None,
         as_markdown: Some(true),
@@ -106,7 +106,7 @@ async fn main() {
 ### With Tool Builder
 
 ```rust
-use webfetch::Tool;
+use fetchkit::Tool;
 
 let tool = Tool::builder()
     .enable_markdown(true)
@@ -122,23 +122,23 @@ let response = tool.fetch(request).await;
 ## Python Bindings
 
 ```bash
-pip install webfetch
+pip install fetchkit
 ```
 
 ```python
-from webfetch import fetch, WebFetchRequest, WebFetchTool
+from fetchkit import fetch, FetchRequest, FetchKitTool
 
 # Simple fetch
 response = fetch("https://example.com", as_markdown=True)
 print(response.content)
 
 # With configuration
-tool = WebFetchTool(
+tool = FetchKitTool(
     enable_markdown=True,
     user_agent="MyBot/1.0",
     allow_prefixes=["https://docs.example.com"]
 )
-response = tool.fetch(WebFetchRequest(url="https://example.com"))
+response = tool.fetch(FetchRequest(url="https://example.com"))
 ```
 
 ## Response Fields

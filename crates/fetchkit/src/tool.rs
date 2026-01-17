@@ -1,8 +1,8 @@
-//! Tool builder and contract for WebFetch
+//! Tool builder and contract for FetchKit
 
 use crate::client::{fetch_with_options, FetchOptions};
 use crate::error::FetchError;
-use crate::types::{WebFetchRequest, WebFetchResponse};
+use crate::types::{FetchRequest, FetchResponse};
 use crate::{TOOL_DESCRIPTION, TOOL_LLMTXT};
 use schemars::schema_for;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ impl ToolStatus {
     }
 }
 
-/// Builder for configuring the WebFetch tool
+/// Builder for configuring the FetchKit tool
 #[derive(Debug, Clone, Default)]
 pub struct ToolBuilder {
     /// Enable as_markdown option
@@ -120,7 +120,7 @@ impl ToolBuilder {
     }
 }
 
-/// Configured WebFetch tool
+/// Configured FetchKit tool
 #[derive(Debug, Clone)]
 pub struct Tool {
     enable_markdown: bool,
@@ -159,7 +159,7 @@ impl Tool {
 
     /// Get input schema as JSON
     pub fn input_schema(&self) -> serde_json::Value {
-        let schema = schema_for!(WebFetchRequest);
+        let schema = schema_for!(FetchRequest);
         let mut value = serde_json::to_value(schema).unwrap_or_default();
 
         // Remove disabled options from schema
@@ -177,12 +177,12 @@ impl Tool {
 
     /// Get output schema as JSON
     pub fn output_schema(&self) -> serde_json::Value {
-        let schema = schema_for!(WebFetchResponse);
+        let schema = schema_for!(FetchResponse);
         serde_json::to_value(schema).unwrap_or_default()
     }
 
     /// Execute the tool with the given request
-    pub async fn execute(&self, req: WebFetchRequest) -> Result<WebFetchResponse, FetchError> {
+    pub async fn execute(&self, req: FetchRequest) -> Result<FetchResponse, FetchError> {
         let options = FetchOptions {
             user_agent: self.user_agent.clone(),
             allow_prefixes: self.allow_prefixes.clone(),
@@ -197,9 +197,9 @@ impl Tool {
     /// Execute the tool with status updates
     pub async fn execute_with_status<F>(
         &self,
-        req: WebFetchRequest,
+        req: FetchRequest,
         mut status_callback: F,
-    ) -> Result<WebFetchResponse, FetchError>
+    ) -> Result<FetchResponse, FetchError>
     where
         F: FnMut(ToolStatus),
     {

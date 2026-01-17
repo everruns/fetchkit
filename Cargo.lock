@@ -298,6 +298,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "fetchkit"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "fetchkit-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fetchkit",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "fetchkit-python"
+version = "0.1.0"
+dependencies = [
+ "fetchkit",
+ "pyo3",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1816,46 +1856,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webfetch"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "tracing",
- "tracing-subscriber",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "webfetch-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "serde",
- "serde_json",
- "tokio",
- "webfetch",
-]
-
-[[package]]
-name = "webfetch-python"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "serde_json",
- "tokio",
- "webfetch",
 ]
 
 [[package]]
