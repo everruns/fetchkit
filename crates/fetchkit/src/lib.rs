@@ -13,7 +13,7 @@ pub use client::fetch;
 pub use convert::{html_to_markdown, html_to_text};
 pub use error::FetchError;
 pub use tool::{Tool, ToolBuilder, ToolStatus};
-pub use types::{HttpMethod, FetchRequest, FetchResponse};
+pub use types::{FetchRequest, FetchResponse, HttpMethod};
 
 /// Default User-Agent string
 pub const DEFAULT_USER_AGENT: &str = "Everruns FetchKit/1.0";

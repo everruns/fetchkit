@@ -2,7 +2,7 @@
 
 use crate::convert::{filter_excessive_newlines, html_to_markdown, html_to_text, is_html};
 use crate::error::FetchError;
-use crate::types::{HttpMethod, FetchRequest, FetchResponse};
+use crate::types::{FetchRequest, FetchResponse, HttpMethod};
 use crate::DEFAULT_USER_AGENT;
 use bytes::Bytes;
 use futures::StreamExt;

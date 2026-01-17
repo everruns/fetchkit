@@ -5,9 +5,9 @@
 // Allow false positive clippy warning from pyo3 macro expansion
 #![allow(clippy::useless_conversion)]
 
+use fetchkit::{FetchError, FetchRequest, FetchResponse, HttpMethod, Tool, ToolBuilder};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use fetchkit::{FetchError, HttpMethod, Tool, ToolBuilder, FetchRequest, FetchResponse};
 
 /// Convert FetchError to PyErr
 fn to_py_err(e: FetchError) -> PyErr {

@@ -3,7 +3,7 @@
 mod mcp;
 
 use clap::{Parser, Subcommand};
-use fetchkit::{HttpMethod, Tool, FetchRequest, TOOL_LLMTXT};
+use fetchkit::{FetchRequest, HttpMethod, Tool, TOOL_LLMTXT};
 
 /// FetchKit - AI-friendly web content fetching tool
 #[derive(Parser, Debug)]

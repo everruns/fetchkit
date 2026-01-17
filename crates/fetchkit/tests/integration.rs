@@ -1,6 +1,6 @@
 //! Integration tests for FetchKit using wiremock
 
-use fetchkit::{fetch, HttpMethod, Tool, FetchRequest};
+use fetchkit::{fetch, FetchRequest, HttpMethod, Tool};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -42,8 +42,7 @@ async fn test_head_request() {
         .mount(&mock_server)
         .await;
 
-    let req =
-        FetchRequest::new(format!("{}/file.pdf", mock_server.uri())).method(HttpMethod::Head);
+    let req = FetchRequest::new(format!("{}/file.pdf", mock_server.uri())).method(HttpMethod::Head);
     let resp = fetch(req).await.unwrap();
 
     assert_eq!(resp.status_code, 200);

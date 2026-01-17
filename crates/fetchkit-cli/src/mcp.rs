@@ -1,9 +1,9 @@
 //! MCP (Model Context Protocol) server implementation
 
+use fetchkit::{FetchRequest, Tool, TOOL_DESCRIPTION};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
-use fetchkit::{Tool, FetchRequest, TOOL_DESCRIPTION};
 
 /// JSON-RPC 2.0 request
 #[derive(Debug, Deserialize)]
