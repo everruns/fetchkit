@@ -1,6 +1,8 @@
 //! Integration tests for FetchKit using wiremock
 
-use fetchkit::{fetch, FetchRequest, HttpMethod, Tool};
+use fetchkit::{
+    fetch, fetch_with_options, FetchOptions, FetchRequest, FetcherRegistry, HttpMethod, Tool,
+};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -441,4 +443,159 @@ async fn test_excessive_newlines_filtered() {
 
     // Should have at most 2 consecutive newlines
     assert!(!resp.content.unwrap().contains("\n\n\n"));
+}
+
+// ============================================================================
+// Fetcher System Integration Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_fetcher_registry_with_defaults() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("<html><body><h1>Test</h1></body></html>")
+                .insert_header("content-type", "text/html"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let registry = FetcherRegistry::with_defaults();
+    let options = FetchOptions {
+        enable_markdown: true,
+        enable_text: true,
+        ..Default::default()
+    };
+
+    let req = FetchRequest::new(format!("{}/page", mock_server.uri())).as_markdown();
+    let resp = registry.fetch(req, options).await.unwrap();
+
+    assert_eq!(resp.status_code, 200);
+    assert_eq!(resp.format, Some("markdown".to_string()));
+    assert!(resp.content.unwrap().contains("# Test"));
+}
+
+#[tokio::test]
+async fn test_fetcher_registry_url_validation() {
+    let registry = FetcherRegistry::with_defaults();
+    let options = FetchOptions::default();
+
+    // Invalid scheme
+    let req = FetchRequest::new("ftp://example.com");
+    let result = registry.fetch(req, options.clone()).await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("http://"));
+
+    // Empty URL handled by fetch_with_options before registry
+    let req = FetchRequest::new("");
+    let result = fetch_with_options(req, options).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_fetcher_registry_allow_block_lists() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+        .mount(&mock_server)
+        .await;
+
+    let registry = FetcherRegistry::with_defaults();
+
+    // Block list
+    let options = FetchOptions {
+        block_prefixes: vec!["http://127.0.0.1".to_string()],
+        ..Default::default()
+    };
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let result = registry.fetch(req, options).await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Blocked"));
+
+    // Allow list (not matching)
+    let options = FetchOptions {
+        allow_prefixes: vec!["https://allowed.com".to_string()],
+        ..Default::default()
+    };
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let result = registry.fetch(req, options).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_github_fetcher_url_matching() {
+    // These URLs should NOT match GitHubRepoFetcher (will use DefaultFetcher)
+    let mock_server = MockServer::start().await;
+
+    // Mock for non-GitHub URLs
+    Mock::given(method("GET"))
+        .and(path("/owner/repo/issues"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("issues page")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/owner/repo/issues", mock_server.uri()));
+    let resp = fetch(req).await.unwrap();
+
+    // Should use default fetcher (format is "raw", not "github_repo")
+    assert_eq!(resp.format, Some("raw".to_string()));
+    assert!(resp.content.unwrap().contains("issues page"));
+}
+
+#[tokio::test]
+async fn test_fetch_enables_conversions_by_default() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("<html><body><p>Hello</p></body></html>")
+                .insert_header("content-type", "text/html"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Using fetch() with as_markdown() should work
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
+    let resp = fetch(req).await.unwrap();
+
+    assert_eq!(resp.format, Some("markdown".to_string()));
+}
+
+#[tokio::test]
+async fn test_fetch_with_options_respects_disabled_conversion() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("<html><body><p>Hello</p></body></html>")
+                .insert_header("content-type", "text/html"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Disable markdown conversion
+    let options = FetchOptions {
+        enable_markdown: false,
+        enable_text: false,
+        ..Default::default()
+    };
+
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
+    let resp = fetch_with_options(req, options).await.unwrap();
+
+    // Should be raw because conversion is disabled
+    assert_eq!(resp.format, Some("raw".to_string()));
 }
