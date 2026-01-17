@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) server implementation
 
-use fetchkit::{FetchRequest, Tool, TOOL_DESCRIPTION};
+use fetchkit::{FetchRequest, Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -107,10 +107,7 @@ impl McpServer {
     }
 
     fn handle_tools_list(&self, id: Option<Value>) -> JsonRpcResponse {
-        let input_schema = self.tool.input_schema();
-
-        // Simplified schema for fetchkit_md (no as_markdown/as_text options)
-        let md_input_schema = json!({
+        let input_schema = json!({
             "type": "object",
             "properties": {
                 "url": {
@@ -126,12 +123,8 @@ impl McpServer {
             json!({
                 "tools": [{
                     "name": "fetchkit",
-                    "description": TOOL_DESCRIPTION,
-                    "inputSchema": input_schema
-                }, {
-                    "name": "fetchkit_md",
                     "description": "Fetch URL and return markdown with metadata frontmatter. Optimized for LLM consumption.",
-                    "inputSchema": md_input_schema
+                    "inputSchema": input_schema
                 }]
             }),
         )
@@ -143,52 +136,14 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
 
-        match tool_name {
-            "fetchkit" => self.handle_fetchkit_call(id, params).await,
-            "fetchkit_md" => self.handle_fetchkit_md_call(id, params).await,
-            _ => JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name)),
+        if tool_name != "fetchkit" {
+            return JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name));
         }
+
+        self.handle_fetchkit_call(id, params).await
     }
 
     async fn handle_fetchkit_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
-        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
-
-        // Parse request
-        let request: FetchRequest = match serde_json::from_value(arguments) {
-            Ok(req) => req,
-            Err(e) => {
-                return JsonRpcResponse::error(id, -32602, format!("Invalid arguments: {}", e));
-            }
-        };
-
-        // Execute tool
-        match self.tool.execute(request).await {
-            Ok(response) => {
-                let content = serde_json::to_value(&response).unwrap_or(json!({}));
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{
-                            "type": "text",
-                            "text": serde_json::to_string_pretty(&content).unwrap_or_default()
-                        }]
-                    }),
-                )
-            }
-            Err(e) => JsonRpcResponse::success(
-                id,
-                json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Error: {}", e)
-                    }],
-                    "isError": true
-                }),
-            ),
-        }
-    }
-
-    async fn handle_fetchkit_md_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
         // Extract URL from arguments
@@ -238,10 +193,10 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
     output.push_str(&format!("url: {}\n", response.url));
     output.push_str(&format!("status_code: {}\n", response.status_code));
     if let Some(ref ct) = response.content_type {
-        output.push_str(&format!("content_type: {}\n", ct));
+        output.push_str(&format!("source_content_type: {}\n", ct));
     }
     if let Some(size) = response.size {
-        output.push_str(&format!("size: {}\n", size));
+        output.push_str(&format!("source_size: {}\n", size));
     }
     if let Some(ref lm) = response.last_modified {
         output.push_str(&format!("last_modified: {}\n", lm));
@@ -254,14 +209,13 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
             output.push_str("truncated: true\n");
         }
     }
-    if let Some(ref err) = response.error {
-        output.push_str(&format!("error: {}\n", err));
-    }
     output.push_str("---\n");
 
-    // Append content
+    // Append content, or error as body for unsupported content
     if let Some(ref content) = response.content {
         output.push_str(content);
+    } else if let Some(ref err) = response.error {
+        output.push_str(err);
     }
 
     output

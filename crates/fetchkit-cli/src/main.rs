@@ -2,8 +2,19 @@
 
 mod mcp;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use fetchkit::{FetchRequest, HttpMethod, Tool, TOOL_LLMTXT};
+use std::io::{self, Write};
+
+/// Output format for md subcommand
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum OutputFormat {
+    /// Markdown with YAML frontmatter
+    #[default]
+    Md,
+    /// JSON format
+    Json,
+}
 
 /// FetchKit - AI-friendly web content fetching tool
 #[derive(Parser, Debug)]
@@ -67,8 +78,11 @@ enum Commands {
     /// Fetch URL and output as markdown with metadata frontmatter
     Md {
         /// URL to fetch
-        #[arg(long)]
         url: String,
+
+        /// Output format
+        #[arg(long, short, default_value = "md")]
+        output: OutputFormat,
 
         /// Custom User-Agent
         #[arg(long)]
@@ -82,7 +96,7 @@ async fn main() {
 
     // Handle --llmtxt flag
     if cli.llmtxt {
-        println!("{}", TOOL_LLMTXT);
+        writeln_safe(TOOL_LLMTXT);
         std::process::exit(0);
     }
 
@@ -99,8 +113,12 @@ async fn main() {
         }) => {
             run_fetch(&url, &method, as_markdown, as_text, user_agent).await;
         }
-        Some(Commands::Md { url, user_agent }) => {
-            run_md(&url, user_agent).await;
+        Some(Commands::Md {
+            url,
+            output,
+            user_agent,
+        }) => {
+            run_md(&url, output, user_agent).await;
         }
         None => {
             // Default: fetch mode if URL is provided
@@ -167,7 +185,7 @@ async fn run_fetch(
                 eprintln!("Error serializing response: {}", e);
                 std::process::exit(1);
             });
-            println!("{}", json);
+            writeln_safe(&json);
         }
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -176,7 +194,7 @@ async fn run_fetch(
     }
 }
 
-async fn run_md(url: &str, user_agent: Option<String>) {
+async fn run_md(url: &str, output: OutputFormat, user_agent: Option<String>) {
     // Build request with markdown conversion
     let request = FetchRequest::new(url).as_markdown();
 
@@ -191,9 +209,16 @@ async fn run_md(url: &str, user_agent: Option<String>) {
 
     // Execute request
     match tool.execute(request).await {
-        Ok(response) => {
-            print_md_with_frontmatter(&response);
-        }
+        Ok(response) => match output {
+            OutputFormat::Md => print_md_with_frontmatter(&response),
+            OutputFormat::Json => {
+                let json = serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
+                    eprintln!("Error serializing response: {}", e);
+                    std::process::exit(1);
+                });
+                writeln_safe(&json);
+            }
+        },
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);
@@ -203,33 +228,45 @@ async fn run_md(url: &str, user_agent: Option<String>) {
 
 fn print_md_with_frontmatter(response: &fetchkit::FetchResponse) {
     // Build frontmatter
-    println!("---");
-    println!("url: {}", response.url);
-    println!("status_code: {}", response.status_code);
+    writeln_safe("---");
+    writeln_safe(&format!("url: {}", response.url));
+    writeln_safe(&format!("status_code: {}", response.status_code));
     if let Some(ref ct) = response.content_type {
-        println!("content_type: {}", ct);
+        writeln_safe(&format!("source_content_type: {}", ct));
     }
     if let Some(size) = response.size {
-        println!("size: {}", size);
+        writeln_safe(&format!("source_size: {}", size));
     }
     if let Some(ref lm) = response.last_modified {
-        println!("last_modified: {}", lm);
+        writeln_safe(&format!("last_modified: {}", lm));
     }
     if let Some(ref filename) = response.filename {
-        println!("filename: {}", filename);
+        writeln_safe(&format!("filename: {}", filename));
     }
     if let Some(truncated) = response.truncated {
         if truncated {
-            println!("truncated: true");
+            writeln_safe("truncated: true");
         }
     }
-    if let Some(ref err) = response.error {
-        println!("error: {}", err);
-    }
-    println!("---");
+    writeln_safe("---");
 
-    // Print content
+    // Print content, or error as body for unsupported content
     if let Some(ref content) = response.content {
-        println!("{}", content);
+        writeln_safe(content);
+    } else if let Some(ref err) = response.error {
+        writeln_safe(err);
+    }
+}
+
+/// Write to stdout, exit silently on broken pipe
+fn writeln_safe(s: &str) {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    if let Err(e) = writeln!(handle, "{}", s) {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("Error writing to stdout: {}", e);
+        std::process::exit(1);
     }
 }
