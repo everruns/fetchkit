@@ -90,23 +90,34 @@ Provide a builder to configure tool options, including:
 ### CLI
 
 - Binary name: `fetchkit`.
-- CLI provides a convenient interface that matches this spec (args map to the tool input schema).
-- Flags:
-  - `--url <URL>` (required)
-  - `--method <GET|HEAD>` (optional, default GET)
-  - `--as-markdown` (optional)
-  - `--as-text` (optional)
-  - `--help` (standard help)
-  - `--llmtxt` (full help with examples and tool details)
+- CLI provides a convenient interface optimized for LLM consumption.
+- Subcommands:
+  - `fetch <URL>` - Fetch URL and convert to markdown
+  - `mcp` - Run as MCP server over stdio
+- Fetch subcommand options:
+  - `<URL>` (positional, required)
+  - `--output <md|json>` / `-o` (optional, default `md`)
   - `--user-agent <UA>` (optional, overrides default User-Agent)
-- Output: JSON-serialized `FetchResponse` to stdout.
+  - `--help` (standard help)
+- Global options:
+  - `--llmtxt` (full help with examples and tool details)
+  - `--help` (standard help)
+- Output format (default `md`):
+  - Markdown with YAML frontmatter containing metadata
+  - Frontmatter fields: `url`, `status_code`, `source_content_type`, `source_size`,
+    `last_modified`, `filename`, `truncated`
+  - Content follows frontmatter (markdown-converted HTML or error message)
+- Output format (`json`):
+  - JSON-serialized `FetchResponse` to stdout
 - Exit code: non-zero for `FetchError`.
 - `--llmtxt` outputs the tool `docs/llmtxt` content and exits.
 
 ### MCP Server
 
-- Expose the tool contract over MCP.
-- Input/output schemas and status updates must match the library tool contract.
+- Expose a single `fetchkit` tool over MCP.
+- Input schema: `{ url: string }` (required).
+- Output: Markdown with YAML frontmatter (same format as CLI `--output md`).
+- Tool description: "Fetch URL and return markdown with metadata frontmatter. Optimized for LLM consumption."
 
 ### Python Bindings
 

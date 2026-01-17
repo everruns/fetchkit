@@ -31,26 +31,34 @@ cargo install --path crates/fetchkit-cli
 ## CLI Usage
 
 ```bash
-# Basic fetch
-fetchkit --url https://example.com
+# Fetch URL (outputs markdown with frontmatter)
+fetchkit fetch https://example.com
 
-# Convert to markdown
-fetchkit --url https://example.com --as-markdown
-
-# Convert to plain text
-fetchkit --url https://example.com --as-text
-
-# HEAD request (metadata only)
-fetchkit --url https://example.com --method HEAD
+# Output as JSON instead
+fetchkit fetch https://example.com -o json
 
 # Custom user agent
-fetchkit --url https://example.com --user-agent "MyBot/1.0"
+fetchkit fetch https://example.com --user-agent "MyBot/1.0"
 
 # Show full documentation
 fetchkit --llmtxt
 ```
 
-Output is JSON to stdout:
+Default output is markdown with YAML frontmatter:
+
+```markdown
+---
+url: https://example.com
+status_code: 200
+source_content_type: text/html; charset=UTF-8
+source_size: 1256
+---
+# Example Domain
+
+This domain is for use in illustrative examples in documents...
+```
+
+JSON output (`-o json`):
 
 ```json
 {
@@ -59,9 +67,7 @@ Output is JSON to stdout:
   "content_type": "text/html",
   "size": 1256,
   "format": "markdown",
-  "content": "# Example Domain\n\nThis domain is for use in illustrative examples...",
-  "truncated": false,
-  "method": "GET"
+  "content": "# Example Domain\n\nThis domain is for use in illustrative examples..."
 }
 ```
 
@@ -73,7 +79,7 @@ Run as a Model Context Protocol server:
 fetchkit mcp
 ```
 
-Exposes `fetchkit` as a tool over JSON-RPC 2.0 stdio transport. Compatible with Claude Desktop and other MCP clients.
+Exposes `fetchkit` tool over JSON-RPC 2.0 stdio transport. Returns markdown with frontmatter (same format as CLI). Compatible with Claude Desktop and other MCP clients.
 
 ## Library Usage
 
@@ -187,17 +193,12 @@ Automatically detected and returns metadata only for:
 
 ### HTML Conversion
 
-**Markdown mode** (`--as-markdown`):
+HTML is automatically converted to markdown:
 - Headers: `h1-h6` → `#` to `######`
 - Lists: Proper nesting with 2-space indent
 - Code: Fenced blocks and inline backticks
 - Links: `[text](url)` format
 - Strips: scripts, styles, iframes, SVGs
-
-**Text mode** (`--as-text`):
-- Plain text extraction
-- Normalized whitespace
-- Newlines for block elements
 
 ## License
 
