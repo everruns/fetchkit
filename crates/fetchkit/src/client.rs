@@ -25,9 +25,15 @@ pub struct FetchOptions {
 /// Fetch a URL and return the response
 ///
 /// Uses the default fetcher registry with all built-in fetchers.
-/// For custom fetcher configuration, use [`FetcherRegistry`] directly.
+/// Markdown and text conversions are enabled by default.
+/// For custom options, use [`fetch_with_options`].
 pub async fn fetch(req: FetchRequest) -> Result<FetchResponse, FetchError> {
-    fetch_with_options(req, FetchOptions::default()).await
+    let options = FetchOptions {
+        enable_markdown: true,
+        enable_text: true,
+        ..Default::default()
+    };
+    fetch_with_options(req, options).await
 }
 
 /// Fetch a URL with custom options
