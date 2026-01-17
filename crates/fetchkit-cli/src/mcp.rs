@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) server implementation
 
-use fetchkit::{FetchRequest, Tool, TOOL_DESCRIPTION};
+use fetchkit::{FetchRequest, Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -107,14 +107,23 @@ impl McpServer {
     }
 
     fn handle_tools_list(&self, id: Option<Value>) -> JsonRpcResponse {
-        let input_schema = self.tool.input_schema();
+        let input_schema = json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to fetch (required, must be http:// or https://)"
+                }
+            },
+            "required": ["url"]
+        });
 
         JsonRpcResponse::success(
             id,
             json!({
                 "tools": [{
                     "name": "fetchkit",
-                    "description": TOOL_DESCRIPTION,
+                    "description": "Fetch URL and return markdown with metadata frontmatter. Optimized for LLM consumption.",
                     "inputSchema": input_schema
                 }]
             }),
@@ -131,26 +140,33 @@ impl McpServer {
             return JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name));
         }
 
+        self.handle_fetchkit_call(id, params).await
+    }
+
+    async fn handle_fetchkit_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
-        // Parse request
-        let request: FetchRequest = match serde_json::from_value(arguments) {
-            Ok(req) => req,
-            Err(e) => {
-                return JsonRpcResponse::error(id, -32602, format!("Invalid arguments: {}", e));
+        // Extract URL from arguments
+        let url = match arguments.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u.to_string(),
+            None => {
+                return JsonRpcResponse::error(id, -32602, "Missing required argument: url");
             }
         };
+
+        // Build request with markdown conversion
+        let request = FetchRequest::new(url).as_markdown();
 
         // Execute tool
         match self.tool.execute(request).await {
             Ok(response) => {
-                let content = serde_json::to_value(&response).unwrap_or(json!({}));
+                let output = format_md_with_frontmatter(&response);
                 JsonRpcResponse::success(
                     id,
                     json!({
                         "content": [{
                             "type": "text",
-                            "text": serde_json::to_string_pretty(&content).unwrap_or_default()
+                            "text": output
                         }]
                     }),
                 )
@@ -167,6 +183,42 @@ impl McpServer {
             ),
         }
     }
+}
+
+fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
+    let mut output = String::new();
+
+    // Build frontmatter
+    output.push_str("---\n");
+    output.push_str(&format!("url: {}\n", response.url));
+    output.push_str(&format!("status_code: {}\n", response.status_code));
+    if let Some(ref ct) = response.content_type {
+        output.push_str(&format!("source_content_type: {}\n", ct));
+    }
+    if let Some(size) = response.size {
+        output.push_str(&format!("source_size: {}\n", size));
+    }
+    if let Some(ref lm) = response.last_modified {
+        output.push_str(&format!("last_modified: {}\n", lm));
+    }
+    if let Some(ref filename) = response.filename {
+        output.push_str(&format!("filename: {}\n", filename));
+    }
+    if let Some(truncated) = response.truncated {
+        if truncated {
+            output.push_str("truncated: true\n");
+        }
+    }
+    output.push_str("---\n");
+
+    // Append content, or error as body for unsupported content
+    if let Some(ref content) = response.content {
+        output.push_str(content);
+    } else if let Some(ref err) = response.error {
+        output.push_str(err);
+    }
+
+    output
 }
 
 /// Run the MCP server over stdio
