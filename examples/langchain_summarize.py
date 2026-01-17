@@ -44,12 +44,12 @@ async def main():
     # URL to summarize
     url = "https://everruns.com/"
 
-    print(f"Creating LangChain agent with FetchKit MCP tool...")
+    print("Creating LangChain agent with FetchKit MCP tool...")
     print(f"Target URL: {url}")
     print()
 
     # Create MCP client connected to FetchKit server
-    async with MultiServerMCPClient(
+    mcp_client = MultiServerMCPClient(
         {
             "fetchkit": {
                 "command": "cargo",
@@ -57,38 +57,39 @@ async def main():
                 "transport": "stdio",
             }
         }
-    ) as mcp_client:
-        # Get tools from MCP server
-        tools = mcp_client.get_tools()
-        print(f"Available MCP tools: {[t.name for t in tools]}")
-        print()
+    )
 
-        # Create LLM and agent
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        agent = create_react_agent(llm, tools)
+    # Get tools from MCP server (new API - no context manager)
+    tools = await mcp_client.get_tools()
+    print(f"Available MCP tools: {[t.name for t in tools]}")
+    print()
 
-        # Run the agent with a summarization task
-        prompt = f"""
-        Please fetch the content from {url} using the fetchkit tool with as_markdown=true,
-        then provide a concise summary of what the website is about.
+    # Create LLM and agent
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    agent = create_react_agent(llm, tools)
 
-        Include:
-        1. What the company/product does
-        2. Key features or offerings
-        3. Target audience
-        """
+    # Run the agent with a summarization task
+    prompt = f"""
+    Please fetch the content from {url} using the fetchkit tool with as_markdown=true,
+    then provide a concise summary of what the website is about.
 
-        print("Running agent...")
-        print("-" * 50)
+    Include:
+    1. What the company/product does
+    2. Key features or offerings
+    3. Target audience
+    """
 
-        result = await agent.ainvoke({"messages": [("human", prompt)]})
+    print("Running agent...")
+    print("-" * 50)
 
-        # Print the final response
-        for message in result["messages"]:
-            if hasattr(message, "content") and message.content:
-                if hasattr(message, "type") and message.type == "ai":
-                    print("\nAgent response:")
-                    print(message.content)
+    result = await agent.ainvoke({"messages": [("human", prompt)]})
+
+    # Print the final response
+    for message in result["messages"]:
+        if hasattr(message, "content") and message.content:
+            if hasattr(message, "type") and message.type == "ai":
+                print("\nAgent response:")
+                print(message.content)
 
 
 if __name__ == "__main__":

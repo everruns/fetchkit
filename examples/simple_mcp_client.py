@@ -101,13 +101,29 @@ def main():
         print("Fetching https://example.com as markdown...")
         fetch_response = send_request(proc, fetch_request)
 
-        result = fetch_response.get("result", {})
-        content = result.get("content", [])
-        if content:
-            response_data = json.loads(content[0].get("text", "{}"))
-            print(f"Status: {response_data.get('status_code')}")
-            print(f"Format: {response_data.get('format')}")
-            print(f"Content preview:\n{response_data.get('content', '')[:500]}...")
+        # Check for errors
+        if "error" in fetch_response:
+            print(f"Error: {json.dumps(fetch_response['error'], indent=2)}")
+        else:
+            result = fetch_response.get("result", {})
+            content = result.get("content", [])
+            if content and content[0].get("text"):
+                text = content[0]["text"]
+                # Response text is prettified JSON from FetchKit, or error string
+                try:
+                    response_data = json.loads(text)
+                    print(f"Status: {response_data.get('status_code')}")
+                    print(f"Format: {response_data.get('format')}")
+                    content_text = response_data.get("content", "")
+                    if content_text:
+                        print(f"Content preview:\n{content_text[:500]}...")
+                    elif response_data.get("error"):
+                        print(f"Fetch error: {response_data.get('error')}")
+                except json.JSONDecodeError:
+                    # Error responses may be plain text
+                    print(f"Response: {text}")
+            else:
+                print(f"Raw response: {json.dumps(result, indent=2)}")
 
     finally:
         proc.terminate()
