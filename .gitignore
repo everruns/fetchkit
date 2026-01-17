@@ -21,3 +21,7 @@ build/
 # Testing
 *.profraw
 coverage/
+
+# Local development files
+.env
+local*
