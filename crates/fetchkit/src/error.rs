@@ -36,6 +36,10 @@ pub enum FetchError {
     /// Other request error
     #[error("Request failed: {0}")]
     RequestError(String),
+
+    /// Fetcher-specific error
+    #[error("Fetcher error: {0}")]
+    FetcherError(String),
 }
 
 impl FetchError {

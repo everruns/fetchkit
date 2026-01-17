@@ -2,16 +2,28 @@
 //!
 //! This crate provides a reusable library API for fetching web content,
 //! with optional HTML to markdown/text conversion.
+//!
+//! ## Fetcher System
+//!
+//! FetchKit uses a pluggable fetcher system where specialized fetchers
+//! handle specific URL patterns. The [`FetcherRegistry`] dispatches
+//! requests to the appropriate fetcher based on URL matching.
+//!
+//! Built-in fetchers:
+//! - [`DefaultFetcher`] - General HTTP/HTTPS fetcher with HTML conversion
+//! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
 
-mod client;
+pub mod client;
 mod convert;
 mod error;
+pub mod fetchers;
 mod tool;
 mod types;
 
-pub use client::fetch;
+pub use client::{fetch, fetch_with_options, FetchOptions};
 pub use convert::{html_to_markdown, html_to_text};
 pub use error::FetchError;
+pub use fetchers::{DefaultFetcher, Fetcher, FetcherRegistry, GitHubRepoFetcher};
 pub use tool::{Tool, ToolBuilder, ToolStatus};
 pub use types::{FetchRequest, FetchResponse, HttpMethod};
 

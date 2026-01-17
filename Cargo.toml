@@ -15,7 +15,7 @@ description = "AI-friendly fetchkit tool, CLI, MCP server, and library"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "gzip", "brotli", "deflate", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "gzip", "brotli", "deflate", "stream", "json"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -42,3 +42,6 @@ bytes = "1"
 
 # Testing
 wiremock = "0.6"
+
+# Async traits
+async-trait = "0.1"
