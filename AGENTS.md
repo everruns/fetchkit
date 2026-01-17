@@ -17,14 +17,22 @@ Fix root cause (not band-aid). Unsure: read more code; if still stuck, ask w/ sh
 
 ### Top level requirements
 
-< insert top level requirements >
+AI-friendly web content fetching tool designed for LLM consumption. Rust library with CLI, MCP server, and Python bindings.
+
+Key capabilities:
+- HTTP fetching (GET/HEAD) with streaming support
+- HTML-to-Markdown and HTML-to-Text conversion optimized for LLMs
+- Binary content detection (returns metadata only)
+- Timeout handling with partial content on timeout
+- URL filtering via allow/block lists
+- MCP server for AI tool integration
 
 ### Specs
 
 `specs/` folder contains feature specifications outlining requirements for specific features and components. New code should comply with these specifications or propose changes to them.
 
-Avaible specs:
-- <`spec name.md` - Spec description>
+Available specs:
+- `specs/initial.md` - WebFetch tool specification (types, behavior, conversions, error handling)
 
 Specification format: Abstract and Requirements sections.
 
@@ -33,7 +41,7 @@ Specification format: Abstract and Requirements sections.
 `.claude/skills/` contains development skills following the [Agent Skills Specification](https://agentskills.io/specification).
 
 Available skills:
-- <`.claude/skills/skill-name.md` - Skill description>
+- None configured yet
 
 
 ### Public Documentation
@@ -45,35 +53,95 @@ When making changes that affect user-facing behavior or operations, update the r
 
 ### Local dev expectations
 
-< insert requirements for locel dev env >
+Requirements:
+- Rust stable toolchain (rustup recommended)
+- cargo for building and testing
+
+Quick start:
+```bash
+cargo build --workspace          # Build all crates
+cargo test --workspace           # Run all tests
+cargo run -p webfetch-cli -- --help  # Run CLI
+```
 
 
 ### Code organization
 
-< insert code organisation >
+```
+crates/
+├── webfetch/           # Core library - types, fetch logic, HTML conversion
+├── webfetch-cli/       # CLI binary and MCP server
+└── webfetch-python/    # Python bindings (PyO3)
+specs/                  # Feature specifications
+```
 
 ### Naming
 
-< insert naming conventions >
+- Crate names: `webfetch`, `webfetch-cli`, `webfetch-python`
+- Types: PascalCase (`WebFetchRequest`, `WebFetchResponse`)
+- Functions: snake_case (`fetch`, `html_to_markdown`)
+- Constants: SCREAMING_SNAKE_CASE
 
 
 ### CI expectations
 
 - CI is implemented using GitHub Actions.
-< insert other CI expectation >
+- Jobs: check, fmt, clippy, test, build, doc
+- All jobs must pass before merging
+- Clippy runs with `-D warnings` (warnings are errors)
+- Doc builds must not have warnings
+
+### Cloud Agent environments
+
+When running in cloud-hosted agent environments (e.g., Claude Code on the web), the following secrets are available:
+
+- `GITHUB_TOKEN`: Available for GitHub API operations (PRs, issues, repository access)
+
+These secrets are pre-configured in the environment and do not require manual setup.
+
+If `gh` CLI is not available, use GitHub API directly with `GITHUB_TOKEN`:
+```bash
+curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/owner/repo/...
+```
 
 ### Pre-PR checklist
 
 Before creating a pull request, ensure:
 
-1. **Formatting**: Run ... to format all code
-2. **Linting**: Run ... and fix all warnings
-3. **Tests**: Run ... to ensure all tests pass
-4. **Smoke tests**: Run smoke tests to verify the system works end-to-end
-5. **Specs**: If your changes affect system behavior, update the relevant specs in `specs/`. Check that changes are not conflicting with specs
-6. **Docs**: If your changes affect usage or configuration, update public docs in `./docs` folder
+1. **Branch rebased**: Rebase on latest main to avoid merge conflicts
+   ```bash
+   git fetch origin main && git rebase origin/main
+   ```
 
-CI will fail if formatting, linting, tests, or UI build fail. Always run these locally before pushing.
+2. **Formatting**: Run formatter and fix any issues
+   ```bash
+   cargo fmt --all
+   ```
+
+3. **Linting**: Run clippy and fix all warnings
+   ```bash
+   cargo clippy --workspace --all-targets -- -D warnings
+   ```
+
+4. **Tests**: Run all tests and ensure they pass
+   ```bash
+   cargo test --workspace
+   ```
+
+5. **Documentation**: Ensure docs build without warnings
+   ```bash
+   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+   ```
+
+6. **CI green**: All CI checks must pass before merging
+
+7. **PR comments resolved**: No unaddressed review comments in PR
+
+8. **Specs**: If changes affect system behavior, update specs in `specs/`
+
+9. **Docs**: If changes affect usage or configuration, update public docs in `docs/`
+
+CI will fail if formatting, linting, tests, or doc build fail. Always run these locally before pushing.
 
 ### Commit message conventions
 
@@ -145,4 +213,21 @@ High-level approach.
 
 ### Testing the system
 
-< insert isntructions on testing the system >
+```bash
+# Run all tests
+cargo test --workspace
+
+# Run tests with output
+cargo test --workspace -- --nocapture
+
+# Run specific test
+cargo test --workspace test_name
+
+# Test CLI directly
+cargo run -p webfetch-cli -- --url https://example.com --as-markdown
+
+# Test MCP server
+cargo run -p webfetch-cli -- mcp
+```
+
+Integration tests use `wiremock` for HTTP mocking. See `specs/initial.md` for test requirements.
