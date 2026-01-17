@@ -84,8 +84,6 @@ jobs:
   examples:
     name: Examples
     runs-on: ubuntu-latest
-    # Network-dependent, may fail due to external services
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
