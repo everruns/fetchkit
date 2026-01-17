@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uvx --with langchain --with langchain-openai --with langchain-mcp-adapters python
+#!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
@@ -17,12 +17,8 @@ Requirements:
     - OPENAI_API_KEY environment variable set
     - FetchKit CLI built: cargo build -p fetchkit-cli --release
 
-Usage with uvx (recommended):
-    uvx examples/langchain_summarize.py
-
-Or with pip:
-    pip install langchain langchain-openai langchain-mcp-adapters
-    python examples/langchain_summarize.py
+Usage:
+    uv run examples/langchain_summarize.py
 """
 
 import asyncio
