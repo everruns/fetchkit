@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "langchain>=0.3.0",
+#     "langchain>=1.0.0",
 #     "langchain-openai>=0.2.0",
 #     "langchain-mcp-adapters>=0.1.0",
 # ]
@@ -29,9 +29,9 @@ import asyncio
 import os
 import sys
 
+from langchain.agents import create_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
 
 
 async def main():
@@ -65,8 +65,8 @@ async def main():
     print()
 
     # Create LLM and agent
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    agent = create_react_agent(llm, tools)
+    llm = ChatOpenAI(model="gpt-5-mini", temperature=0)
+    agent = create_agent(llm, tools)
 
     # Run the agent with a summarization task
     prompt = f"""
