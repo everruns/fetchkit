@@ -230,4 +230,4 @@ cargo run -p webfetch-cli -- --url https://example.com --as-markdown
 cargo run -p webfetch-cli -- mcp
 ```
 
-Integration tests use `wiremock` for HTTP mocking. See `specs/initial.md` for test requirements.
+Tests use `wiremock` for HTTP mocking (no real external network calls). See `specs/initial.md` for test requirements.
