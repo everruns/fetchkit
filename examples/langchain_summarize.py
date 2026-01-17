@@ -19,8 +19,10 @@ Requirements:
 
 Usage:
     uv run examples/langchain_summarize.py
+    uv run examples/langchain_summarize.py --inspector  # with MCP inspector
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -31,6 +33,14 @@ from langchain_openai import ChatOpenAI
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="LangChain + FetchKit MCP example")
+    parser.add_argument(
+        "--inspector",
+        action="store_true",
+        help="Run MCP server via MCP inspector (npx @modelcontextprotocol/inspector)",
+    )
+    args = parser.parse_args()
+
     # Check for API key
     if not os.environ.get("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY environment variable is required")
@@ -42,20 +52,36 @@ async def main():
 
     print("Creating LangChain agent with FetchKit MCP tool...")
     print(f"Target URL: {url}")
+    if args.inspector:
+        print("Using MCP inspector")
     print()
 
-    # Create MCP client connected to FetchKit server
-    mcp_client = MultiServerMCPClient(
-        {
-            "fetchkit": {
-                "command": "cargo",
-                "args": ["run", "-p", "fetchkit-cli", "--", "mcp"],
-                "transport": "stdio",
-            }
+    # Configure MCP server command
+    if args.inspector:
+        mcp_config = {
+            "command": "npx",
+            "args": [
+                "@modelcontextprotocol/inspector",
+                "cargo",
+                "run",
+                "-p",
+                "fetchkit-cli",
+                "--",
+                "mcp",
+            ],
+            "transport": "stdio",
         }
-    )
+    else:
+        mcp_config = {
+            "command": "cargo",
+            "args": ["run", "-p", "fetchkit-cli", "--", "mcp"],
+            "transport": "stdio",
+        }
 
-    # Get tools from MCP server (new API - no context manager)
+    # Create MCP client connected to FetchKit server
+    mcp_client = MultiServerMCPClient({"fetchkit": mcp_config})
+
+    # Get tools from MCP server
     tools = await mcp_client.get_tools()
     print(f"Available MCP tools: {[t.name for t in tools]}")
     print()
