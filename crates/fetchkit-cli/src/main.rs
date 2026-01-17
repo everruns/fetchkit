@@ -64,6 +64,16 @@ enum Commands {
         #[arg(long)]
         user_agent: Option<String>,
     },
+    /// Fetch URL and output as markdown with metadata frontmatter
+    Md {
+        /// URL to fetch
+        #[arg(long)]
+        url: String,
+
+        /// Custom User-Agent
+        #[arg(long)]
+        user_agent: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -88,6 +98,9 @@ async fn main() {
             user_agent,
         }) => {
             run_fetch(&url, &method, as_markdown, as_text, user_agent).await;
+        }
+        Some(Commands::Md { url, user_agent }) => {
+            run_md(&url, user_agent).await;
         }
         None => {
             // Default: fetch mode if URL is provided
@@ -160,5 +173,63 @@ async fn run_fetch(
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
+    }
+}
+
+async fn run_md(url: &str, user_agent: Option<String>) {
+    // Build request with markdown conversion
+    let request = FetchRequest::new(url).as_markdown();
+
+    // Build tool
+    let mut builder = Tool::builder().enable_markdown(true);
+
+    if let Some(ua) = user_agent {
+        builder = builder.user_agent(ua);
+    }
+
+    let tool = builder.build();
+
+    // Execute request
+    match tool.execute(request).await {
+        Ok(response) => {
+            print_md_with_frontmatter(&response);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_md_with_frontmatter(response: &fetchkit::FetchResponse) {
+    // Build frontmatter
+    println!("---");
+    println!("url: {}", response.url);
+    println!("status_code: {}", response.status_code);
+    if let Some(ref ct) = response.content_type {
+        println!("content_type: {}", ct);
+    }
+    if let Some(size) = response.size {
+        println!("size: {}", size);
+    }
+    if let Some(ref lm) = response.last_modified {
+        println!("last_modified: {}", lm);
+    }
+    if let Some(ref filename) = response.filename {
+        println!("filename: {}", filename);
+    }
+    if let Some(truncated) = response.truncated {
+        if truncated {
+            println!("truncated: true");
+        }
+    }
+    if let Some(ref err) = response.error {
+        println!("error: {}", err);
+    }
+    println!("---");
+
+    // Print content
+    if let Some(ref content) = response.content {
+        println!("{}", content);
     }
 }

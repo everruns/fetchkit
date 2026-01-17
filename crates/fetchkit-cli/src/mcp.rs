@@ -109,6 +109,18 @@ impl McpServer {
     fn handle_tools_list(&self, id: Option<Value>) -> JsonRpcResponse {
         let input_schema = self.tool.input_schema();
 
+        // Simplified schema for fetchkit_md (no as_markdown/as_text options)
+        let md_input_schema = json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to fetch (required, must be http:// or https://)"
+                }
+            },
+            "required": ["url"]
+        });
+
         JsonRpcResponse::success(
             id,
             json!({
@@ -116,6 +128,10 @@ impl McpServer {
                     "name": "fetchkit",
                     "description": TOOL_DESCRIPTION,
                     "inputSchema": input_schema
+                }, {
+                    "name": "fetchkit_md",
+                    "description": "Fetch URL and return markdown with metadata frontmatter. Optimized for LLM consumption.",
+                    "inputSchema": md_input_schema
                 }]
             }),
         )
@@ -127,10 +143,14 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
 
-        if tool_name != "fetchkit" {
-            return JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name));
+        match tool_name {
+            "fetchkit" => self.handle_fetchkit_call(id, params).await,
+            "fetchkit_md" => self.handle_fetchkit_md_call(id, params).await,
+            _ => JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name)),
         }
+    }
 
+    async fn handle_fetchkit_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
         // Parse request
@@ -167,6 +187,84 @@ impl McpServer {
             ),
         }
     }
+
+    async fn handle_fetchkit_md_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
+        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+
+        // Extract URL from arguments
+        let url = match arguments.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u.to_string(),
+            None => {
+                return JsonRpcResponse::error(id, -32602, "Missing required argument: url");
+            }
+        };
+
+        // Build request with markdown conversion
+        let request = FetchRequest::new(url).as_markdown();
+
+        // Execute tool
+        match self.tool.execute(request).await {
+            Ok(response) => {
+                let output = format_md_with_frontmatter(&response);
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{
+                            "type": "text",
+                            "text": output
+                        }]
+                    }),
+                )
+            }
+            Err(e) => JsonRpcResponse::success(
+                id,
+                json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Error: {}", e)
+                    }],
+                    "isError": true
+                }),
+            ),
+        }
+    }
+}
+
+fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
+    let mut output = String::new();
+
+    // Build frontmatter
+    output.push_str("---\n");
+    output.push_str(&format!("url: {}\n", response.url));
+    output.push_str(&format!("status_code: {}\n", response.status_code));
+    if let Some(ref ct) = response.content_type {
+        output.push_str(&format!("content_type: {}\n", ct));
+    }
+    if let Some(size) = response.size {
+        output.push_str(&format!("size: {}\n", size));
+    }
+    if let Some(ref lm) = response.last_modified {
+        output.push_str(&format!("last_modified: {}\n", lm));
+    }
+    if let Some(ref filename) = response.filename {
+        output.push_str(&format!("filename: {}\n", filename));
+    }
+    if let Some(truncated) = response.truncated {
+        if truncated {
+            output.push_str("truncated: true\n");
+        }
+    }
+    if let Some(ref err) = response.error {
+        output.push_str(&format!("error: {}\n", err));
+    }
+    output.push_str("---\n");
+
+    // Append content
+    if let Some(ref content) = response.content {
+        output.push_str(content);
+    }
+
+    output
 }
 
 /// Run the MCP server over stdio
