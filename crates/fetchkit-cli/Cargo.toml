@@ -12,7 +12,7 @@ name = "fetchkit"
 path = "src/main.rs"
 
 [dependencies]
-fetchkit = { path = "../fetchkit" }
+fetchkit = { version = "0.1.0", path = "../fetchkit" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

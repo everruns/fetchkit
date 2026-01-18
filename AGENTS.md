@@ -33,6 +33,7 @@ Key capabilities:
 
 Available specs:
 - `specs/initial.md` - WebFetch tool specification (types, behavior, conversions, error handling)
+- `specs/fetchers.md` - Pluggable fetcher system for URL-specific handling
 
 Specification format: Abstract and Requirements sections.
 
@@ -90,6 +91,36 @@ specs/                  # Feature specifications
 - All jobs must pass before merging
 - Clippy runs with `-D warnings` (warnings are errors)
 - Doc builds must not have warnings
+
+### Publishing to crates.io
+
+Workflow: `.github/workflows/publish.yml`
+
+Triggers:
+- Push version tag: `v*.*.*` or `v*.*.*-*` (e.g., `v0.1.0`, `v0.2.0-beta.1`)
+- Manual workflow dispatch with dry-run option
+
+Process:
+1. Runs tests, fmt check, and clippy
+2. Publishes `fetchkit` library first
+3. Waits for crates.io index update
+4. Publishes `fetchkit-cli`
+
+Requirements:
+- `CARGO_REGISTRY_TOKEN` secret must be configured in repo settings
+- Crate metadata (name, version, description, license, repository) in Cargo.toml
+
+Release steps:
+```bash
+# 1. Update version in Cargo.toml (workspace level)
+# 2. Commit version bump
+git commit -am "chore: bump version to 0.2.0"
+# 3. Create and push tag
+git tag v0.2.0
+git push origin main --tags
+```
+
+Note: `fetchkit-python` is not published to crates.io (uses PyPI distribution instead).
 
 ### Cloud Agent environments
 
