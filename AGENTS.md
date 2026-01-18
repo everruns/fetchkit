@@ -92,33 +92,23 @@ specs/                  # Feature specifications
 - Clippy runs with `-D warnings` (warnings are errors)
 - Doc builds must not have warnings
 
-### Publishing to crates.io
+### Releasing
 
-Workflow: `.github/workflows/publish.yml`
+See `docs/release-process.md` for full release process documentation.
 
-Triggers:
-- Push version tag: `v*.*.*` or `v*.*.*-*` (e.g., `v0.1.0`, `v0.2.0-beta.1`)
-- Manual workflow dispatch with dry-run option
+Quick summary:
+1. Human asks agent: "Create release v0.2.0"
+2. Agent updates CHANGELOG.md, Cargo.toml version, creates PR
+3. Human reviews and merges PR to main
+4. CI creates GitHub Release (release.yml)
+5. CI publishes to crates.io (publish.yml)
 
-Process:
-1. Runs tests, fmt check, and clippy
-2. Publishes `fetchkit` library first
-3. Waits for crates.io index update
-4. Publishes `fetchkit-cli`
+Workflows:
+- `.github/workflows/release.yml` - Creates GitHub Release on merge
+- `.github/workflows/publish.yml` - Publishes to crates.io on GitHub Release
 
 Requirements:
 - `CARGO_REGISTRY_TOKEN` secret must be configured in repo settings
-- Crate metadata (name, version, description, license, repository) in Cargo.toml
-
-Release steps:
-```bash
-# 1. Update version in Cargo.toml (workspace level)
-# 2. Commit version bump
-git commit -am "chore: bump version to 0.2.0"
-# 3. Create and push tag
-git tag v0.2.0
-git push origin main --tags
-```
 
 Note: `fetchkit-python` is not published to crates.io (uses PyPI distribution instead).
 
