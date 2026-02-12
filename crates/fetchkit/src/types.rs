@@ -37,6 +37,25 @@ impl std::fmt::Display for HttpMethod {
 }
 
 /// Request to fetch a URL
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::{FetchRequest, HttpMethod};
+///
+/// // Simple GET request
+/// let req = FetchRequest::new("https://example.com");
+/// assert_eq!(req.effective_method(), HttpMethod::Get);
+///
+/// // Request with markdown conversion
+/// let req = FetchRequest::new("https://example.com").as_markdown();
+/// assert!(req.wants_markdown());
+///
+/// // HEAD request
+/// let req = FetchRequest::new("https://example.com")
+///     .method(HttpMethod::Head);
+/// assert_eq!(req.effective_method(), HttpMethod::Head);
+/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct FetchRequest {
     /// The URL to fetch (required, must be http:// or https://)
@@ -99,6 +118,27 @@ impl FetchRequest {
 }
 
 /// Response from a fetch operation
+///
+/// Contains the fetched content along with metadata like status code,
+/// content type, and size. Optional fields are omitted when not applicable.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::FetchResponse;
+///
+/// let response = FetchResponse {
+///     url: "https://example.com".to_string(),
+///     status_code: 200,
+///     content_type: Some("text/html".to_string()),
+///     format: Some("markdown".to_string()),
+///     content: Some("# Example Domain".to_string()),
+///     ..Default::default()
+/// };
+///
+/// assert_eq!(response.status_code, 200);
+/// assert!(response.content.unwrap().contains("Example"));
+/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct FetchResponse {
     /// The fetched URL

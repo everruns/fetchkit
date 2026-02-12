@@ -46,6 +46,19 @@ pub trait Fetcher: Send + Sync {
 ///
 /// Maintains an ordered list of fetchers. When fetching a URL, iterates
 /// through fetchers and uses the first one that matches.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::FetcherRegistry;
+///
+/// // Create registry with built-in fetchers
+/// let registry = FetcherRegistry::with_defaults();
+///
+/// // Or create empty and register custom fetchers
+/// let mut registry = FetcherRegistry::new();
+/// registry.register(Box::new(fetchkit::DefaultFetcher::new()));
+/// ```
 pub struct FetcherRegistry {
     fetchers: Vec<Box<dyn Fetcher>>,
 }

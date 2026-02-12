@@ -1,8 +1,17 @@
-//! Error types for WebFetch
+//! Error types for FetchKit
 
 use thiserror::Error;
 
 /// Errors that can occur during fetch operations
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::FetchError;
+///
+/// let err = FetchError::MissingUrl;
+/// assert_eq!(err.to_string(), "Missing required parameter: url");
+/// ```
 #[derive(Debug, Error)]
 pub enum FetchError {
     /// URL is missing

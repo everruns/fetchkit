@@ -1,9 +1,16 @@
 //! Python bindings for FetchKit
 //!
-//! This module exposes the FetchKit tool contract to Python.
-
-// Allow false positive clippy warning from pyo3 macro expansion
-#![allow(clippy::useless_conversion)]
+//! Exposes the FetchKit tool contract to Python via PyO3.
+//!
+//! # Python Usage
+//!
+//! ```python
+//! from fetchkit_py import FetchKitTool, FetchRequest
+//!
+//! tool = FetchKitTool()
+//! response = tool.fetch("https://example.com", as_markdown=True)
+//! print(response.content)
+//! ```
 
 use fetchkit::{FetchError, FetchRequest, FetchResponse, HttpMethod, Tool, ToolBuilder};
 use pyo3::exceptions::PyValueError;
@@ -15,7 +22,7 @@ fn to_py_err(e: FetchError) -> PyErr {
 }
 
 /// Python wrapper for FetchRequest
-#[pyclass(name = "FetchRequest")]
+#[pyclass(name = "FetchRequest", from_py_object)]
 #[derive(Clone)]
 pub struct PyFetchRequest {
     inner: FetchRequest,
@@ -83,7 +90,7 @@ impl PyFetchRequest {
 }
 
 /// Python wrapper for FetchResponse
-#[pyclass(name = "FetchResponse")]
+#[pyclass(name = "FetchResponse", from_py_object)]
 #[derive(Clone)]
 pub struct PyFetchResponse {
     inner: FetchResponse,

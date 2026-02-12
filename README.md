@@ -97,14 +97,9 @@ use fetchkit::{fetch, FetchRequest};
 
 #[tokio::main]
 async fn main() {
-    let request = FetchRequest {
-        url: "https://example.com".to_string(),
-        method: None,
-        as_markdown: Some(true),
-        as_text: None,
-    };
+    let request = FetchRequest::new("https://example.com").as_markdown();
 
-    let response = fetch(request).await;
+    let response = fetch(request).await.unwrap();
     println!("{}", response.content.unwrap_or_default());
 }
 ```
@@ -112,9 +107,9 @@ async fn main() {
 ### With Tool Builder
 
 ```rust
-use fetchkit::Tool;
+use fetchkit::{FetchRequest, ToolBuilder};
 
-let tool = Tool::builder()
+let tool = ToolBuilder::new()
     .enable_markdown(true)
     .enable_text(false)
     .user_agent("MyBot/1.0")
@@ -122,7 +117,8 @@ let tool = Tool::builder()
     .block_prefix("https://internal.example.com")
     .build();
 
-let response = tool.fetch(request).await;
+let request = FetchRequest::new("https://example.com");
+let response = tool.execute(request).await.unwrap();
 ```
 
 ## Python Bindings
@@ -132,7 +128,7 @@ pip install fetchkit
 ```
 
 ```python
-from fetchkit import fetch, FetchRequest, FetchKitTool
+from fetchkit_py import fetch, FetchRequest, FetchKitTool
 
 # Simple fetch
 response = fetch("https://example.com", as_markdown=True)
@@ -144,7 +140,7 @@ tool = FetchKitTool(
     user_agent="MyBot/1.0",
     allow_prefixes=["https://docs.example.com"]
 )
-response = tool.fetch(FetchRequest(url="https://example.com"))
+response = tool.fetch("https://example.com")
 ```
 
 ## Response Fields
@@ -157,10 +153,10 @@ response = tool.fetch(FetchRequest(url="https://example.com"))
 | `size` | int? | Content size in bytes |
 | `last_modified` | string? | Last-Modified header |
 | `filename` | string? | From Content-Disposition |
-| `format` | string | "markdown", "text", or "raw" |
+| `format` | string? | "markdown", "text", "raw", or "github_repo" |
 | `content` | string? | Page content |
-| `truncated` | bool | True if content was cut off |
-| `method` | string | HTTP method used |
+| `truncated` | bool? | True if content was cut off |
+| `method` | string? | "HEAD" for HEAD requests |
 | `error` | string? | Error message if failed |
 
 ## Error Handling
