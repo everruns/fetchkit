@@ -8,7 +8,9 @@ edition = "2021"
 license = "MIT"
 authors = ["Everruns"]
 repository = "https://github.com/everruns/fetchkit"
-description = "AI-friendly fetchkit tool, CLI, MCP server, and library"
+description = "AI-friendly web content fetching and HTML-to-Markdown conversion library"
+keywords = ["fetch", "web", "markdown", "llm", "ai"]
+categories = ["web-programming", "text-processing"]
 
 [workspace.dependencies]
 # Async runtime

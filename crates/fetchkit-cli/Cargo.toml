@@ -5,14 +5,17 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "CLI for the FetchKit tool"
+description = "Command line interface for FetchKit web content fetching tool"
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
 
 [[bin]]
 name = "fetchkit"
 path = "src/main.rs"
 
 [dependencies]
-fetchkit = { version = "0.1.0", path = "../fetchkit" }
+fetchkit = { path = "../fetchkit", version = "0.1.0" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

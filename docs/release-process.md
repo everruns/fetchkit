@@ -18,9 +18,9 @@ fetchkit follows [Semantic Versioning](https://semver.org/):
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Human asks     │     │  Agent creates  │     │  GitHub         │     │  crates.io      │
-│  "release v0.2" │────>│  release PR     │────>│  Release        │────>│  Publish        │
-│                 │     │                 │     │  (automatic)    │     │  (automatic)    │
+│  Human asks      │     │  Agent creates   │     │  GitHub          │     │  crates.io       │
+│  "release v0.2"  │────>│  release PR      │────>│  Release         │────>│  Publish          │
+│                  │     │                  │     │  (automatic)     │     │  (automatic)     │
 └─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
@@ -46,17 +46,20 @@ When asked to create a release, the agent:
 2. **Update CHANGELOG.md**
    - Move items from `[Unreleased]` to new version section
    - Add release date: `## [X.Y.Z] - YYYY-MM-DD`
-   - Add breaking changes section if applicable (see format below)
-   - List commits in GitHub-style format with PR links and contributors
+   - Add `### Highlights` section with 2-5 key changes
+   - Add `### Breaking Changes` section if applicable (see format below)
+   - List commits in `### What's Changed` using `*` bullets with PR links and contributors
+   - Add `**Full Changelog**` comparison link at bottom of version section
    - Update comparison links at bottom of file
 
 3. **Update Cargo.toml**
    - Set `version = "X.Y.Z"` in workspace
+   - Update `fetchkit-cli` dependency version on `fetchkit` to match
 
 4. **Run verification**
    - `cargo fmt --check`
-   - `cargo clippy`
-   - `cargo test`
+   - `cargo clippy --workspace --all-targets -- -D warnings`
+   - `cargo test --workspace`
 
 5. **Commit and push**
    - Commit message: `chore(release): prepare vX.Y.Z`
@@ -70,12 +73,17 @@ When asked to create a release, the agent:
 
 **On merge to main** (release.yml):
 - Detects commit message `chore(release): prepare vX.Y.Z`
+- Also supports manual trigger via `workflow_dispatch`
 - Extracts release notes from CHANGELOG.md
-- Creates GitHub Release with tag `vX.Y.Z`
+- Creates GitHub Release with tag `vX.Y.Z` using `softprops/action-gh-release`
+- Triggers the publish workflow
 
 **On GitHub Release created** (publish.yml):
-- Runs verification (fmt, clippy, tests)
-- Publishes `fetchkit` and `fetchkit-cli` to crates.io
+- Verifies tag version matches Cargo.toml version
+- Publishes `fetchkit` to crates.io
+- Waits 30s for crates.io index update
+- Publishes `fetchkit-cli` to crates.io
+- Also supports manual trigger via `workflow_dispatch`
 
 ## Pre-Release Checklist
 
@@ -96,6 +104,11 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) with GitHu
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
 
+### Highlights
+
+- Key change 1
+- Key change 2
+
 ### Breaking Changes
 
 - **Short description**: Detailed explanation of what changed and migration steps.
@@ -104,8 +117,10 @@ The changelog follows [Keep a Changelog](https://keepachangelog.com/) with GitHu
 
 ### What's Changed
 
-- Commit message ([#PR](https://github.com/everruns/fetchkit/pull/PR)) by @contributor
-- Another commit ([#PR](https://github.com/everruns/fetchkit/pull/PR)) by @contributor
+* type(scope): commit message ([#PR](https://github.com/everruns/fetchkit/pull/PR)) by @contributor
+* type(scope): another commit ([#PR](https://github.com/everruns/fetchkit/pull/PR)) by @contributor
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/vPREV...vX.Y.Z
 ```
 
 ### Generating Commit List
@@ -118,7 +133,7 @@ git log --oneline | grep -v -E "^.{7} (chore|ci|bench)"
 
 Format each commit as:
 ```
-- <commit message> ([#<PR>](https://github.com/everruns/fetchkit/pull/<PR>)) by @<author>
+* <commit message> ([#<PR>](https://github.com/everruns/fetchkit/pull/<PR>)) by @<author>
 ```
 
 ### Breaking Changes Section
@@ -129,29 +144,28 @@ Include when the release has breaking changes (typically MINOR or MAJOR versions
 2. **Migration guide** showing before/after
 3. **Code examples** if helpful
 
-Example:
-```markdown
-### Breaking Changes
-
-- **Renamed crate from webfetch to fetchkit**: All imports need to be updated.
-  - `webfetch::fetch` → `fetchkit::fetch`
-  - CLI binary: `webfetch` → `fetchkit`
-```
-
 ## Workflows
 
 ### release.yml
 
-- **Trigger**: Push to `main` with commit message starting with `chore(release): prepare v`
-- **Actions**: Creates GitHub Release with tag and release notes
+- **Trigger**: Push to `main` with commit message starting with `chore(release): prepare v`, or manual `workflow_dispatch`
+- **Actions**: Creates GitHub Release with tag and release notes, triggers publish workflow
 - **File**: `.github/workflows/release.yml`
 
 ### publish.yml
 
-- **Trigger**: GitHub Release published
-- **Actions**: Verifies and publishes to crates.io
+- **Trigger**: GitHub Release published, or manual `workflow_dispatch`
+- **Actions**: Verifies version and publishes to crates.io
 - **File**: `.github/workflows/publish.yml`
 - **Secret required**: `CARGO_REGISTRY_TOKEN`
+
+## Package Distribution
+
+| Package | Registry | Notes |
+|---------|----------|-------|
+| `fetchkit` | crates.io | Core library |
+| `fetchkit-cli` | crates.io | CLI binary (`cargo install fetchkit-cli`) |
+| `fetchkit-python` | PyPI (future) | Python bindings, not published to crates.io |
 
 ## Example Conversation
 
@@ -185,9 +199,8 @@ Each release includes:
 - **GitHub Release**: Tag, release notes, source archives
 - **crates.io**: Published crates for `cargo install fetchkit-cli`
 
-Note: `fetchkit-python` is not published to crates.io (uses PyPI distribution instead).
-
 Future considerations:
 - Pre-built binaries (Linux, macOS, Windows)
 - Docker images
 - Homebrew formula
+- Python wheels on PyPI
