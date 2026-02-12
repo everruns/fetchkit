@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-02-12
+
+### Highlights
+
+- Updated dependencies to latest versions
+- Added maintenance spec for periodic upkeep
+- Documentation improvements
+
+### What's Changed
+
+* chore: periodic maintenance - update deps, docs, and add maintenance spec ([#15](https://github.com/everruns/fetchkit/pull/15)) by @chaliy
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.1.0...v0.1.1
+
 ## [0.1.0] - 2026-02-12
 
 ### Highlights
@@ -30,5 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/everruns/fetchkit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/everruns/fetchkit/releases/tag/v0.1.0
