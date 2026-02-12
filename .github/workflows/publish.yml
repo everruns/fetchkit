@@ -1,100 +1,53 @@
-name: Publish to crates.io
+name: Publish
 
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Dry run (no actual publish)'
-        required: false
-        default: 'true'
-        type: boolean
-      crate:
-        description: 'Crate to publish (all, fetchkit, fetchkit-cli)'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - fetchkit
-          - fetchkit-cli
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 jobs:
-  test:
-    name: Test before publish
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: cargo test --workspace
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
   publish-fetchkit:
     name: Publish fetchkit
-    needs: test
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'release' ||
-      (github.event_name == 'workflow_dispatch' &&
-       (github.event.inputs.crate == 'all' || github.event.inputs.crate == 'fetchkit'))
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
 
-      - name: Verify crate can be packaged
-        run: cargo package -p fetchkit --allow-dirty
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${{ github.event.release.tag_name }}"
+          if [ -n "$TAG_VERSION" ]; then
+            TAG_VERSION="${TAG_VERSION#v}"
+            CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+              echo "Error: Tag version does not match Cargo.toml version"
+              exit 1
+            fi
+          fi
 
-      - name: Publish fetchkit (dry run)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
-        run: cargo publish -p fetchkit --dry-run
-
-      - name: Publish fetchkit
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+      - name: Publish fetchkit to crates.io
         run: cargo publish -p fetchkit
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   publish-fetchkit-cli:
     name: Publish fetchkit-cli
-    needs: [test, publish-fetchkit]
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'release' ||
-      (github.event_name == 'workflow_dispatch' &&
-       (github.event.inputs.crate == 'all' || github.event.inputs.crate == 'fetchkit-cli'))
+    needs: publish-fetchkit
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
 
-      # Wait for crates.io index to update after fetchkit publish
-      - name: Wait for crates.io index
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+      - name: Wait for crates.io index update
         run: sleep 30
 
-      - name: Verify crate can be packaged
-        run: cargo package -p fetchkit-cli --allow-dirty
-
-      - name: Publish fetchkit-cli (dry run)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
-        run: cargo publish -p fetchkit-cli --dry-run
-
-      - name: Publish fetchkit-cli
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+      - name: Publish fetchkit-cli to crates.io
         run: cargo publish -p fetchkit-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

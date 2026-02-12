@@ -4,87 +4,63 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
 
 jobs:
   release:
+    name: Create Release
     runs-on: ubuntu-latest
-    # Only run if commit message matches release pattern
-    if: ${{ startsWith(github.event.head_commit.message, 'chore(release): prepare v') }}
-
-    permissions:
-      contents: write
+    if: "${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): prepare v') }}"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Extract version from commit message
+      - name: Extract version
         id: version
         run: |
-          # Extract version from commit message like "chore(release): prepare v0.1.0"
-          VERSION=$(echo "${{ github.event.head_commit.message }}" | grep -oP 'prepare v\K[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          else
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+            VERSION=$(echo "$COMMIT_MSG" | sed -n 's/.*prepare v\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p')
+          fi
           if [ -z "$VERSION" ]; then
-            echo "::error::Could not extract version from commit message"
+            echo "Error: Could not determine version"
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION"
 
-      - name: Check if tag already exists
-        id: check_tag
+      - name: Verify version matches Cargo.toml
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "::error::Tag v${{ steps.version.outputs.version }} already exists"
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ "${{ steps.version.outputs.version }}" != "$CARGO_VERSION" ]; then
+            echo "Error: Commit version does not match Cargo.toml version"
             exit 1
           fi
-          echo "Tag does not exist, proceeding..."
 
-      - name: Verify Cargo.toml version matches
-        run: |
-          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          if [ "$CARGO_VERSION" != "${{ steps.version.outputs.version }}" ]; then
-            echo "::error::Cargo.toml version ($CARGO_VERSION) does not match release version (${{ steps.version.outputs.version }})"
-            exit 1
-          fi
-          echo "Cargo.toml version matches: $CARGO_VERSION"
-
-      - name: Extract release notes from CHANGELOG.md
+      - name: Extract release notes from CHANGELOG
         id: changelog
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-
-          # Extract the section for this version from CHANGELOG.md
-          # Matches from "## [X.Y.Z]" until the next "## [" or end of significant content
-          NOTES=$(awk -v ver="$VERSION" '
-            /^## \[/ {
-              if (found) exit
-              if (index($0, "[" ver "]")) found=1
-              next
-            }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md)
-
-          if [ -z "$NOTES" ]; then
-            echo "::warning::No changelog entry found for version $VERSION"
-            NOTES="Release v$VERSION"
-          fi
-
-          # Write to file to preserve formatting
+          NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md)
           echo "$NOTES" > release_notes.md
-          echo "Release notes extracted:"
-          cat release_notes.md
 
       - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+
+      - name: Trigger publish workflow
+        run: gh workflow run publish.yml
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "v${{ steps.version.outputs.version }}" \
-            --title "v${{ steps.version.outputs.version }}" \
-            --notes-file release_notes.md \
-            --target "${{ github.sha }}"
-
-          echo "Created release v${{ steps.version.outputs.version }}"

@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Python bindings for the FetchKit library"
+publish = false
 
 [lib]
 name = "fetchkit_py"

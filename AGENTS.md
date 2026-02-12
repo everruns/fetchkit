@@ -98,19 +98,20 @@ See `docs/release-process.md` for full release process documentation.
 
 Quick summary:
 1. Human asks agent: "Create release v0.2.0"
-2. Agent updates CHANGELOG.md, Cargo.toml version, creates PR
+2. Agent updates CHANGELOG.md (with Highlights + What's Changed), Cargo.toml version, creates PR
 3. Human reviews and merges PR to main
-4. CI creates GitHub Release (release.yml)
-5. CI publishes to crates.io (publish.yml)
+4. CI creates GitHub Release via `softprops/action-gh-release` (release.yml)
+5. release.yml triggers publish.yml
+6. CI publishes `fetchkit` then `fetchkit-cli` to crates.io (publish.yml)
 
 Workflows:
-- `.github/workflows/release.yml` - Creates GitHub Release on merge
-- `.github/workflows/publish.yml` - Publishes to crates.io on GitHub Release
+- `.github/workflows/release.yml` - Creates GitHub Release on merge or manual dispatch
+- `.github/workflows/publish.yml` - Publishes to crates.io on GitHub Release or manual dispatch
 
 Requirements:
 - `CARGO_REGISTRY_TOKEN` secret must be configured in repo settings
 
-Note: `fetchkit-python` is not published to crates.io (uses PyPI distribution instead).
+Note: `fetchkit-python` is not published to crates.io (`publish = false`). Uses PyPI distribution instead.
 
 ### Cloud Agent environments
 
