@@ -1,4 +1,15 @@
 //! FetchKit CLI - Command-line interface for fetching web content
+//!
+//! Provides the `fetchkit` binary with subcommands for fetching URLs
+//! and running an MCP server.
+//!
+//! # Usage
+//!
+//! ```text
+//! fetchkit fetch <URL> [--output md|json] [--user-agent <UA>]
+//! fetchkit mcp
+//! fetchkit --llmtxt
+//! ```
 
 mod mcp;
 

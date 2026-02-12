@@ -54,6 +54,22 @@ impl ToolStatus {
 }
 
 /// Builder for configuring the FetchKit tool
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::ToolBuilder;
+///
+/// let tool = ToolBuilder::new()
+///     .enable_markdown(true)
+///     .enable_text(false)
+///     .user_agent("MyBot/1.0")
+///     .allow_prefix("https://docs.example.com")
+///     .block_prefix("https://internal.example.com")
+///     .build();
+///
+/// assert!(!tool.description().is_empty());
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct ToolBuilder {
     /// Enable as_markdown option
@@ -121,6 +137,22 @@ impl ToolBuilder {
 }
 
 /// Configured FetchKit tool
+///
+/// Created via [`ToolBuilder`]. Provides methods for executing fetch requests,
+/// retrieving schemas, and accessing tool metadata.
+///
+/// # Examples
+///
+/// ```no_run
+/// use fetchkit::{FetchRequest, Tool};
+///
+/// # async fn example() -> Result<(), fetchkit::FetchError> {
+/// let tool = Tool::default();
+/// let response = tool.execute(FetchRequest::new("https://example.com")).await?;
+/// println!("Status: {}", response.status_code);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Tool {
     enable_markdown: bool,

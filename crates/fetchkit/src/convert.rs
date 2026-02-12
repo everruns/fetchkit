@@ -1,6 +1,9 @@
 //! HTML conversion utilities
 
 /// Check if content is HTML based on content type and body
+///
+/// Returns `true` if the content type contains `text/html` or `application/xhtml`,
+/// or if the body starts with `<!DOCTYPE` or `<html`.
 pub fn is_html(content_type: &Option<String>, body: &str) -> bool {
     // Check Content-Type
     if let Some(ct) = content_type {
@@ -16,6 +19,21 @@ pub fn is_html(content_type: &Option<String>, body: &str) -> bool {
 }
 
 /// Convert HTML to markdown
+///
+/// Converts common HTML elements (headings, lists, emphasis, code blocks, links,
+/// blockquotes) to their Markdown equivalents. Strips script, style, noscript,
+/// iframe, and svg elements. Decodes HTML entities.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::html_to_markdown;
+///
+/// let html = "<h1>Title</h1><p><strong>Bold</strong> text</p>";
+/// let md = html_to_markdown(html);
+/// assert!(md.contains("# Title"));
+/// assert!(md.contains("**Bold**"));
+/// ```
 pub fn html_to_markdown(html: &str) -> String {
     let mut output = String::new();
     let mut in_skip_element = 0;
@@ -196,6 +214,20 @@ pub fn html_to_markdown(html: &str) -> String {
 }
 
 /// Convert HTML to plain text
+///
+/// Strips all HTML tags and returns plain text content. Handles newlines
+/// for block elements (p, div, headings). Decodes HTML entities.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::html_to_text;
+///
+/// let html = "<h1>Title</h1><p>Paragraph with &amp; entity</p>";
+/// let text = html_to_text(html);
+/// assert!(text.contains("Title"));
+/// assert!(text.contains("Paragraph with & entity"));
+/// ```
 pub fn html_to_text(html: &str) -> String {
     let mut output = String::new();
     let mut in_skip_element = 0;

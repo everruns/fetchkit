@@ -34,6 +34,7 @@ Key capabilities:
 Available specs:
 - `specs/initial.md` - WebFetch tool specification (types, behavior, conversions, error handling)
 - `specs/fetchers.md` - Pluggable fetcher system for URL-specific handling
+- `specs/maintenance.md` - Periodic maintenance checklist (deps, docs, spec-code alignment)
 
 Specification format: Abstract and Requirements sections.
 

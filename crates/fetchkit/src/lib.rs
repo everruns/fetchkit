@@ -1,9 +1,57 @@
 //! FetchKit - AI-friendly web content fetching library
 //!
 //! This crate provides a reusable library API for fetching web content,
-//! with optional HTML to markdown/text conversion.
+//! with optional HTML to markdown/text conversion optimized for LLM consumption.
 //!
-//! ## Fetcher System
+//! # Quick Start
+//!
+//! ```no_run
+//! use fetchkit::{FetchRequest, fetch};
+//!
+//! # async fn example() -> Result<(), fetchkit::FetchError> {
+//! let request = FetchRequest::new("https://example.com").as_markdown();
+//! let response = fetch(request).await?;
+//! println!("Content: {}", response.content.unwrap_or_default());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Tool Builder
+//!
+//! For more control, use the [`ToolBuilder`] to configure options:
+//!
+//! ```no_run
+//! use fetchkit::{FetchRequest, ToolBuilder};
+//!
+//! # async fn example() -> Result<(), fetchkit::FetchError> {
+//! let tool = ToolBuilder::new()
+//!     .enable_markdown(true)
+//!     .user_agent("MyBot/1.0")
+//!     .block_prefix("https://blocked.example.com")
+//!     .build();
+//!
+//! let request = FetchRequest::new("https://example.com");
+//! let response = tool.execute(request).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # HTML Conversion
+//!
+//! Convert HTML to markdown or plain text directly:
+//!
+//! ```
+//! use fetchkit::{html_to_markdown, html_to_text};
+//!
+//! let html = "<h1>Hello</h1><p>World</p>";
+//! let md = html_to_markdown(html);
+//! assert!(md.contains("# Hello"));
+//!
+//! let text = html_to_text(html);
+//! assert!(text.contains("Hello"));
+//! ```
+//!
+//! # Fetcher System
 //!
 //! FetchKit uses a pluggable fetcher system where specialized fetchers
 //! handle specific URL patterns. The [`FetcherRegistry`] dispatches

@@ -27,6 +27,18 @@ pub struct FetchOptions {
 /// Uses the default fetcher registry with all built-in fetchers.
 /// Markdown and text conversions are enabled by default.
 /// For custom options, use [`fetch_with_options`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use fetchkit::{FetchRequest, fetch};
+///
+/// # async fn example() -> Result<(), fetchkit::FetchError> {
+/// let response = fetch(FetchRequest::new("https://example.com")).await?;
+/// println!("Status: {}", response.status_code);
+/// # Ok(())
+/// # }
+/// ```
 pub async fn fetch(req: FetchRequest) -> Result<FetchResponse, FetchError> {
     let options = FetchOptions {
         enable_markdown: true,
