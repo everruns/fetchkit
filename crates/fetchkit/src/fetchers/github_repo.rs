@@ -155,10 +155,21 @@ impl Fetcher for GitHubRepoFetcher {
         })?;
 
         // Build HTTP client
+        // THREAT[TM-SSRF-001]: Validate DNS resolution for GitHub API host
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let client = reqwest::Client::builder()
+        let mut client_builder = reqwest::Client::builder()
             .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
+            .timeout(API_TIMEOUT);
+
+        if options.dns_policy.block_private {
+            let validated_addr = options
+                .dns_policy
+                .resolve_and_validate("api.github.com", 443)
+                .map_err(|_| FetchError::BlockedUrl)?;
+            client_builder = client_builder.resolve("api.github.com", validated_addr);
+        }
+
+        let client = client_builder
             .build()
             .map_err(FetchError::ClientBuildError)?;
 

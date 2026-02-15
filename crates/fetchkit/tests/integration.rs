@@ -284,7 +284,7 @@ async fn test_url_prefix_allow_list() {
     assert!(result
         .unwrap_err()
         .to_string()
-        .contains("prefix not allowed"));
+        .contains("not allowed by policy"));
 }
 
 #[tokio::test]
@@ -307,7 +307,7 @@ async fn test_url_prefix_block_list() {
     assert!(result
         .unwrap_err()
         .to_string()
-        .contains("prefix not allowed"));
+        .contains("not allowed by policy"));
 }
 
 #[tokio::test]

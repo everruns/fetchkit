@@ -1,6 +1,7 @@
 //! Tool builder and contract for FetchKit
 
 use crate::client::{fetch_with_options, FetchOptions};
+use crate::dns::DnsPolicy;
 use crate::error::FetchError;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::{TOOL_DESCRIPTION, TOOL_LLMTXT};
@@ -82,6 +83,8 @@ pub struct ToolBuilder {
     allow_prefixes: Vec<String>,
     /// Block list of URL prefixes
     block_prefixes: Vec<String>,
+    /// DNS resolution policy for SSRF prevention
+    dns_policy: DnsPolicy,
 }
 
 impl ToolBuilder {
@@ -124,6 +127,23 @@ impl ToolBuilder {
         self
     }
 
+    /// Block connections to private/reserved IP ranges (SSRF prevention)
+    ///
+    /// When enabled, FetchKit resolves hostnames to IP addresses before connecting
+    /// and validates that the resolved IP is not in a private or reserved range.
+    /// This prevents SSRF attacks where DNS names resolve to internal network
+    /// addresses (e.g., 10.x.x.x, 169.254.169.254, etc.).
+    ///
+    /// DNS pinning is used to prevent DNS rebinding attacks.
+    pub fn block_private_ips(mut self, block: bool) -> Self {
+        self.dns_policy = if block {
+            DnsPolicy::block_private_ips()
+        } else {
+            DnsPolicy::allow_all()
+        };
+        self
+    }
+
     /// Build the tool
     pub fn build(self) -> Tool {
         Tool {
@@ -132,6 +152,7 @@ impl ToolBuilder {
             user_agent: self.user_agent,
             allow_prefixes: self.allow_prefixes,
             block_prefixes: self.block_prefixes,
+            dns_policy: self.dns_policy,
         }
     }
 }
@@ -160,6 +181,7 @@ pub struct Tool {
     user_agent: Option<String>,
     allow_prefixes: Vec<String>,
     block_prefixes: Vec<String>,
+    dns_policy: DnsPolicy,
 }
 
 impl Default for Tool {
@@ -221,6 +243,7 @@ impl Tool {
             block_prefixes: self.block_prefixes.clone(),
             enable_markdown: self.enable_markdown,
             enable_text: self.enable_text,
+            dns_policy: self.dns_policy.clone(),
         };
 
         fetch_with_options(req, options).await
@@ -254,6 +277,7 @@ impl Tool {
             block_prefixes: self.block_prefixes.clone(),
             enable_markdown: self.enable_markdown,
             enable_text: self.enable_text,
+            dns_policy: self.dns_policy.clone(),
         };
 
         status_callback(ToolStatus::new("fetch").with_percent(20.0));
@@ -278,6 +302,7 @@ mod tests {
             .user_agent("TestAgent/1.0")
             .allow_prefix("https://allowed.com")
             .block_prefix("https://blocked.com")
+            .block_private_ips(true)
             .build();
 
         assert!(!tool.enable_markdown);
@@ -285,6 +310,7 @@ mod tests {
         assert_eq!(tool.user_agent, Some("TestAgent/1.0".to_string()));
         assert_eq!(tool.allow_prefixes, vec!["https://allowed.com"]);
         assert_eq!(tool.block_prefixes, vec!["https://blocked.com"]);
+        assert!(tool.dns_policy.block_private);
     }
 
     #[test]
