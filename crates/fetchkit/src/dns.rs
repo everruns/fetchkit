@@ -24,10 +24,17 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 /// assert!(policy.is_blocked_ip("10.0.0.1".parse().unwrap()));
 /// assert!(!policy.is_blocked_ip("8.8.8.8".parse().unwrap()));
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DnsPolicy {
     /// Block private/reserved IP ranges
     pub block_private: bool,
+}
+
+/// Default is safe: blocks private/reserved IPs
+impl Default for DnsPolicy {
+    fn default() -> Self {
+        Self::block_private_ips()
+    }
 }
 
 impl DnsPolicy {
@@ -424,9 +431,12 @@ mod tests {
     }
 
     #[test]
-    fn test_default_permits_all() {
+    fn test_default_blocks_private() {
         let p = DnsPolicy::default();
-        assert!(!p.is_blocked_ip("127.0.0.1".parse().unwrap()));
+        assert!(p.is_blocked_ip("127.0.0.1".parse().unwrap()));
+        assert!(p.is_blocked_ip("10.0.0.1".parse().unwrap()));
+        assert!(p.is_blocked_ip("169.254.169.254".parse().unwrap()));
+        assert!(!p.is_blocked_ip("8.8.8.8".parse().unwrap()));
     }
 
     // ==================== resolve_and_validate ====================

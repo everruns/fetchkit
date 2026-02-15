@@ -95,5 +95,7 @@ mod tests {
         assert!(options.block_prefixes.is_empty());
         assert!(!options.enable_markdown);
         assert!(!options.enable_text);
+        // Safe by default: private IPs blocked
+        assert!(options.dns_policy.block_private);
     }
 }

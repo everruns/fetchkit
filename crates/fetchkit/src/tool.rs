@@ -127,14 +127,14 @@ impl ToolBuilder {
         self
     }
 
-    /// Block connections to private/reserved IP ranges (SSRF prevention)
+    /// Control private/reserved IP range blocking (SSRF prevention)
     ///
-    /// When enabled, FetchKit resolves hostnames to IP addresses before connecting
-    /// and validates that the resolved IP is not in a private or reserved range.
-    /// This prevents SSRF attacks where DNS names resolve to internal network
-    /// addresses (e.g., 10.x.x.x, 169.254.169.254, etc.).
+    /// Enabled by default. When enabled, FetchKit resolves hostnames to IP
+    /// addresses before connecting and validates that the resolved IP is not
+    /// in a private or reserved range. DNS pinning prevents rebinding attacks.
     ///
-    /// DNS pinning is used to prevent DNS rebinding attacks.
+    /// Pass `false` only for local development or testing against loopback
+    /// servers. In production, always leave this enabled.
     pub fn block_private_ips(mut self, block: bool) -> Self {
         self.dns_policy = if block {
             DnsPolicy::block_private_ips()
@@ -302,7 +302,6 @@ mod tests {
             .user_agent("TestAgent/1.0")
             .allow_prefix("https://allowed.com")
             .block_prefix("https://blocked.com")
-            .block_private_ips(true)
             .build();
 
         assert!(!tool.enable_markdown);
@@ -310,7 +309,14 @@ mod tests {
         assert_eq!(tool.user_agent, Some("TestAgent/1.0".to_string()));
         assert_eq!(tool.allow_prefixes, vec!["https://allowed.com"]);
         assert_eq!(tool.block_prefixes, vec!["https://blocked.com"]);
+        // Safe by default: private IPs blocked
         assert!(tool.dns_policy.block_private);
+    }
+
+    #[test]
+    fn test_tool_builder_opt_out_private_ip_blocking() {
+        let tool = Tool::builder().block_private_ips(false).build();
+        assert!(!tool.dns_policy.block_private);
     }
 
     #[test]

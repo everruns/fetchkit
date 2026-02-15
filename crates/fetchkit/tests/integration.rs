@@ -1,10 +1,25 @@
 //! Integration tests for FetchKit using wiremock
 
 use fetchkit::{
-    fetch, fetch_with_options, FetchOptions, FetchRequest, FetcherRegistry, HttpMethod, Tool,
+    fetch_with_options, DnsPolicy, FetchOptions, FetchRequest, FetcherRegistry, HttpMethod, Tool,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// Helper: create FetchOptions that permit loopback (for wiremock tests)
+fn test_options() -> FetchOptions {
+    FetchOptions {
+        enable_markdown: true,
+        enable_text: true,
+        dns_policy: DnsPolicy::allow_all(),
+        ..Default::default()
+    }
+}
+
+/// Helper: create a Tool that permits loopback (for wiremock tests)
+fn test_tool() -> Tool {
+    Tool::builder().block_private_ips(false).build()
+}
 
 #[tokio::test]
 async fn test_simple_get() {
@@ -21,7 +36,7 @@ async fn test_simple_get() {
         .await;
 
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
     assert_eq!(resp.content_type, Some("text/plain".to_string()));
@@ -45,7 +60,7 @@ async fn test_head_request() {
         .await;
 
     let req = FetchRequest::new(format!("{}/file.pdf", mock_server.uri())).method(HttpMethod::Head);
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
     assert_eq!(resp.method, Some("HEAD".to_string()));
@@ -81,7 +96,7 @@ async fn test_html_to_markdown() {
         .mount(&mock_server)
         .await;
 
-    let tool = Tool::default();
+    let tool = test_tool();
     let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
     let resp = tool.execute(req).await.unwrap();
 
@@ -114,7 +129,7 @@ async fn test_html_to_text() {
         .mount(&mock_server)
         .await;
 
-    let tool = Tool::default();
+    let tool = test_tool();
     let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_text();
     let resp = tool.execute(req).await.unwrap();
 
@@ -143,7 +158,7 @@ async fn test_binary_content() {
         .await;
 
     let req = FetchRequest::new(format!("{}/image.png", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     assert_eq!(resp.status_code, 200);
     assert_eq!(resp.content_type, Some("image/png".to_string()));
@@ -168,7 +183,7 @@ async fn test_4xx_status() {
         .await;
 
     let req = FetchRequest::new(format!("{}/not-found", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     // 4xx is still a success response (not a tool error)
     assert_eq!(resp.status_code, 404);
@@ -190,7 +205,7 @@ async fn test_5xx_status() {
         .await;
 
     let req = FetchRequest::new(format!("{}/error", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     // 5xx is still a success response (not a tool error)
     assert_eq!(resp.status_code, 500);
@@ -213,7 +228,7 @@ async fn test_content_disposition_filename() {
         .await;
 
     let req = FetchRequest::new(format!("{}/download", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     assert_eq!(resp.filename, Some("report.txt".to_string()));
 }
@@ -234,7 +249,7 @@ async fn test_filename_from_url() {
 
     let req = FetchRequest::new(format!("{}/path/to/document.pdf", mock_server.uri()))
         .method(HttpMethod::Head);
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     assert_eq!(resp.filename, Some("document.pdf".to_string()));
 }
@@ -256,7 +271,7 @@ async fn test_size_for_text_content() {
         .await;
 
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     // Size should equal bytes read from body
     assert_eq!(resp.size, Some(body.len() as u64));
@@ -274,6 +289,7 @@ async fn test_url_prefix_allow_list() {
 
     // Create tool with allow list that doesn't include the mock server
     let tool = Tool::builder()
+        .block_private_ips(false)
         .allow_prefix("https://allowed.example.com")
         .build();
 
@@ -298,7 +314,10 @@ async fn test_url_prefix_block_list() {
         .await;
 
     // Create tool with block list that includes localhost
-    let tool = Tool::builder().block_prefix("http://127.0.0.1").build();
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .block_prefix("http://127.0.0.1")
+        .build();
 
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let result = tool.execute(req).await;
@@ -313,7 +332,7 @@ async fn test_url_prefix_block_list() {
 #[tokio::test]
 async fn test_invalid_url_scheme() {
     let req = FetchRequest::new("ftp://example.com/file.txt");
-    let result = fetch(req).await;
+    let result = fetch_with_options(req, test_options()).await;
 
     assert!(result.is_err());
     assert!(result
@@ -325,7 +344,7 @@ async fn test_invalid_url_scheme() {
 #[tokio::test]
 async fn test_missing_url() {
     let req = FetchRequest::new("");
-    let result = fetch(req).await;
+    let result = fetch_with_options(req, test_options()).await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Missing"));
@@ -343,7 +362,7 @@ async fn test_entity_decoding_in_html() {
         .mount(&mock_server)
         .await;
 
-    let tool = Tool::default();
+    let tool = test_tool();
     let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_text();
     let resp = tool.execute(req).await.unwrap();
 
@@ -370,7 +389,7 @@ async fn test_non_html_with_conversion_flags() {
         .mount(&mock_server)
         .await;
 
-    let tool = Tool::default();
+    let tool = test_tool();
     let req = FetchRequest::new(format!("{}/api/data", mock_server.uri())).as_markdown();
     let resp = tool.execute(req).await.unwrap();
 
@@ -396,7 +415,7 @@ async fn test_html_detection_by_body() {
         .mount(&mock_server)
         .await;
 
-    let tool = Tool::default();
+    let tool = test_tool();
     let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
     let resp = tool.execute(req).await.unwrap();
 
@@ -414,7 +433,10 @@ async fn test_custom_user_agent() {
         .mount(&mock_server)
         .await;
 
-    let tool = Tool::builder().user_agent("CustomBot/1.0").build();
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .user_agent("CustomBot/1.0")
+        .build();
 
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let resp = tool.execute(req).await.unwrap();
@@ -439,7 +461,7 @@ async fn test_excessive_newlines_filtered() {
         .await;
 
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     // Should have at most 2 consecutive newlines
     assert!(!resp.content.unwrap().contains("\n\n\n"));
@@ -467,6 +489,7 @@ async fn test_fetcher_registry_with_defaults() {
     let options = FetchOptions {
         enable_markdown: true,
         enable_text: true,
+        dns_policy: DnsPolicy::allow_all(),
         ..Default::default()
     };
 
@@ -481,7 +504,10 @@ async fn test_fetcher_registry_with_defaults() {
 #[tokio::test]
 async fn test_fetcher_registry_url_validation() {
     let registry = FetcherRegistry::with_defaults();
-    let options = FetchOptions::default();
+    let options = FetchOptions {
+        dns_policy: DnsPolicy::allow_all(),
+        ..Default::default()
+    };
 
     // Invalid scheme
     let req = FetchRequest::new("ftp://example.com");
@@ -510,6 +536,7 @@ async fn test_fetcher_registry_allow_block_lists() {
     // Block list
     let options = FetchOptions {
         block_prefixes: vec!["http://127.0.0.1".to_string()],
+        dns_policy: DnsPolicy::allow_all(),
         ..Default::default()
     };
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
@@ -520,6 +547,7 @@ async fn test_fetcher_registry_allow_block_lists() {
     // Allow list (not matching)
     let options = FetchOptions {
         allow_prefixes: vec!["https://allowed.com".to_string()],
+        dns_policy: DnsPolicy::allow_all(),
         ..Default::default()
     };
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
@@ -544,7 +572,7 @@ async fn test_github_fetcher_url_matching() {
         .await;
 
     let req = FetchRequest::new(format!("{}/owner/repo/issues", mock_server.uri()));
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     // Should use default fetcher (format is "raw", not "github_repo")
     assert_eq!(resp.format, Some("raw".to_string()));
@@ -565,9 +593,9 @@ async fn test_fetch_enables_conversions_by_default() {
         .mount(&mock_server)
         .await;
 
-    // Using fetch() with as_markdown() should work
+    // test_options() has enable_markdown: true (matching fetch() default)
     let req = FetchRequest::new(format!("{}/", mock_server.uri())).as_markdown();
-    let resp = fetch(req).await.unwrap();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
 
     assert_eq!(resp.format, Some("markdown".to_string()));
 }
@@ -590,6 +618,7 @@ async fn test_fetch_with_options_respects_disabled_conversion() {
     let options = FetchOptions {
         enable_markdown: false,
         enable_text: false,
+        dns_policy: DnsPolicy::allow_all(),
         ..Default::default()
     };
 
@@ -598,4 +627,40 @@ async fn test_fetch_with_options_respects_disabled_conversion() {
 
     // Should be raw because conversion is disabled
     assert_eq!(resp.format, Some("raw".to_string()));
+}
+
+// ============================================================================
+// Safe-by-default: fetch() and Tool::default() block private IPs
+// ============================================================================
+
+#[tokio::test]
+async fn test_fetch_blocks_loopback_by_default() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+        .mount(&mock_server)
+        .await;
+
+    // fetch() uses default options which now block private IPs
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let result = fetchkit::fetch(req).await;
+    assert!(matches!(result, Err(fetchkit::FetchError::BlockedUrl)));
+}
+
+#[tokio::test]
+async fn test_tool_default_blocks_loopback() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::default();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let result = tool.execute(req).await;
+    assert!(matches!(result, Err(fetchkit::FetchError::BlockedUrl)));
 }
