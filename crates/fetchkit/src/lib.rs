@@ -63,6 +63,7 @@
 
 pub mod client;
 mod convert;
+mod dns;
 mod error;
 pub mod fetchers;
 mod tool;
@@ -70,6 +71,7 @@ mod types;
 
 pub use client::{fetch, fetch_with_options, FetchOptions};
 pub use convert::{html_to_markdown, html_to_text};
+pub use dns::DnsPolicy;
 pub use error::FetchError;
 pub use fetchers::{DefaultFetcher, Fetcher, FetcherRegistry, GitHubRepoFetcher};
 pub use tool::{Tool, ToolBuilder, ToolStatus};

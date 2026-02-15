@@ -110,11 +110,27 @@ impl Fetcher for DefaultFetcher {
         };
         headers.insert(ACCEPT, HeaderValue::from_static(accept));
 
-        // Build client
-        let client = reqwest::Client::builder()
+        // THREAT[TM-SSRF-001]: Resolve-then-check — validate resolved IP before connecting
+        // THREAT[TM-SSRF-005]: Pin DNS resolution to prevent DNS rebinding
+        let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        let mut client_builder = reqwest::Client::builder()
             .default_headers(headers)
             .connect_timeout(FIRST_BYTE_TIMEOUT)
-            .timeout(FIRST_BYTE_TIMEOUT)
+            .timeout(FIRST_BYTE_TIMEOUT);
+
+        if options.dns_policy.block_private {
+            if let Some(host) = parsed_url.host_str() {
+                let port = parsed_url.port_or_known_default().unwrap_or(80);
+                let validated_addr = options
+                    .dns_policy
+                    .resolve_and_validate(host, port)
+                    .map_err(|_| FetchError::BlockedUrl)?;
+                // Pin the connection to the validated IP to prevent DNS rebinding
+                client_builder = client_builder.resolve(host, validated_addr);
+            }
+        }
+
+        let client = client_builder
             .build()
             .map_err(FetchError::ClientBuildError)?;
 

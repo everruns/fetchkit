@@ -26,8 +26,8 @@ pub enum FetchError {
     #[error("Invalid method: must be GET or HEAD")]
     InvalidMethod,
 
-    /// URL is blocked by prefix list
-    #[error("Blocked URL: prefix not allowed")]
+    /// URL is blocked by policy (prefix list or DNS policy)
+    #[error("Blocked URL: not allowed by policy")]
     BlockedUrl,
 
     /// Failed to build HTTP client
@@ -84,7 +84,7 @@ mod tests {
         );
         assert_eq!(
             FetchError::BlockedUrl.to_string(),
-            "Blocked URL: prefix not allowed"
+            "Blocked URL: not allowed by policy"
         );
         assert_eq!(
             FetchError::FirstByteTimeout.to_string(),

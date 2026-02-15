@@ -66,6 +66,7 @@ Fetchers receive `FetchOptions` for:
 - `block_prefixes` - URL prefix block list
 - `enable_markdown` - Enable markdown conversion
 - `enable_text` - Enable text conversion
+- `dns_policy` - DNS resolution policy for SSRF prevention (default: block private IPs)
 
 ### Extensibility
 
@@ -82,10 +83,20 @@ Design supports hundreds of fetchers by:
 - `FetchError::FetcherError(String)` for fetcher-specific errors
 - GitHub API errors return response with error field set
 
+### SSRF Protection
+
+Both built-in fetchers integrate resolve-then-check DNS validation:
+- Resolve hostname to IP before connecting
+- Validate IP against blocked ranges (private, loopback, link-local, etc.)
+- Pin validated IP via `reqwest::ClientBuilder::resolve()` to prevent DNS rebinding
+- Enabled by default via `DnsPolicy::default()` (blocks private IPs)
+- See `specs/threat-model.md` for threat IDs: TM-SSRF-001 through TM-SSRF-010
+
 ## Module Structure
 
 ```
 crates/fetchkit/src/
+├── dns.rs               # DnsPolicy - SSRF prevention via resolve-then-check
 ├── fetchers/
 │   ├── mod.rs           # Fetcher trait, FetcherRegistry
 │   ├── default.rs       # DefaultFetcher

@@ -3,6 +3,7 @@
 //! This module provides the main entry points for fetching URLs.
 //! The actual fetch logic is implemented by fetchers in the [`fetchers`](crate::fetchers) module.
 
+use crate::dns::DnsPolicy;
 use crate::error::FetchError;
 use crate::fetchers::FetcherRegistry;
 use crate::types::{FetchRequest, FetchResponse};
@@ -20,6 +21,8 @@ pub struct FetchOptions {
     pub enable_markdown: bool,
     /// Enable as_text option
     pub enable_text: bool,
+    /// DNS resolution policy for SSRF prevention
+    pub dns_policy: DnsPolicy,
 }
 
 /// Fetch a URL and return the response
@@ -92,5 +95,7 @@ mod tests {
         assert!(options.block_prefixes.is_empty());
         assert!(!options.enable_markdown);
         assert!(!options.enable_text);
+        // Safe by default: private IPs blocked
+        assert!(options.dns_policy.block_private);
     }
 }
