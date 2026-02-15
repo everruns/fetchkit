@@ -10,6 +10,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **Binary detection** - Returns metadata only for images, PDFs, etc.
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
 - **URL filtering** - Allow/block lists for controlled access
+- **SSRF protection** - Resolve-then-check blocks private IPs by default
 - **MCP server** - Model Context Protocol support for AI tool integration
 
 ## Installation
@@ -170,6 +171,26 @@ Errors are returned in the `error` field:
 - `HttpError` - 4xx/5xx response
 - `ContentError` - Failed to read body
 - `BinaryContent` - Binary content not supported
+
+## Security
+
+FetchKit blocks connections to private/reserved IP ranges by default, preventing SSRF attacks when used in server-side or AI agent contexts.
+
+**Blocked by default:** loopback, private networks (10.x, 172.16-31.x, 192.168.x), link-local (169.254.x including cloud metadata), IPv6 equivalents, multicast, and other reserved ranges.
+
+```rust
+// Default: private IPs blocked (safe for production)
+let tool = Tool::default();
+
+// Explicit opt-out for local development only
+let tool = Tool::builder()
+    .block_private_ips(false)
+    .build();
+```
+
+DNS pinning prevents DNS rebinding attacks. IPv6-mapped IPv4 addresses are canonicalized before validation.
+
+See [`specs/threat-model.md`](specs/threat-model.md) for the full threat model.
 
 ## Configuration
 

@@ -48,6 +48,7 @@ Provide a builder to configure tool options, including:
 - Support allow/block list of URL prefixes.
 - Support enabling/disabling request options (feature gating).
 - Support User-Agent override (e.g., `allow_ua`).
+- Support `block_private_ips(bool)` for SSRF prevention (default: `true`).
 
 #### Types
 
@@ -74,6 +75,7 @@ Provide a builder to configure tool options, including:
   - Missing url
   - Invalid url scheme
   - Invalid method
+  - Blocked URL (prefix list or DNS policy)
   - Client build failure
   - Request error (timeout/connect/other)
 - `ToolStatus` (or equivalent)
@@ -133,6 +135,17 @@ Provide a builder to configure tool options, including:
 - Allow/block list prefixes (if configured) are applied before fetch.
   - If allow list is non-empty, URL must match at least one allow prefix.
   - If block list matches, request is denied even if allow list matches.
+
+### SSRF Prevention (DNS Policy)
+
+By default, FetchKit blocks connections to private/reserved IP ranges:
+- Resolves hostnames to IP addresses before connecting (resolve-then-check).
+- Validates resolved IPs against blocked ranges (loopback, private, link-local,
+  cloud metadata, carrier-grade NAT, documentation, benchmarking, multicast, broadcast).
+- Handles IPv6-mapped IPv4 addresses via canonicalization.
+- Pins validated IP via `reqwest::ClientBuilder::resolve()` to prevent DNS rebinding.
+- Blocked by default; opt out via `ToolBuilder::block_private_ips(false)`.
+- See `specs/threat-model.md` for full threat analysis.
 
 ### HTTP Behavior
 
@@ -237,7 +250,7 @@ Content is HTML if:
 - Missing url -> tool error string "Missing required parameter: url".
 - Invalid URL -> tool error string "Invalid URL: must start with http:// or https://".
 - Invalid method -> tool error string "Invalid method: must be GET or HEAD".
-- Blocked prefix -> tool error string "Blocked URL: prefix not allowed".
+- Blocked URL (prefix or DNS policy) -> tool error string "Blocked URL: not allowed by policy".
 - First-byte timeout -> "Request timed out: server did not respond within 1 second".
 - Connect error -> "Failed to connect to server".
 - Other request errors -> "Request failed: <error>".
@@ -263,6 +276,7 @@ Unit:
 - Binary content detection.
 - HTML conversion, entity decoding.
 - Newline filtering behavior.
+- DNS policy IP range blocking (IPv4, IPv6, mapped addresses).
 
 Integration (mock HTTP server):
 - GET/HEAD with expected fields.
@@ -272,3 +286,12 @@ Integration (mock HTTP server):
 - Last-Modified extraction.
 - Size correctness for text and binary.
 - Body timeout truncation.
+
+SSRF security:
+- Private IP blocking (loopback, 10.x, 172.16.x, 192.168.x).
+- Cloud metadata endpoint blocking (169.254.169.254).
+- IPv6 loopback/mapped address blocking.
+- Non-HTTP scheme blocking (file, ftp, data, gopher).
+- Default-blocks-loopback verification.
+- Explicit opt-out verification.
+- Script stripping in converted content.
