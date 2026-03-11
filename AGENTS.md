@@ -8,6 +8,9 @@ Telegraph. Drop filler/grammar. Min tokens (global AGENTS + replies).
 Critical Thinking
 Fix root cause (not band-aid). Unsure: read more code; if still stuck, ask w/ short options. Unrecognized changes: assume other agent; keep going; focus your changes. If it causes issues, stop + ask user. Leave breadcrumb notes in thread.
 
+Attribution
+NEVER add links to Claude sessions in PR body or commits. Also never attribute commit or merge commit to coding agents, always use real user.
+
 ### Principles
 
 - Keep decisions as comments on top of the file. Only important decisions that could not be inferred from code.
