@@ -11,6 +11,13 @@ Fix root cause (not band-aid). Unsure: read more code; if still stuck, ask w/ sh
 Attribution
 NEVER add links to Claude sessions in PR body or commits. Also never attribute commit or merge commit to coding agents, always use real user.
 
+Before committing, configure git user from environment variables:
+```bash
+git config user.name "$GIT_USER_NAME"
+git config user.email "$GIT_USER_EMAIL"
+```
+`GIT_USER_NAME` and `GIT_USER_EMAIL` must be set in the session.
+
 ### Principles
 
 - Keep decisions as comments on top of the file. Only important decisions that could not be inferred from code.
