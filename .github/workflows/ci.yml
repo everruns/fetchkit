@@ -81,6 +81,9 @@ jobs:
       - name: Run fetch_urls example
         run: cargo run -p fetchkit --example fetch_urls
         timeout-minutes: 2
+      - name: Run save_to_file example
+        run: cargo run -p fetchkit --example save_to_file
+        timeout-minutes: 1
 
   # Gate job for branch protection.
   check:
