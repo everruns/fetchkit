@@ -7,14 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-03-12
+
 ### Highlights
 
 - Hardened redirect handling to revalidate every hop against FetchKit's SSRF policy
 - Tightened allow/block prefix matching to use parsed URL components instead of raw string prefixes
+- Added FileSaver trait for saving fetched content to files
+- Mitigated 6 open threats from threat model
+- Added CLI integration tests and doc tests
 
 ### What's Changed
 
-* fix(security): harden redirect validation and URL policy matching
+* fix(security): harden redirect validation and URL policy matching ([#23](https://github.com/everruns/fetchkit/pull/23))
+* fix(security): mitigate 6 open threats from threat model ([#24](https://github.com/everruns/fetchkit/pull/24))
+* fix(cli): disable bin rustdoc to avoid doc collision ([#25](https://github.com/everruns/fetchkit/pull/25))
+* feat: add FileSaver trait for saving fetched content to files ([#27](https://github.com/everruns/fetchkit/pull/27))
+* fix(ci): replace external HTTP calls with wiremock in fetch_urls example ([#29](https://github.com/everruns/fetchkit/pull/29))
+* test: add CLI integration tests, doc tests, Python example, and CI improvements ([#31](https://github.com/everruns/fetchkit/pull/31))
+* docs: add cargo install from crates.io to README ([#22](https://github.com/everruns/fetchkit/pull/22))
+* docs: remove duplicate release-process from public docs ([#30](https://github.com/everruns/fetchkit/pull/30))
+* docs: add git user config requirement to attribution section ([#32](https://github.com/everruns/fetchkit/pull/32))
+* ci: adopt bashkit release process ([#26](https://github.com/everruns/fetchkit/pull/26))
+* feat(skills): add /processing-issues skill ([#28](https://github.com/everruns/fetchkit/pull/28))
+* feat: add /ship command and .agents symlinks ([#21](https://github.com/everruns/fetchkit/pull/21))
+* chore: add Doppler secrets management and cloud init script ([#20](https://github.com/everruns/fetchkit/pull/20))
+* chore: add attribution settings and agent attribution policy ([#19](https://github.com/everruns/fetchkit/pull/19))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.1.2...v0.1.3
 
 ## [0.1.2] - 2026-02-16
 
@@ -66,7 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/everruns/fetchkit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/everruns/fetchkit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/everruns/fetchkit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/everruns/fetchkit/releases/tag/v0.1.0
