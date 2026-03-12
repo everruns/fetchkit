@@ -11,8 +11,10 @@ categories.workspace = true
 readme = "../../README.md"
 
 [[bin]]
+# Keep CLI docs off so rustdoc doesn't collide with the library's `fetchkit` output.
 name = "fetchkit"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 fetchkit = { path = "../fetchkit", version = "0.1.2" }
