@@ -85,6 +85,8 @@ pub struct ToolBuilder {
     block_prefixes: Vec<String>,
     /// DNS resolution policy for SSRF prevention
     dns_policy: DnsPolicy,
+    /// Maximum response body size in bytes
+    max_body_size: Option<usize>,
 }
 
 impl ToolBuilder {
@@ -127,6 +129,16 @@ impl ToolBuilder {
         self
     }
 
+    /// Set maximum response body size in bytes
+    ///
+    /// Limits the amount of data read from responses. Protects against
+    /// memory exhaustion from large responses and compressed content bombs.
+    /// Default: 10 MB if not set.
+    pub fn max_body_size(mut self, size: usize) -> Self {
+        self.max_body_size = Some(size);
+        self
+    }
+
     /// Control private/reserved IP range blocking (SSRF prevention)
     ///
     /// Enabled by default. When enabled, FetchKit resolves hostnames to IP
@@ -153,6 +165,7 @@ impl ToolBuilder {
             allow_prefixes: self.allow_prefixes,
             block_prefixes: self.block_prefixes,
             dns_policy: self.dns_policy,
+            max_body_size: self.max_body_size,
         }
     }
 }
@@ -182,6 +195,7 @@ pub struct Tool {
     allow_prefixes: Vec<String>,
     block_prefixes: Vec<String>,
     dns_policy: DnsPolicy,
+    max_body_size: Option<usize>,
 }
 
 impl Default for Tool {
@@ -244,6 +258,7 @@ impl Tool {
             enable_markdown: self.enable_markdown,
             enable_text: self.enable_text,
             dns_policy: self.dns_policy.clone(),
+            max_body_size: self.max_body_size,
         };
 
         fetch_with_options(req, options).await
@@ -278,6 +293,7 @@ impl Tool {
             enable_markdown: self.enable_markdown,
             enable_text: self.enable_text,
             dns_policy: self.dns_policy.clone(),
+            max_body_size: self.max_body_size,
         };
 
         status_callback(ToolStatus::new("fetch").with_percent(20.0));

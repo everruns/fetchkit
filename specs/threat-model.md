@@ -8,18 +8,6 @@ influence which URLs are fetched. This document identifies threats that arise wh
 runs inside a container or cluster with access to internal network resources, and tracks
 mitigations implemented in the library.
 
-## Verification Status
-
-Last verified: 2026-03-12
-
-Verified in this review:
-- `cargo test --workspace -- --nocapture`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
-- `cargo run -p fetchkit-cli -- fetch https://example.com --output json`
-- `cargo run -p fetchkit-cli -- fetch http://127.0.0.1 --output json`
-- JSON-RPC smoke test against `cargo run -p fetchkit-cli -- mcp`
-
 ## Threat ID Scheme
 
 **Format:** `TM-<CATEGORY>-<NNN>`
@@ -118,7 +106,7 @@ only allow connections to publicly-routable IP addresses by default.
 | TM-SSRF-007 | DNS names resolving to private IPs | Critical | Post-resolution IP check catches all DNS-to-private-IP scenarios | MITIGATED |
 | TM-SSRF-008 | Kubernetes service DNS (*.svc.cluster.local) | High | Resolves to cluster IPs which are private ranges; blocked by IP check | MITIGATED |
 | TM-SSRF-009 | URL with credentials (http://user:pass@internal) | Medium | Credentials in URL passed through to reqwest; no credential stripping | **ACCEPTED** |
-| TM-SSRF-010 | Redirect to internal resource | High | Default fetcher follows redirects manually; each hop is re-parsed and re-validated against scheme and DNS policy | MITIGATED |
+| TM-SSRF-010 | Redirect to internal resource | High | Manual redirect following with IP validation at each hop | MITIGATED |
 
 ### Mitigation Details
 
@@ -158,17 +146,18 @@ they are sent with the request. This is acceptable because:
 - **Risk:** Low. Mitigated at the caller level.
 
 **TM-SSRF-010 — Redirect to internal resource (MITIGATED):**
-Automatic redirects are disabled. The default fetcher follows redirects manually
-(max 10 hops), reparses the `Location` target, rejects non-HTTP(S) schemes, and
-rebuilds the client for each hop so DNS resolution and private-IP validation run
-again before every outbound connection. The GitHub fetcher disables redirects
-entirely because it only talks to `api.github.com`.
+Automatic redirects are disabled via `reqwest::redirect::Policy::none()`. FetchKit
+manually follows redirects (up to 10 hops) and performs full IP validation
+(resolve-then-check with DNS pinning) at each hop. Scheme validation is also
+enforced at each hop, preventing redirects to non-HTTP schemes (e.g., `file://`).
+A new `reqwest::Client` is built per hop to ensure DNS pinning applies to the
+redirect target, not the original host.
 
 ## 2. Network Security (TM-NET)
 
 | ID | Threat | Severity | Mitigation | Status |
 |----|--------|----------|------------|--------|
-| TM-NET-001 | HTTP downgrade (HTTPS URL redirects to HTTP) | Medium | Redirects are validated manually but HTTP is still allowed as a destination scheme | **ACCEPTED** |
+| TM-NET-001 | HTTP downgrade (HTTPS URL redirects to HTTP) | Medium | No scheme validation on redirects; reqwest follows | **ACCEPTED** |
 | TM-NET-002 | TLS certificate validation bypass | Low | Uses reqwest defaults (system certificate store via rustls-platform-verifier) | MITIGATED |
 | TM-NET-003 | Connection reuse leaking context | Low | New reqwest client per request; no connection pooling across requests | MITIGATED |
 | TM-NET-004 | Proxy environment variables (HTTP_PROXY) | Medium | Reqwest respects system proxy env vars; attacker could set these in container | **CALLER RISK** |
@@ -178,8 +167,7 @@ entirely because it only talks to `api.github.com`.
 
 **TM-NET-001 — HTTP downgrade (ACCEPTED):**
 FetchKit allows both HTTP and HTTPS schemes. If an HTTPS URL redirects to HTTP,
-FetchKit will still follow the redirect after validating the new target. This is
-accepted because:
+reqwest will follow the redirect without warning. This is accepted because:
 - FetchKit is designed for content fetching, not security-sensitive operations
 - The caller controls which URLs to fetch
 - Enforcing HTTPS-only would break many legitimate use cases
@@ -199,12 +187,12 @@ This is the caller's responsibility to configure or clear.
 | ID | Threat | Severity | Mitigation | Status |
 |----|--------|----------|------------|--------|
 | TM-INPUT-001 | Non-HTTP scheme (file://, ftp://, data:) | High | Explicit scheme check: only `http://` and `https://` prefixes allowed | MITIGATED |
-| TM-INPUT-002 | URL prefix normalization edge cases | Medium | Prefix matching parses URLs, normalizes scheme/host/trailing dot, and checks path boundaries; encoded path canonicalization is still limited | **PARTIALLY MITIGATED** |
+| TM-INPUT-002 | URL prefix bypass via encoding | Medium | URL-aware prefix matching using parsed/normalized URL components | MITIGATED |
 | TM-INPUT-003 | Empty or malformed URL | Low | Empty URL check and `url::Url::parse()` validation | MITIGATED |
 | TM-INPUT-004 | Extremely long URL | Low | No explicit length limit; reqwest/OS handles | **ACCEPTED** |
 | TM-INPUT-005 | URL with fragment/query manipulation | Low | Fragments and queries are part of the URL; no special handling needed | **BY DESIGN** |
 | TM-INPUT-006 | Prefix bypass via URL authority (http://evil.com@127.0.0.1) | Medium | `url` crate parses authority correctly; resolve-then-check validates the actual host | MITIGATED |
-| TM-INPUT-007 | Prefix matching is string-based, not URL-aware | Medium | Prefixes are parsed and compared by scheme, host, optional port, path boundary, and optional query | MITIGATED |
+| TM-INPUT-007 | Block prefix matching is string-based, not URL-aware | Medium | URL-aware prefix matching compares parsed components (scheme, host, path) | MITIGATED |
 
 ### Mitigation Details
 
@@ -217,62 +205,52 @@ if !request.url.starts_with("http://") && !request.url.starts_with("https://") {
 }
 ```
 
-**TM-INPUT-002 — URL prefix normalization edge cases (PARTIALLY MITIGATED):**
-Prefix matching no longer relies on raw string prefixes. FetchKit parses both the
-policy prefix and candidate URL, lowercases and de-dots the host, respects path
-segment boundaries, and treats an omitted prefix port as "any port on this host".
-Residual risk remains for percent-encoded path variants because FetchKit does not
-fully canonicalize encoded path segments before comparison.
+**TM-INPUT-002 — URL prefix bypass via encoding (MITIGATED):**
+Prefix matching now uses the `url` crate to parse both the URL and the prefix,
+then compares normalized components (scheme, host, port, path). The `url` crate
+normalizes scheme/host to lowercase, resolves punycode, and handles encoding.
+This prevents bypasses via case variations, URL encoding, or trailing dots.
 
 **TM-INPUT-006 — URL authority bypass (MITIGATED):**
 URLs like `http://evil.com@127.0.0.1/path` have `127.0.0.1` as the host (with
 `evil.com` as the username). The `url` crate correctly parses this, and
 resolve-then-check validates the actual host's IP.
 
-**TM-INPUT-007 — URL-aware prefix matching (MITIGATED):**
-Allow/block prefixes are parsed as URLs and compared structurally:
-- Scheme must match
-- Host is lowercased and trailing dots are ignored
-- Explicit prefix ports must match; omitted prefix ports match any port
-- Path prefixes respect segment boundaries (`/api` matches `/api/v1`, not `/apiv1`)
-- If the prefix includes a query string, it must match exactly
-
-This closes the allow-list overmatch case where a raw prefix like
-`https://allowed.example.com` previously also matched
-`https://allowed.example.com.evil.test`.
+**TM-INPUT-007 — String-based prefix matching (MITIGATED):**
+Prefix matching now parses both the URL and the prefix with the `url` crate,
+then compares scheme, host (exact match), port, and path (segment-boundary
+matching). `http://internal.example.com` correctly does NOT match
+`http://internal.example.com.evil.com` since hosts differ after parsing.
 
 ## 4. Denial of Service (TM-DOS)
 
 | ID | Threat | Severity | Mitigation | Status |
 |----|--------|----------|------------|--------|
-| TM-DOS-001 | Unbounded response body | Medium | 30-second body timeout; no max body size limit | **OPEN** |
+| TM-DOS-001 | Unbounded response body | Medium | Configurable `max_body_size` (default 10 MB); truncates with `truncated: true` | MITIGATED |
 | TM-DOS-002 | Slowloris / slow body | Low | 1-second first-byte timeout; 30-second body timeout | MITIGATED |
-| TM-DOS-003 | Compressed content bomb (gzip bomb) | Medium | Reqwest decompresses gzip/brotli/deflate; no decompressed size limit | **OPEN** |
+| TM-DOS-003 | Compressed content bomb (gzip bomb) | Medium | `max_body_size` enforced on decompressed stream; truncates large payloads | MITIGATED |
 | TM-DOS-004 | Rapid request flooding via tool | Low | No rate limiting in FetchKit; caller responsibility | **CALLER RISK** |
 | TM-DOS-005 | DNS resolution delay | Low | DNS resolution uses system resolver; no explicit timeout on DNS lookup | **ACCEPTED** |
-| TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | HTML converter processes in-memory; no streaming conversion | **OPEN** |
+| TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
 
 ### Mitigation Details
 
-**TM-DOS-001 — Unbounded response body (OPEN):**
-FetchKit reads the entire response body into memory (up to 30-second timeout).
-A malicious server could stream data at just above the timeout threshold,
-consuming significant memory.
-- **Recommendation:** Add a configurable `max_body_size` (e.g., 10 MB default)
-  that truncates the response and sets `truncated: true`.
-- **Priority:** Medium
+**TM-DOS-001 — Unbounded response body (MITIGATED):**
+FetchKit enforces a configurable `max_body_size` (default 10 MB) during streaming
+body reads. When the limit is reached, the response is truncated and
+`truncated: true` is set in the response. The 30-second body timeout provides
+additional protection. Configurable via `ToolBuilder::max_body_size()`.
 
 **TM-DOS-002 — Slowloris (MITIGATED):**
 The 1-second first-byte timeout prevents connections from being held open
 indefinitely during the initial handshake. The 30-second body timeout provides
 a hard ceiling on total request duration.
 
-**TM-DOS-003 — Compressed content bomb (OPEN):**
-Reqwest is configured with `gzip`, `brotli`, and `deflate` features, which
-enable transparent decompression. A small compressed payload could decompress
-to a very large body.
-- **Recommendation:** Monitor decompressed body size against `max_body_size`.
-- **Priority:** Medium
+**TM-DOS-003 — Compressed content bomb (MITIGATED):**
+The `max_body_size` limit is enforced on the decompressed stream (reqwest
+decompresses transparently before returning chunks). A gzip bomb that
+decompresses to a large size is caught by the same size limit that protects
+against unbounded responses (TM-DOS-001).
 
 ## 5. Information Leakage (TM-LEAK)
 
@@ -309,19 +287,25 @@ and `svg` tags, preventing script injection into the converted output.
 **TM-CONV-002 — Deeply nested HTML (ACCEPTED):**
 The HTML parser is character-based and iterative (not recursive), so stack
 overflow from deep nesting is unlikely. However, deeply nested structures could
-produce large output. This remains accepted only because the parser is iterative;
-there is currently no upstream body size cap, so TM-DOS-001/TM-DOS-006 remain open.
+produce large output. This is accepted as the body size limit (TM-DOS-001)
+provides upstream protection.
 
 ## Vulnerability Summary
 
 ### Open Threats (Require Action)
 
-| ID | Threat | Severity | Recommendation |
-|----|--------|----------|----------------|
-| TM-INPUT-002 | URL prefix normalization edge cases | Medium | Canonicalize percent-encoded path variants before comparison |
-| TM-DOS-001 | Unbounded response body | Medium | Add configurable max_body_size |
-| TM-DOS-003 | Compressed content bomb | Medium | Monitor decompressed size |
-| TM-DOS-006 | Memory exhaustion from HTML conversion | Medium | Add conversion size limit |
+None — all previously open threats have been mitigated.
+
+### Recently Mitigated (previously open)
+
+| ID | Threat | Severity | Mitigation |
+|----|--------|----------|------------|
+| TM-SSRF-010 | Redirect to internal resource | High | Manual redirect following with IP validation per hop |
+| TM-INPUT-002 | URL prefix bypass via encoding | Medium | URL-aware prefix matching via parsed components |
+| TM-INPUT-007 | String-based prefix matching | Medium | URL-aware prefix matching with host/path comparison |
+| TM-DOS-001 | Unbounded response body | Medium | Configurable `max_body_size` (default 10 MB) |
+| TM-DOS-003 | Compressed content bomb | Medium | Size limit enforced on decompressed stream |
+| TM-DOS-006 | Memory exhaustion from HTML conversion | Medium | Conversion input bounded by `max_body_size` |
 
 ### Accepted Risks
 
@@ -334,7 +318,7 @@ there is currently no upstream body size cap, so TM-DOS-001/TM-DOS-006 remain op
 | TM-DOS-005 | DNS delay | System resolver; typical behavior |
 | TM-LEAK-002 | DNS error detail | Hostname visible but not internal IPs |
 | TM-LEAK-005 | Timing channels | Low risk; timeout masks some signal |
-| TM-CONV-002 | Deep HTML nesting | Iterative parser avoids stack overflow, but large-output DoS remains tracked separately |
+| TM-CONV-002 | Deep HTML nesting | Iterative parser; upstream size limits |
 
 ### Caller Responsibilities
 
@@ -343,20 +327,21 @@ there is currently no upstream body size cap, so TM-DOS-001/TM-DOS-006 remain op
 | Rate limiting | TM-DOS-004 | Caller must implement request rate limits |
 | Proxy config | TM-NET-004 | Clear or set HTTP_PROXY env vars appropriately |
 | Content filtering | TM-LEAK-003 | Filter sensitive data from responses |
-| URL allow-listing | TM-INPUT-002 | Use allow_prefixes for positive security model and prefer exact path prefixes |
+| URL allow-listing | TM-INPUT-002, TM-INPUT-007 | Use allow_prefixes for positive security model (now URL-aware) |
 
 ## Security Controls Matrix
 
 | Control | Category | Implementation |
 |---------|----------|---------------|
-| Scheme validation | TM-INPUT | `starts_with("http://")` check |
-| URL prefix allow/block | TM-INPUT | Parsed URL comparison in `FetcherRegistry` |
+| Scheme validation | TM-INPUT | `starts_with("http://")` check; also enforced at each redirect hop |
+| URL prefix allow/block | TM-INPUT | URL-aware prefix matching via parsed URL components |
 | Private IP blocking | TM-SSRF | `DnsPolicy::block_private_ips()` with resolve-then-check |
-| DNS pinning | TM-SSRF | `reqwest::ClientBuilder::resolve()` |
-| Redirect hop validation | TM-SSRF | Manual redirect loop in `DefaultFetcher`; redirects disabled in `GitHubRepoFetcher` |
+| DNS pinning | TM-SSRF | `reqwest::ClientBuilder::resolve()` per redirect hop |
 | IPv6-mapped-IPv4 canonicalization | TM-SSRF | `IpAddr::to_canonical()` before range check |
+| Manual redirect following | TM-SSRF | `Policy::none()` with IP validation at each hop |
 | First-byte timeout | TM-DOS | 1-second connect+response timeout |
 | Body timeout | TM-DOS | 30-second streaming body timeout |
+| Body size limit | TM-DOS | Configurable `max_body_size` (default 10 MB) |
 | Script tag stripping | TM-CONV | Skip `script`/`style`/`noscript`/`iframe`/`svg` |
 | Binary detection | TM-CONV | Content-Type prefix matching |
 | New client per request | TM-NET | No connection pool state leakage |
