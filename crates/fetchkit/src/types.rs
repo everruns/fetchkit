@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// HTTP method for the request
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::HttpMethod;
+///
+/// let method: HttpMethod = "HEAD".parse().unwrap();
+/// assert_eq!(method, HttpMethod::Head);
+/// assert_eq!(method.to_string(), "HEAD");
+///
+/// assert_eq!(HttpMethod::default(), HttpMethod::Get);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {

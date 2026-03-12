@@ -43,6 +43,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --workspace
+      - name: Test (network-dependent)
+        run: cargo test --workspace -- --ignored
 
   build:
     name: Build
@@ -83,13 +85,31 @@ jobs:
         timeout-minutes: 2
       - name: Run save_to_file example
         run: cargo run -p fetchkit --example save_to_file
-        timeout-minutes: 1
+        timeout-minutes: 2
+
+  python:
+    name: Python Example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install maturin
+        run: pip install maturin
+      - name: Build Python bindings
+        run: maturin develop -m crates/fetchkit-python/Cargo.toml
+      - name: Run Python example
+        run: python examples/python_fetchkit.py
+        timeout-minutes: 2
 
   # Gate job for branch protection.
   check:
     name: Check
     if: always()
-    needs: [lint, test, build, doc, examples]
+    needs: [lint, test, build, doc, examples, python]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all jobs passed
@@ -98,7 +118,8 @@ jobs:
              [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]] || \
              [[ "${{ needs.doc.result }}" != "success" ]] || \
-             [[ "${{ needs.examples.result }}" != "success" ]]; then
+             [[ "${{ needs.examples.result }}" != "success" ]] || \
+             [[ "${{ needs.python.result }}" != "success" ]]; then
             echo "One or more required jobs failed"
             exit 1
           fi

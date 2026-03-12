@@ -199,6 +199,19 @@ impl ToolBuilder {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Tool metadata is available without making any requests:
+///
+/// ```
+/// use fetchkit::Tool;
+///
+/// let tool = Tool::default();
+/// assert!(!tool.description().is_empty());
+/// assert!(!tool.llmtxt().is_empty());
+///
+/// let schema = tool.input_schema();
+/// assert!(schema["properties"]["url"].is_object());
+/// ```
 #[derive(Debug, Clone)]
 pub struct Tool {
     enable_markdown: bool,
