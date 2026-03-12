@@ -97,12 +97,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install maturin
-        run: pip install maturin
+      - name: Set up virtualenv and install maturin
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin
       - name: Build Python bindings
-        run: maturin develop -m crates/fetchkit-python/Cargo.toml
+        run: |
+          . .venv/bin/activate
+          maturin develop -m crates/fetchkit-python/Cargo.toml
       - name: Run Python example
-        run: python examples/python_fetchkit.py
+        run: |
+          . .venv/bin/activate
+          python examples/python_fetchkit.py
         timeout-minutes: 2
 
   # Gate job for branch protection.
