@@ -131,5 +131,4 @@ cargo build --workspace --exclude fetchkit-python --release
 
 ### Alignment
 
-- `docs/release-process.md` must stay consistent with this spec
 - `.claude/commands/ship.md` must remain compatible with this release workflow

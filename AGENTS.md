@@ -119,8 +119,7 @@ specs/                  # Feature specifications
 
 ### Releasing
 
-See `specs/release-process.md` for the release contract and `docs/release-process.md`
-for the operator-facing summary.
+See `specs/release-process.md` for the release contract.
 
 Quick summary:
 1. Human asks agent: "Create release v0.2.0"
