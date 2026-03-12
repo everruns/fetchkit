@@ -6,7 +6,7 @@ use crate::error::FetchError;
 use crate::fetchers::FetcherRegistry;
 use crate::file_saver::FileSaver;
 use crate::types::{FetchRequest, FetchResponse};
-use crate::{TOOL_DESCRIPTION, TOOL_LLMTXT};
+use crate::{build_llmtxt, TOOL_DESCRIPTION_BASE, TOOL_DESCRIPTION_SAVE};
 use schemars::schema_for;
 use serde::{Deserialize, Serialize};
 
@@ -223,19 +223,23 @@ impl Tool {
         ToolBuilder::new()
     }
 
-    /// Get tool description
-    pub fn description(&self) -> &'static str {
-        TOOL_DESCRIPTION
+    /// Get tool description, reflecting enabled features
+    pub fn description(&self) -> String {
+        let mut s = TOOL_DESCRIPTION_BASE.to_string();
+        if self.enable_save_to_file {
+            s.push_str(TOOL_DESCRIPTION_SAVE);
+        }
+        s
     }
 
     /// Get system prompt (empty for this tool)
-    pub fn system_prompt(&self) -> &'static str {
-        ""
+    pub fn system_prompt(&self) -> String {
+        String::new()
     }
 
-    /// Get full documentation (llmtxt)
-    pub fn llmtxt(&self) -> &'static str {
-        TOOL_LLMTXT
+    /// Get full documentation (llmtxt), reflecting enabled features
+    pub fn llmtxt(&self) -> String {
+        build_llmtxt(self.enable_save_to_file)
     }
 
     /// Get input schema as JSON
@@ -384,6 +388,15 @@ mod tests {
         assert!(!tool.description().is_empty());
         assert!(tool.system_prompt().is_empty());
         assert!(!tool.llmtxt().is_empty());
+
+        // Default tool should NOT mention save_to_file
+        assert!(!tool.description().contains("save_to_file"));
+        assert!(!tool.llmtxt().contains("save_to_file"));
+
+        // Enabled tool SHOULD mention save_to_file
+        let tool = Tool::builder().enable_save_to_file(true).build();
+        assert!(tool.description().contains("save_to_file"));
+        assert!(tool.llmtxt().contains("save_to_file"));
     }
 
     #[test]

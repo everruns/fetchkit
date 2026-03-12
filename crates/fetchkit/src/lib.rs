@@ -82,17 +82,24 @@ pub use types::{FetchRequest, FetchResponse, HttpMethod};
 /// Default User-Agent string
 pub const DEFAULT_USER_AGENT: &str = "Everruns FetchKit/1.0";
 
-/// Tool description for LLM consumption
-pub const TOOL_DESCRIPTION: &str = r#"Fetches content from a URL and optionally converts HTML to markdown or text.
+// -- Tool description fragments (composed dynamically by Tool methods) --
+
+/// Base tool description (always included)
+pub(crate) const TOOL_DESCRIPTION_BASE: &str = "\
+Fetches content from a URL and optionally converts HTML to markdown or text.
 
 - Supports GET and HEAD methods
 - Converts HTML to markdown or plain text
 - Returns metadata for binary content
-- Strict timeouts for reliability
-- Optional file download (save_to_file)"#;
+- Strict timeouts for reliability";
 
-/// Extended documentation for LLM consumption (llmtxt)
-pub const TOOL_LLMTXT: &str = r#"# FetchKit Tool
+/// Save-to-file line appended to description when enabled
+pub(crate) const TOOL_DESCRIPTION_SAVE: &str = "\n- File download (save_to_file)";
+
+// -- TOOL_LLMTXT fragments --
+
+pub(crate) const TOOL_LLMTXT_HEADER: &str = "\
+# FetchKit Tool
 
 Fetches content from a URL and optionally converts HTML to markdown or text.
 
@@ -107,8 +114,13 @@ Fetches content from a URL and optionally converts HTML to markdown or text.
 - `url` (required): The URL to fetch (must be http:// or https://)
 - `method` (optional): GET or HEAD (default: GET)
 - `as_markdown` (optional): Convert HTML to markdown
-- `as_text` (optional): Convert HTML to plain text
-- `save_to_file` (optional): Save response body to this path instead of returning inline content. Accepts binary content (images, PDFs, archives). Requires file saving to be enabled.
+- `as_text` (optional): Convert HTML to plain text";
+
+pub(crate) const TOOL_LLMTXT_SAVE_INPUT: &str = "\
+\n- `save_to_file` (optional): Save response body to this path instead of returning inline content. \
+Accepts binary content (images, PDFs, archives). Requires file saving to be enabled.";
+
+pub(crate) const TOOL_LLMTXT_OUTPUT_BASE: &str = "
 
 ## Output Fields
 - `url`: The fetched URL
@@ -117,39 +129,86 @@ Fetches content from a URL and optionally converts HTML to markdown or text.
 - `size`: Content size in bytes
 - `last_modified`: Last-Modified header value
 - `filename`: Extracted filename
-- `format`: "markdown", "text", or "raw"
+- `format`: \"markdown\", \"text\", or \"raw\"
 - `content`: The fetched/converted content
 - `truncated`: True if content was truncated due to timeout
-- `method`: "HEAD" for HEAD requests
-- `error`: Error message for binary content
-- `saved_path`: Path where file was saved (when save_to_file was used)
-- `bytes_written`: Bytes written to file (when save_to_file was used)
+- `method`: \"HEAD\" for HEAD requests
+- `error`: Error message for binary content";
+
+pub(crate) const TOOL_LLMTXT_SAVE_OUTPUT: &str = "\
+\n- `saved_path`: Path where file was saved (when save_to_file was used)
+- `bytes_written`: Bytes written to file (when save_to_file was used)";
+
+pub(crate) const TOOL_LLMTXT_EXAMPLES_BASE: &str = "
 
 ## Examples
 
 ### Fetch a webpage as markdown
 ```json
-{"url": "https://example.com", "as_markdown": true}
+{\"url\": \"https://example.com\", \"as_markdown\": true}
 ```
 
 ### Check if a URL exists (HEAD request)
 ```json
-{"url": "https://example.com/file.pdf", "method": "HEAD"}
+{\"url\": \"https://example.com/file.pdf\", \"method\": \"HEAD\"}
 ```
 
 ### Fetch raw content
 ```json
-{"url": "https://api.example.com/data.json"}
-```
+{\"url\": \"https://api.example.com/data.json\"}
+```";
+
+pub(crate) const TOOL_LLMTXT_SAVE_EXAMPLE: &str = "
 
 ### Download a file
 ```json
-{"url": "https://example.com/image.png", "save_to_file": "image.png"}
-```
+{\"url\": \"https://example.com/image.png\", \"save_to_file\": \"image.png\"}
+```";
+
+pub(crate) const TOOL_LLMTXT_ERRORS_BASE: &str = "
 
 ## Error Handling
 - Invalid URLs return an error
-- Binary content returns metadata with error message (unless save_to_file is used)
-- Timeouts return partial content with truncated flag
-- File saving errors include path validation and IO failures
-"#;
+- Binary content returns metadata with error message
+- Timeouts return partial content with truncated flag";
+
+pub(crate) const TOOL_LLMTXT_SAVE_ERRORS: &str = "\
+\n- Binary content is accepted when using save_to_file\n\
+- File saving errors include path validation and IO failures";
+
+/// Compose full TOOL_DESCRIPTION with all features (for backward compat / CLI)
+pub const TOOL_DESCRIPTION: &str = "\
+Fetches content from a URL and optionally converts HTML to markdown or text.\n\
+\n\
+- Supports GET and HEAD methods\n\
+- Converts HTML to markdown or plain text\n\
+- Returns metadata for binary content\n\
+- Strict timeouts for reliability\n\
+- File download (save_to_file)";
+
+/// Compose full TOOL_LLMTXT with all features (for backward compat / CLI)
+pub static TOOL_LLMTXT: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| build_llmtxt(true));
+
+/// Build llmtxt string with optional save_to_file sections
+pub(crate) fn build_llmtxt(include_save: bool) -> String {
+    let mut s = String::with_capacity(2048);
+    s.push_str(TOOL_LLMTXT_HEADER);
+    if include_save {
+        s.push_str(TOOL_LLMTXT_SAVE_INPUT);
+    }
+    s.push_str(TOOL_LLMTXT_OUTPUT_BASE);
+    if include_save {
+        s.push_str(TOOL_LLMTXT_SAVE_OUTPUT);
+    }
+    s.push_str(TOOL_LLMTXT_EXAMPLES_BASE);
+    if include_save {
+        s.push_str(TOOL_LLMTXT_SAVE_EXAMPLE);
+    }
+    s.push_str(TOOL_LLMTXT_ERRORS_BASE);
+    if include_save {
+        s.push_str(TOOL_LLMTXT_SAVE_ERRORS);
+    }
+    s.push('\n');
+    s
+}

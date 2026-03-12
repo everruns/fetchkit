@@ -215,17 +215,17 @@ impl PyFetchKitTool {
     }
 
     /// Get tool description
-    fn description(&self) -> &'static str {
+    fn description(&self) -> String {
         self.inner.description()
     }
 
     /// Get system prompt
-    fn system_prompt(&self) -> &'static str {
+    fn system_prompt(&self) -> String {
         self.inner.system_prompt()
     }
 
     /// Get full documentation (llmtxt)
-    fn llmtxt(&self) -> &'static str {
+    fn llmtxt(&self) -> String {
         self.inner.llmtxt()
     }
 
