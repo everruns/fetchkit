@@ -73,7 +73,15 @@ Verify CI pipeline and development tooling are current.
 1. **Unreleased section** - `CHANGELOG.md` has an `[Unreleased]` section for pending changes
 2. **Version consistency** - Workspace version in root `Cargo.toml` matches latest changelog entry
 3. **Inter-crate versions** - Internal dependency versions (e.g., `fetchkit-cli` depending on `fetchkit`) are consistent
+4. **Release format** - Released changelog sections follow `specs/release-process.md`
+
+### 8. Release Automation Alignment
+
+1. **Release spec sync** - `docs/release-process.md` and `.claude/commands/ship.md` still match `specs/release-process.md`
+2. **Workflow triggers** - `.github/workflows/release.yml` and `.github/workflows/publish.yml` still reflect the documented release handoff
+3. **Publish scope** - crates.io publishing still targets `fetchkit` and `fetchkit-cli` only
+4. **Manual retry path** - `workflow_dispatch` remains available for release/publish recovery
 
 ## Execution
 
-Run this checklist by working through sections 1-7 in order. Fix issues as encountered. Commit fixes in logical groups following conventional commits. After completion, all CI checks should pass.
+Run this checklist by working through sections 1-8 in order. Fix issues as encountered. Commit fixes in logical groups following conventional commits. After completion, all CI checks should pass.

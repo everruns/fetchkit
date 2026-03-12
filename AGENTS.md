@@ -37,6 +37,7 @@ Key capabilities:
 Available specs:
 - `specs/initial.md` - WebFetch tool specification (types, behavior, conversions, error handling)
 - `specs/fetchers.md` - Pluggable fetcher system for URL-specific handling
+- `specs/release-process.md` - Agent-driven release and publish workflow
 - `specs/maintenance.md` - Periodic maintenance checklist (deps, docs, spec-code alignment)
 - `specs/threat-model.md` - Security threat model (SSRF, network, input validation, DoS)
 
@@ -79,25 +80,28 @@ Requirements:
 
 Quick start:
 ```bash
-cargo build --workspace          # Build all crates
+cargo build --workspace --exclude fetchkit-python  # Build default Rust artifacts
 cargo test --workspace           # Run all tests
-cargo run -p webfetch-cli -- --help  # Run CLI
+cargo run -p fetchkit-cli -- --help  # Run CLI
 ```
+
+Note: `fetchkit-python` currently requires a separate Python link environment and is
+not part of the default release-build smoke path.
 
 
 ### Code organization
 
 ```
 crates/
-├── webfetch/           # Core library - types, fetch logic, HTML conversion
-├── webfetch-cli/       # CLI binary and MCP server
-└── webfetch-python/    # Python bindings (PyO3)
+├── fetchkit/           # Core library - types, fetch logic, HTML conversion
+├── fetchkit-cli/       # CLI binary and MCP server
+└── fetchkit-python/    # Python bindings (PyO3)
 specs/                  # Feature specifications
 ```
 
 ### Naming
 
-- Crate names: `webfetch`, `webfetch-cli`, `webfetch-python`
+- Crate names: `fetchkit`, `fetchkit-cli`, `fetchkit-python`
 - Types: PascalCase (`WebFetchRequest`, `WebFetchResponse`)
 - Functions: snake_case (`fetch`, `html_to_markdown`)
 - Constants: SCREAMING_SNAKE_CASE
@@ -106,22 +110,24 @@ specs/                  # Feature specifications
 ### CI expectations
 
 - CI is implemented using GitHub Actions.
-- Jobs: check, fmt, clippy, test, build, doc
+- Jobs: lint, test, build, doc, examples, check
+- `check` is the branch-protection gate and must stay green
 - All jobs must pass before merging
 - Clippy runs with `-D warnings` (warnings are errors)
 - Doc builds must not have warnings
 
 ### Releasing
 
-See `docs/release-process.md` for full release process documentation.
+See `specs/release-process.md` for the release contract and `docs/release-process.md`
+for the operator-facing summary.
 
 Quick summary:
 1. Human asks agent: "Create release v0.2.0"
 2. Agent updates CHANGELOG.md (with Highlights + What's Changed), Cargo.toml version, creates PR
 3. Human reviews and merges PR to main
-4. CI creates GitHub Release via `softprops/action-gh-release` (release.yml)
-5. release.yml triggers publish.yml
-6. CI publishes `fetchkit` then `fetchkit-cli` to crates.io (publish.yml)
+4. CI creates GitHub Release via `softprops/action-gh-release` (`release.yml`)
+5. GitHub Release publication triggers `publish.yml`
+6. CI publishes `fetchkit` then `fetchkit-cli` to crates.io
 
 Workflows:
 - `.github/workflows/release.yml` - Creates GitHub Release on merge or manual dispatch
@@ -130,7 +136,7 @@ Workflows:
 Requirements:
 - `CARGO_REGISTRY_TOKEN` secret must be configured in repo settings
 
-Note: `fetchkit-python` is not published to crates.io (`publish = false`). Uses PyPI distribution instead.
+Note: `fetchkit-python` is not published to crates.io (`publish = false`). Python release automation is not configured in this repo yet.
 
 ### Cloud Agent (start here)
 
@@ -190,15 +196,20 @@ Before creating a pull request, ensure:
    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
    ```
 
-6. **CI green**: All CI checks must pass before merging
+6. **Release build smoke**: Ensure the publishable Rust crates build in release mode
+   ```bash
+   cargo build --workspace --exclude fetchkit-python --release
+   ```
 
-7. **PR comments resolved**: No unaddressed review comments in PR
+7. **CI green**: All CI checks must pass before merging
 
-8. **Specs**: If changes affect system behavior, update specs in `specs/`
+8. **PR comments resolved**: No unaddressed review comments in PR
 
-9. **Docs**: If changes affect usage or configuration, update public docs in `docs/`
+9. **Specs**: If changes affect system behavior, update specs in `specs/`
 
-CI will fail if formatting, linting, tests, or doc build fail. Always run these locally before pushing.
+10. **Docs**: If changes affect usage or configuration, update public docs in `docs/`
+
+CI will fail if formatting, linting, tests, release build smoke, or doc build fail. Always run these locally before pushing.
 
 ### Commit message conventions
 
