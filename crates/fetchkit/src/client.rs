@@ -26,6 +26,8 @@ pub struct FetchOptions {
     /// Maximum response body size in bytes (default: 10 MB)
     /// Protects against TM-DOS-001 (unbounded body) and TM-DOS-003 (gzip bombs)
     pub max_body_size: Option<usize>,
+    /// Enable save_to_file parameter in requests
+    pub enable_save_to_file: bool,
 }
 
 /// Fetch a URL and return the response

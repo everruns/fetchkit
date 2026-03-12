@@ -3,6 +3,8 @@
 use crate::client::{fetch_with_options, FetchOptions};
 use crate::dns::DnsPolicy;
 use crate::error::FetchError;
+use crate::fetchers::FetcherRegistry;
+use crate::file_saver::FileSaver;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::{TOOL_DESCRIPTION, TOOL_LLMTXT};
 use schemars::schema_for;
@@ -87,6 +89,8 @@ pub struct ToolBuilder {
     dns_policy: DnsPolicy,
     /// Maximum response body size in bytes
     max_body_size: Option<usize>,
+    /// Enable save_to_file parameter (opt-in)
+    enable_save_to_file: bool,
 }
 
 impl ToolBuilder {
@@ -139,6 +143,13 @@ impl ToolBuilder {
         self
     }
 
+    /// Enable file download (save_to_file parameter).
+    /// Disabled by default — opt-in only.
+    pub fn enable_save_to_file(mut self, enable: bool) -> Self {
+        self.enable_save_to_file = enable;
+        self
+    }
+
     /// Control private/reserved IP range blocking (SSRF prevention)
     ///
     /// Enabled by default. When enabled, FetchKit resolves hostnames to IP
@@ -166,6 +177,7 @@ impl ToolBuilder {
             block_prefixes: self.block_prefixes,
             dns_policy: self.dns_policy,
             max_body_size: self.max_body_size,
+            enable_save_to_file: self.enable_save_to_file,
         }
     }
 }
@@ -196,6 +208,7 @@ pub struct Tool {
     block_prefixes: Vec<String>,
     dns_policy: DnsPolicy,
     max_body_size: Option<usize>,
+    enable_save_to_file: bool,
 }
 
 impl Default for Tool {
@@ -238,6 +251,9 @@ impl Tool {
             if !self.enable_text {
                 props.remove("as_text");
             }
+            if !self.enable_save_to_file {
+                props.remove("save_to_file");
+            }
         }
 
         value
@@ -251,17 +267,7 @@ impl Tool {
 
     /// Execute the tool with the given request
     pub async fn execute(&self, req: FetchRequest) -> Result<FetchResponse, FetchError> {
-        let options = FetchOptions {
-            user_agent: self.user_agent.clone(),
-            allow_prefixes: self.allow_prefixes.clone(),
-            block_prefixes: self.block_prefixes.clone(),
-            enable_markdown: self.enable_markdown,
-            enable_text: self.enable_text,
-            dns_policy: self.dns_policy.clone(),
-            max_body_size: self.max_body_size,
-        };
-
-        fetch_with_options(req, options).await
+        fetch_with_options(req, self.build_options()).await
     }
 
     /// Execute the tool with status updates
@@ -286,7 +292,18 @@ impl Tool {
 
         status_callback(ToolStatus::new("connect").with_percent(10.0));
 
-        let options = FetchOptions {
+        status_callback(ToolStatus::new("fetch").with_percent(20.0));
+
+        let result = fetch_with_options(req, self.build_options()).await;
+
+        status_callback(ToolStatus::new("complete").with_percent(100.0));
+
+        result
+    }
+
+    /// Build FetchOptions from this Tool's configuration
+    fn build_options(&self) -> FetchOptions {
+        FetchOptions {
             user_agent: self.user_agent.clone(),
             allow_prefixes: self.allow_prefixes.clone(),
             block_prefixes: self.block_prefixes.clone(),
@@ -294,15 +311,41 @@ impl Tool {
             enable_text: self.enable_text,
             dns_policy: self.dns_policy.clone(),
             max_body_size: self.max_body_size,
-        };
+            enable_save_to_file: self.enable_save_to_file,
+        }
+    }
 
-        status_callback(ToolStatus::new("fetch").with_percent(20.0));
+    /// Execute fetch with optional file saving.
+    ///
+    /// When `req.save_to_file` is set, validates the path via the saver,
+    /// fetches content (including binary), and saves through the saver.
+    /// Returns metadata without inline content.
+    ///
+    /// When `req.save_to_file` is `None`, behaves identically to [`execute`](Self::execute).
+    pub async fn execute_with_saver(
+        &self,
+        req: FetchRequest,
+        saver: Option<&dyn FileSaver>,
+    ) -> Result<FetchResponse, FetchError> {
+        if let Some(path) = &req.save_to_file {
+            if !self.enable_save_to_file {
+                return Err(FetchError::SaverNotAvailable);
+            }
 
-        let result = fetch_with_options(req, options).await;
+            let saver = saver.ok_or(FetchError::SaverNotAvailable)?;
 
-        status_callback(ToolStatus::new("complete").with_percent(100.0));
+            // Validate path before making HTTP request
+            saver
+                .validate_path(path)
+                .await
+                .map_err(|e| FetchError::SaveError(e.to_string()))?;
 
-        result
+            let options = self.build_options();
+            let registry = FetcherRegistry::with_defaults();
+            registry.fetch_to_file(req, options, saver).await
+        } else {
+            self.execute(req).await
+        }
     }
 }
 

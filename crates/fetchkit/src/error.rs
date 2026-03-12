@@ -49,6 +49,14 @@ pub enum FetchError {
     /// Fetcher-specific error
     #[error("Fetcher error: {0}")]
     FetcherError(String),
+
+    /// File save failed
+    #[error("Failed to save file: {0}")]
+    SaveError(String),
+
+    /// No FileSaver provided but save_to_file was requested
+    #[error("File saving not available")]
+    SaverNotAvailable,
 }
 
 impl FetchError {

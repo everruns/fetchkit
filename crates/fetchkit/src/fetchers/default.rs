@@ -8,6 +8,7 @@ use crate::client::FetchOptions;
 use crate::convert::{filter_excessive_newlines, html_to_markdown, html_to_text, is_html};
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
+use crate::file_saver::FileSaver;
 use crate::types::{FetchRequest, FetchResponse, HttpMethod};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -223,6 +224,108 @@ impl Fetcher for DefaultFetcher {
             format: Some(format),
             content: Some(final_content),
             truncated: if truncated { Some(true) } else { None },
+            ..Default::default()
+        })
+    }
+
+    /// Fetch and save to file — binary-aware override.
+    ///
+    /// Unlike `fetch()`, this does NOT reject binary content. Downloads raw bytes
+    /// and saves them through the provided [`FileSaver`].
+    async fn fetch_to_file(
+        &self,
+        request: &FetchRequest,
+        options: &FetchOptions,
+        saver: &dyn FileSaver,
+    ) -> Result<FetchResponse, FetchError> {
+        let save_path = match &request.save_to_file {
+            Some(path) => path.clone(),
+            None => return self.fetch(request, options).await,
+        };
+
+        if request.url.is_empty() {
+            return Err(FetchError::MissingUrl);
+        }
+
+        let method = request.effective_method();
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+
+        // Build headers — accept everything for file downloads
+        let mut headers = HeaderMap::new();
+        let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(user_agent)
+                .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
+        );
+        headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+
+        let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        let reqwest_method = match method {
+            HttpMethod::Get => reqwest::Method::GET,
+            HttpMethod::Head => reqwest::Method::HEAD,
+        };
+
+        // THREAT[TM-SSRF-010]: Follow redirects manually with IP validation at each hop
+        let response =
+            send_request_following_redirects(parsed_url, reqwest_method, headers, options).await?;
+
+        let status_code = response.status().as_u16();
+        let resp_headers = response.headers().clone();
+        let final_url = response.url().to_string();
+
+        let content_type = resp_headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let last_modified = resp_headers
+            .get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let content_length: Option<u64> = resp_headers
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok());
+
+        let filename = extract_filename(&resp_headers, &final_url);
+
+        // HEAD request — return metadata only
+        if method == HttpMethod::Head {
+            return Ok(FetchResponse {
+                url: final_url,
+                status_code,
+                content_type,
+                size: content_length,
+                last_modified,
+                filename,
+                method: Some("HEAD".to_string()),
+                ..Default::default()
+            });
+        }
+
+        // Read raw body (no binary rejection for file saves)
+        let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await;
+        let size = body.len() as u64;
+
+        // Save through the FileSaver
+        let result = saver
+            .save(&save_path, &body)
+            .await
+            .map_err(|e| FetchError::SaveError(e.to_string()))?;
+
+        Ok(FetchResponse {
+            url: final_url,
+            status_code,
+            content_type,
+            size: Some(size),
+            last_modified,
+            filename,
+            truncated: if truncated { Some(true) } else { None },
+            saved_path: Some(result.path),
+            bytes_written: Some(result.bytes_written),
+            // No inline content when saving to file
             ..Default::default()
         })
     }

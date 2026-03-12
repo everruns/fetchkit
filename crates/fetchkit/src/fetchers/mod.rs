@@ -11,6 +11,7 @@ pub use github_repo::GitHubRepoFetcher;
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::file_saver::FileSaver;
 use crate::types::{FetchRequest, FetchResponse};
 use async_trait::async_trait;
 use tracing::debug;
@@ -41,6 +42,33 @@ pub trait Fetcher: Send + Sync {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError>;
+
+    /// Fetch with file saving support.
+    ///
+    /// Default implementation delegates to `fetch()`, then saves content through the saver.
+    /// Specialized fetchers (e.g. [`DefaultFetcher`]) override this for binary-aware saving.
+    async fn fetch_to_file(
+        &self,
+        request: &FetchRequest,
+        options: &FetchOptions,
+        saver: &dyn FileSaver,
+    ) -> Result<FetchResponse, FetchError> {
+        let response = self.fetch(request, options).await?;
+        if let (Some(path), Some(content)) = (&request.save_to_file, &response.content) {
+            let result = saver
+                .save(path, content.as_bytes())
+                .await
+                .map_err(|e| FetchError::SaveError(e.to_string()))?;
+            Ok(FetchResponse {
+                saved_path: Some(result.path),
+                bytes_written: Some(result.bytes_written),
+                content: None,
+                ..response
+            })
+        } else {
+            Ok(response)
+        }
+    }
 }
 
 /// Registry of fetchers that dispatches to the appropriate handler
@@ -151,6 +179,50 @@ impl FetcherRegistry {
         }
 
         // No fetcher matched (shouldn't happen with DefaultFetcher)
+        Err(FetchError::FetcherError(
+            "No fetcher available for URL".to_string(),
+        ))
+    }
+
+    /// Fetch a URL and save to file using the appropriate fetcher
+    pub async fn fetch_to_file(
+        &self,
+        request: FetchRequest,
+        options: FetchOptions,
+        saver: &dyn FileSaver,
+    ) -> Result<FetchResponse, FetchError> {
+        // Same validation as fetch()
+        if !request.url.starts_with("http://") && !request.url.starts_with("https://") {
+            return Err(FetchError::InvalidUrlScheme);
+        }
+
+        let parsed_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+
+        if !options.allow_prefixes.is_empty() {
+            let allowed = options
+                .allow_prefixes
+                .iter()
+                .any(|prefix| request.url.starts_with(prefix));
+            if !allowed {
+                return Err(FetchError::BlockedUrl);
+            }
+        }
+
+        if options
+            .block_prefixes
+            .iter()
+            .any(|prefix| request.url.starts_with(prefix))
+        {
+            return Err(FetchError::BlockedUrl);
+        }
+
+        for fetcher in &self.fetchers {
+            if fetcher.matches(&parsed_url) {
+                tracing::debug!(fetcher = fetcher.name(), url = %request.url, "Using fetcher (save to file)");
+                return fetcher.fetch_to_file(&request, &options, saver).await;
+            }
+        }
+
         Err(FetchError::FetcherError(
             "No fetcher available for URL".to_string(),
         ))

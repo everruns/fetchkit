@@ -66,6 +66,7 @@ mod convert;
 mod dns;
 mod error;
 pub mod fetchers;
+pub mod file_saver;
 mod tool;
 mod types;
 
@@ -74,6 +75,7 @@ pub use convert::{html_to_markdown, html_to_text};
 pub use dns::DnsPolicy;
 pub use error::FetchError;
 pub use fetchers::{DefaultFetcher, Fetcher, FetcherRegistry, GitHubRepoFetcher};
+pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{Tool, ToolBuilder, ToolStatus};
 pub use types::{FetchRequest, FetchResponse, HttpMethod};
 
@@ -86,7 +88,8 @@ pub const TOOL_DESCRIPTION: &str = r#"Fetches content from a URL and optionally 
 - Supports GET and HEAD methods
 - Converts HTML to markdown or plain text
 - Returns metadata for binary content
-- Strict timeouts for reliability"#;
+- Strict timeouts for reliability
+- Optional file download (save_to_file)"#;
 
 /// Extended documentation for LLM consumption (llmtxt)
 pub const TOOL_LLMTXT: &str = r#"# FetchKit Tool
@@ -105,6 +108,7 @@ Fetches content from a URL and optionally converts HTML to markdown or text.
 - `method` (optional): GET or HEAD (default: GET)
 - `as_markdown` (optional): Convert HTML to markdown
 - `as_text` (optional): Convert HTML to plain text
+- `save_to_file` (optional): Save response body to this path instead of returning inline content. Accepts binary content (images, PDFs, archives). Requires file saving to be enabled.
 
 ## Output Fields
 - `url`: The fetched URL
@@ -118,6 +122,8 @@ Fetches content from a URL and optionally converts HTML to markdown or text.
 - `truncated`: True if content was truncated due to timeout
 - `method`: "HEAD" for HEAD requests
 - `error`: Error message for binary content
+- `saved_path`: Path where file was saved (when save_to_file was used)
+- `bytes_written`: Bytes written to file (when save_to_file was used)
 
 ## Examples
 
@@ -136,8 +142,14 @@ Fetches content from a URL and optionally converts HTML to markdown or text.
 {"url": "https://api.example.com/data.json"}
 ```
 
+### Download a file
+```json
+{"url": "https://example.com/image.png", "save_to_file": "image.png"}
+```
+
 ## Error Handling
 - Invalid URLs return an error
-- Binary content returns metadata with error message
+- Binary content returns metadata with error message (unless save_to_file is used)
 - Timeouts return partial content with truncated flag
+- File saving errors include path validation and IO failures
 "#;
