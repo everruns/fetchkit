@@ -15,7 +15,13 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 
 ## Installation
 
-### From Git (recommended)
+### From crates.io (recommended)
+
+```bash
+cargo install fetchkit-cli
+```
+
+### From Git
 
 ```bash
 cargo install --git https://github.com/everruns/fetchkit fetchkit-cli
@@ -88,7 +94,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-fetchkit = { git = "https://github.com/everruns/fetchkit" }
+fetchkit = "0.2"
 ```
 
 ### Basic Fetch
