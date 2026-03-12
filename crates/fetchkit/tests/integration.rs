@@ -1,7 +1,8 @@
 //! Integration tests for FetchKit using wiremock
 
 use fetchkit::{
-    fetch_with_options, DnsPolicy, FetchOptions, FetchRequest, FetcherRegistry, HttpMethod, Tool,
+    fetch_with_options, DnsPolicy, FetchError, FetchOptions, FetchRequest, FetcherRegistry,
+    HttpMethod, Tool,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -553,6 +554,21 @@ async fn test_fetcher_registry_allow_block_lists() {
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let result = registry.fetch(req, options).await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_fetcher_registry_allow_list_rejects_lookalike_host() {
+    let registry = FetcherRegistry::with_defaults();
+    let options = FetchOptions {
+        allow_prefixes: vec!["https://allowed.example.com".to_string()],
+        dns_policy: DnsPolicy::allow_all(),
+        ..Default::default()
+    };
+
+    let req = FetchRequest::new("https://allowed.example.com.evil.test/");
+    let result = registry.fetch(req, options).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
 }
 
 #[tokio::test]

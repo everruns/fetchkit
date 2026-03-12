@@ -135,6 +135,9 @@ Provide a builder to configure tool options, including:
 - Allow/block list prefixes (if configured) are applied before fetch.
   - If allow list is non-empty, URL must match at least one allow prefix.
   - If block list matches, request is denied even if allow list matches.
+  - Matching is URL-aware: scheme and host are normalized, trailing dots are ignored,
+    path matches respect segment boundaries, and an explicit prefix port must match.
+    If the prefix omits a port, any port on the same scheme+host matches.
 
 ### SSRF Prevention (DNS Policy)
 
@@ -156,6 +159,10 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
   - Text: `text/html, text/plain, */*;q=0.8`
   - Raw: `*/*`
 - HEAD requests use HTTP HEAD method, return metadata only.
+- Redirects:
+  - Follow at most 10 hops.
+  - Each hop is resolved and validated independently against the DNS policy.
+  - Redirects to non-HTTP(S) schemes are rejected.
 
 ### Timeouts
 
