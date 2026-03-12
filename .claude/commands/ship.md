@@ -39,8 +39,8 @@ Execute all phases sequentially. Phases 2–6 are the quality core — do NOT sk
 ## Phase 6 · Smoke Testing
 
 - Build: `cargo build --workspace`
-- Spot-check CLI: `cargo run -p webfetch-cli -- --help`
-- If MCP changes: `cargo run -p webfetch-cli -- mcp` (verify startup)
+- Spot-check CLI: `cargo run -p fetchkit-cli -- --help`
+- If MCP changes: `cargo run -p fetchkit-cli -- mcp` (verify startup)
 
 ## Phase 7 · Quality Gates
 
