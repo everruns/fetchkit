@@ -77,7 +77,7 @@ Verify CI pipeline and development tooling are current.
 
 ### 8. Release Automation Alignment
 
-1. **Release spec sync** - `docs/release-process.md` and `.claude/commands/ship.md` still match `specs/release-process.md`
+1. **Release spec sync** - `.claude/commands/ship.md` still matches `specs/release-process.md`
 2. **Workflow triggers** - `.github/workflows/release.yml` and `.github/workflows/publish.yml` still reflect the documented release handoff
 3. **Publish scope** - crates.io publishing still targets `fetchkit` and `fetchkit-cli` only
 4. **Manual retry path** - `workflow_dispatch` remains available for release/publish recovery
