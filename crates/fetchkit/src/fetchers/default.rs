@@ -15,7 +15,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_DISPOSITION, LOCATION, USER_AGENT};
 use std::time::Duration;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use url::Url;
 
 /// Binary content type prefixes
@@ -41,11 +41,15 @@ const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(1);
 /// Body timeout (total)
 const BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Maximum redirects to follow manually
+/// Truncation message appended when body is cut short (timeout or size limit)
+const TRUNCATION_MESSAGE: &str = "\n\n[..content truncated...]";
+
+// THREAT[TM-SSRF-010]: Maximum redirects to follow with IP validation at each hop
 const MAX_REDIRECTS: usize = 10;
 
-/// Timeout message appended to truncated content
-const TIMEOUT_MESSAGE: &str = "\n\n[..more content timed out...]";
+// THREAT[TM-DOS-001]: Default max body size (10 MB) to prevent memory exhaustion
+// THREAT[TM-DOS-003]: Also protects against compressed content bombs (gzip bombs)
+const DEFAULT_MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 /// Default HTTP fetcher
 ///
@@ -93,6 +97,7 @@ impl Fetcher for DefaultFetcher {
         let method = request.effective_method();
         let wants_markdown = options.enable_markdown && request.wants_markdown();
         let wants_text = options.enable_text && request.wants_text();
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
         // Build headers
         let mut headers = HeaderMap::new();
@@ -125,6 +130,7 @@ impl Fetcher for DefaultFetcher {
 
         let status_code = response.status().as_u16();
         let resp_headers = response.headers().clone();
+        let final_url = response.url().to_string();
 
         // Extract metadata
         let content_type = resp_headers
@@ -142,12 +148,12 @@ impl Fetcher for DefaultFetcher {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse().ok());
 
-        let filename = extract_filename(&resp_headers, &request.url);
+        let filename = extract_filename(&resp_headers, &final_url);
 
         // Handle HEAD request
         if method == HttpMethod::Head {
             return Ok(FetchResponse {
-                url: request.url.clone(),
+                url: final_url,
                 status_code,
                 content_type,
                 size: content_length,
@@ -162,7 +168,7 @@ impl Fetcher for DefaultFetcher {
         if let Some(ref ct) = content_type {
             if is_binary_content_type(ct) {
                 return Ok(FetchResponse {
-                    url: request.url.clone(),
+                    url: final_url,
                     status_code,
                     content_type,
                     size: content_length,
@@ -177,14 +183,16 @@ impl Fetcher for DefaultFetcher {
             }
         }
 
-        // Read body with timeout
-        let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT).await;
+        // THREAT[TM-DOS-001]: Read body with timeout and size limit
+        // THREAT[TM-DOS-003]: Size limit also protects against compressed content bombs
+        let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await;
         let size = body.len() as u64;
 
         // Convert to string
         let content = String::from_utf8_lossy(&body).to_string();
 
         // Determine format and convert if needed
+        // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
         let (format, final_content) = if is_html(&content_type, &content) {
             if wants_markdown {
                 ("markdown".to_string(), html_to_markdown(&content))
@@ -200,13 +208,13 @@ impl Fetcher for DefaultFetcher {
         // Apply newline filtering
         let mut final_content = filter_excessive_newlines(&final_content);
 
-        // Add timeout message if truncated
+        // Add truncation messages
         if truncated {
-            final_content.push_str(TIMEOUT_MESSAGE);
+            final_content.push_str(TRUNCATION_MESSAGE);
         }
 
         Ok(FetchResponse {
-            url: request.url.clone(),
+            url: final_url,
             status_code,
             content_type,
             size: Some(size),
@@ -243,6 +251,13 @@ async fn send_request_following_redirects(
         if redirect_count == MAX_REDIRECTS {
             return Err(FetchError::RequestError("too many redirects".to_string()));
         }
+
+        debug!(
+            from = %current_url,
+            to = %next_url,
+            hop = redirect_count + 1,
+            "Following redirect with IP validation"
+        );
 
         current_url = next_url;
     }
@@ -300,6 +315,7 @@ fn redirect_target(
         FetchError::RequestError("redirect Location is not a valid URL".to_string())
     })?;
 
+    // THREAT[TM-INPUT-001]: Validate scheme at each redirect hop
     if next_url.scheme() != "http" && next_url.scheme() != "https" {
         return Err(FetchError::InvalidUrlScheme);
     }
@@ -366,8 +382,17 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
     None
 }
 
-/// Read response body with timeout, returning partial content if timeout occurs
-async fn read_body_with_timeout(response: reqwest::Response, timeout: Duration) -> (Bytes, bool) {
+/// Read response body with timeout and size limit, returning partial content if either is hit.
+///
+/// Returns `(body_bytes, truncated)`. `truncated` is true if the body was cut short
+/// due to timeout or exceeding `max_size`.
+// THREAT[TM-DOS-001]: Configurable max body size prevents unbounded memory usage
+// THREAT[TM-DOS-003]: Decompressed size is checked, catching gzip/brotli bombs
+async fn read_body_with_timeout(
+    response: reqwest::Response,
+    timeout: Duration,
+    max_size: usize,
+) -> (Bytes, bool) {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     let deadline = tokio::time::Instant::now() + timeout;
@@ -380,6 +405,16 @@ async fn read_body_with_timeout(response: reqwest::Response, timeout: Duration) 
             chunk = chunk_future => {
                 match chunk {
                     Some(Ok(bytes)) => {
+                        let remaining = max_size.saturating_sub(body.len());
+                        if remaining == 0 {
+                            warn!("Body size limit reached ({}), truncating", max_size);
+                            return (Bytes::from(body), true);
+                        }
+                        if bytes.len() > remaining {
+                            body.extend_from_slice(&bytes[..remaining]);
+                            warn!("Body size limit reached ({}), truncating", max_size);
+                            return (Bytes::from(body), true);
+                        }
                         body.extend_from_slice(&bytes);
                     }
                     Some(Err(e)) => {

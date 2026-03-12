@@ -13,6 +13,7 @@ use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::types::{FetchRequest, FetchResponse};
 use async_trait::async_trait;
+use tracing::debug;
 use url::Url;
 
 /// Trait for specialized content fetchers
@@ -117,13 +118,17 @@ impl FetcherRegistry {
         // Parse URL for matching
         let parsed_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        // Check allow/block lists before fetcher matching
+        // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
+        // encoding-based bypasses (case, trailing dots, default ports)
+        // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks
+        // (e.g., blocking "http://internal.example.com" won't match "http://internal.example.com.evil.com")
         if !options.allow_prefixes.is_empty() {
             let allowed = options
                 .allow_prefixes
                 .iter()
                 .any(|prefix| url_matches_policy_prefix(&parsed_url, prefix));
             if !allowed {
+                debug!(url = %request.url, "URL not in allow list");
                 return Err(FetchError::BlockedUrl);
             }
         }
@@ -133,6 +138,7 @@ impl FetcherRegistry {
             .iter()
             .any(|prefix| url_matches_policy_prefix(&parsed_url, prefix))
         {
+            debug!(url = %request.url, "URL matched block list");
             return Err(FetchError::BlockedUrl);
         }
 
@@ -151,6 +157,10 @@ impl FetcherRegistry {
     }
 }
 
+// THREAT[TM-INPUT-002]: URL-aware prefix matching normalizes both the URL and the prefix
+// before comparison, preventing bypasses via encoding, case, or trailing dots.
+// THREAT[TM-INPUT-007]: Compares parsed URL components (scheme, host, path) instead of
+// raw strings, so "http://internal.example.com" won't match "http://internal.example.com.evil.com".
 fn url_matches_policy_prefix(url: &Url, prefix: &str) -> bool {
     let Ok(prefix_url) = Url::parse(prefix) else {
         tracing::warn!(
@@ -164,10 +174,14 @@ fn url_matches_policy_prefix(url: &Url, prefix: &str) -> bool {
         return false;
     }
 
+    // Host comparison with trailing-dot normalization
     if normalized_host(url) != normalized_host(&prefix_url) {
         return false;
     }
 
+    // Port matching: if the prefix specifies an explicit port, URLs must match that port.
+    // If the prefix has no explicit port (uses default), match any port on that host.
+    // This lets "http://127.0.0.1" block all ports on 127.0.0.1.
     if prefix_url.port().is_some()
         && url.port_or_known_default() != prefix_url.port_or_known_default()
     {
@@ -220,6 +234,7 @@ mod tests {
         assert!(registry.fetchers.is_empty());
     }
 
+    // THREAT[TM-INPUT-007]: URL-aware prefix matching tests
     #[test]
     fn test_policy_prefix_matches_same_origin_and_path_boundary() {
         let url = Url::parse("https://docs.example.com/api/v1").unwrap();
@@ -247,5 +262,29 @@ mod tests {
             &url,
             "HTTPS://DOCS.EXAMPLE.COM.:443"
         ));
+    }
+
+    #[test]
+    fn test_url_prefix_scheme_mismatch() {
+        let url = Url::parse("http://example.com/page").unwrap();
+        assert!(!url_matches_policy_prefix(&url, "https://example.com"));
+    }
+
+    #[test]
+    fn test_url_prefix_port_handling() {
+        let url = Url::parse("http://example.com:8080/page").unwrap();
+        assert!(url_matches_policy_prefix(&url, "http://example.com:8080"));
+        // Prefix without explicit port matches any port on that host
+        assert!(url_matches_policy_prefix(&url, "http://example.com"));
+        // Prefix with explicit port must match exactly
+        assert!(!url_matches_policy_prefix(&url, "http://example.com:9090"));
+    }
+
+    // THREAT[TM-INPUT-002]: Normalization tests
+    #[test]
+    fn test_url_prefix_case_normalization() {
+        // url crate normalizes host to lowercase
+        let url = Url::parse("http://EXAMPLE.COM/page").unwrap();
+        assert!(url_matches_policy_prefix(&url, "http://example.com"));
     }
 }

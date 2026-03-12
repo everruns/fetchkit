@@ -23,6 +23,9 @@ pub struct FetchOptions {
     pub enable_text: bool,
     /// DNS resolution policy for SSRF prevention
     pub dns_policy: DnsPolicy,
+    /// Maximum response body size in bytes (default: 10 MB)
+    /// Protects against TM-DOS-001 (unbounded body) and TM-DOS-003 (gzip bombs)
+    pub max_body_size: Option<usize>,
 }
 
 /// Fetch a URL and return the response
