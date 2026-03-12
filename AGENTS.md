@@ -57,6 +57,7 @@ When asked to "fix and ship": implement fix first, then run `/ship`.
 
 Available skills:
 - `/ship` — 10-phase shipping workflow (`.claude/commands/ship.md`)
+- `/processing-issues` — Batch-process GitHub issues: triage, implement, ship via individual PRs (`.claude/commands/processing-issues.md`)
 
 ### Agent-portable paths
 
