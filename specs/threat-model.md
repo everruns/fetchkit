@@ -193,6 +193,8 @@ This is the caller's responsibility to configure or clear.
 | TM-INPUT-005 | URL with fragment/query manipulation | Low | Fragments and queries are part of the URL; no special handling needed | **BY DESIGN** |
 | TM-INPUT-006 | Prefix bypass via URL authority (http://evil.com@127.0.0.1) | Medium | `url` crate parses authority correctly; resolve-then-check validates the actual host | MITIGATED |
 | TM-INPUT-007 | Block prefix matching is string-based, not URL-aware | Medium | URL-aware prefix matching compares parsed components (scheme, host, path) | MITIGATED |
+| TM-INPUT-008 | Symlink-based path traversal in LocalFileSaver | Medium | Lexical path normalization; symlinks within base_dir can escape | **ACCEPTED** |
+| TM-INPUT-009 | LocalFileSaver without base_dir allows arbitrary writes | Medium | Documented limitation; callers should always set base_dir in untrusted contexts | **ACCEPTED** |
 
 ### Mitigation Details
 
@@ -216,11 +218,27 @@ URLs like `http://evil.com@127.0.0.1/path` have `127.0.0.1` as the host (with
 `evil.com` as the username). The `url` crate correctly parses this, and
 resolve-then-check validates the actual host's IP.
 
+<<<<<<< HEAD
 **TM-INPUT-007 — String-based prefix matching (MITIGATED):**
 Prefix matching now parses both the URL and the prefix with the `url` crate,
 then compares scheme, host (exact match), port, and path (segment-boundary
 matching). `http://internal.example.com` correctly does NOT match
 `http://internal.example.com.evil.com` since hosts differ after parsing.
+
+**TM-INPUT-008 — Symlink-based path traversal (ACCEPTED):**
+`LocalFileSaver` uses lexical normalization (not `canonicalize()`) to prevent `..`
+traversal. If a symlink exists within `base_dir` pointing outside it, the lexical
+check is bypassed. Accepted because:
+- The base_dir is operator-controlled, not user-controlled
+- In containerized deployments, the save directory is freshly created per session
+- Adding `canonicalize()` introduces TOCTOU races and requires the path to exist
+
+**TM-INPUT-009 — No base_dir allows arbitrary writes (ACCEPTED):**
+`LocalFileSaver::new(None)` only requires absolute paths, with no directory restriction.
+Accepted because:
+- This mode is for CLI/trusted contexts only
+- The `FileSaver` trait allows custom implementations with stricter controls
+- `enable_save_to_file` is disabled by default
 
 ## 4. Denial of Service (TM-DOS)
 
@@ -345,6 +363,8 @@ None — all previously open threats have been mitigated.
 | Script tag stripping | TM-CONV | Skip `script`/`style`/`noscript`/`iframe`/`svg` |
 | Binary detection | TM-CONV | Content-Type prefix matching |
 | New client per request | TM-NET | No connection pool state leakage |
+| Path traversal prevention | TM-INPUT | Lexical path normalization in `LocalFileSaver` |
+| Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |
 
 ## References
 

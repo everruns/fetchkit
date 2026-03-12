@@ -2,7 +2,7 @@
 
 use fetchkit::{
     fetch_with_options, DnsPolicy, FetchError, FetchOptions, FetchRequest, FetcherRegistry,
-    HttpMethod, Tool,
+    HttpMethod, LocalFileSaver, Tool,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -20,6 +20,14 @@ fn test_options() -> FetchOptions {
 /// Helper: create a Tool that permits loopback (for wiremock tests)
 fn test_tool() -> Tool {
     Tool::builder().block_private_ips(false).build()
+}
+
+/// Helper: create a Tool with save_to_file enabled (for wiremock tests)
+fn test_tool_with_save() -> Tool {
+    Tool::builder()
+        .block_private_ips(false)
+        .enable_save_to_file(true)
+        .build()
 }
 
 #[tokio::test]
@@ -679,4 +687,196 @@ async fn test_tool_default_blocks_loopback() {
     let req = FetchRequest::new(format!("{}/", mock_server.uri()));
     let result = tool.execute(req).await;
     assert!(matches!(result, Err(fetchkit::FetchError::BlockedUrl)));
+}
+
+// ============================================================================
+// File Save Integration Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_save_to_file_text_content() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/data.json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(r#"{"key": "value"}"#)
+                .insert_header("content-type", "application/json"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let tool = test_tool_with_save();
+
+    let req =
+        FetchRequest::new(format!("{}/data.json", mock_server.uri())).save_to_file("output.json");
+    let resp = tool.execute_with_saver(req, Some(&saver)).await.unwrap();
+
+    assert_eq!(resp.status_code, 200);
+    assert!(resp.saved_path.is_some());
+    assert_eq!(resp.bytes_written, Some(16));
+    // No inline content when saving to file
+    assert!(resp.content.is_none());
+
+    // Verify file on disk
+    let content = std::fs::read_to_string(dir.path().join("output.json")).unwrap();
+    assert_eq!(content, r#"{"key": "value"}"#);
+}
+
+#[tokio::test]
+async fn test_save_to_file_binary_content() {
+    let mock_server = MockServer::start().await;
+
+    let binary_data: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    Mock::given(method("GET"))
+        .and(path("/image.png"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(binary_data.clone())
+                .insert_header("content-type", "image/png"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let tool = test_tool_with_save();
+
+    let req =
+        FetchRequest::new(format!("{}/image.png", mock_server.uri())).save_to_file("image.png");
+    let resp = tool.execute_with_saver(req, Some(&saver)).await.unwrap();
+
+    assert_eq!(resp.status_code, 200);
+    assert!(resp.saved_path.is_some());
+    assert_eq!(resp.bytes_written, Some(8));
+    // Binary saved without error (unlike normal fetch which rejects binary)
+    assert!(resp.error.is_none());
+
+    // Verify binary content on disk
+    let saved = std::fs::read(dir.path().join("image.png")).unwrap();
+    assert_eq!(saved, binary_data);
+}
+
+#[tokio::test]
+async fn test_save_to_file_creates_subdirectories() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/file"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("content")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let tool = test_tool_with_save();
+
+    let req =
+        FetchRequest::new(format!("{}/file", mock_server.uri())).save_to_file("sub/dir/file.txt");
+    let resp = tool.execute_with_saver(req, Some(&saver)).await.unwrap();
+
+    assert!(resp.saved_path.is_some());
+    assert!(dir.path().join("sub/dir/file.txt").exists());
+}
+
+#[tokio::test]
+async fn test_save_to_file_rejects_path_traversal() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+        .mount(&mock_server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let tool = test_tool_with_save();
+
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).save_to_file("../../etc/passwd");
+    let result = tool.execute_with_saver(req, Some(&saver)).await;
+
+    // Path traversal should be rejected before HTTP request
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("save file"));
+}
+
+#[tokio::test]
+async fn test_save_to_file_without_saver_errors() {
+    let tool = test_tool_with_save();
+
+    let req = FetchRequest::new("https://example.com/file").save_to_file("file.txt");
+    let result = tool.execute_with_saver(req, None).await;
+
+    assert!(matches!(
+        result,
+        Err(fetchkit::FetchError::SaverNotAvailable)
+    ));
+}
+
+#[tokio::test]
+async fn test_save_to_file_disabled_by_default() {
+    // Default tool does NOT have save_to_file enabled
+    let tool = Tool::builder().block_private_ips(false).build();
+
+    let req = FetchRequest::new("https://example.com/file").save_to_file("file.txt");
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let result = tool.execute_with_saver(req, Some(&saver)).await;
+
+    assert!(matches!(
+        result,
+        Err(fetchkit::FetchError::SaverNotAvailable)
+    ));
+}
+
+#[tokio::test]
+async fn test_save_to_file_schema_gating() {
+    // Default: save_to_file not in schema
+    let tool = Tool::default();
+    let schema = tool.input_schema();
+    if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+        assert!(!props.contains_key("save_to_file"));
+    }
+
+    // Enabled: save_to_file in schema
+    let tool = Tool::builder().enable_save_to_file(true).build();
+    let schema = tool.input_schema();
+    if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+        assert!(props.contains_key("save_to_file"));
+    }
+}
+
+#[tokio::test]
+async fn test_execute_with_saver_no_save_falls_through() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("Hello")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = test_tool_with_save();
+
+    // No save_to_file — should behave like normal execute
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let resp = tool.execute_with_saver(req, None).await.unwrap();
+
+    assert_eq!(resp.status_code, 200);
+    assert!(resp.content.unwrap().contains("Hello"));
+    assert!(resp.saved_path.is_none());
+    assert!(resp.bytes_written.is_none());
 }

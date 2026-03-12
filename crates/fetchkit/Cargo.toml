@@ -25,5 +25,6 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
+tempfile = { workspace = true }
 tokio-test = "0.4"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -49,6 +49,9 @@ Provide a builder to configure tool options, including:
 - Support enabling/disabling request options (feature gating).
 - Support User-Agent override (e.g., `user_agent`).
 - Support `block_private_ips(bool)` for SSRF prevention (default: `true`).
+- Support `enable_save_to_file(bool)` for file download (default: `false`).
+  When enabled, adds `save_to_file` to input schema and `saved_path`/`bytes_written` to output.
+  Requires a `FileSaver` implementation at execution time.
 
 #### Types
 
@@ -57,6 +60,7 @@ Provide a builder to configure tool options, including:
   - `method: HttpMethod` (optional, default GET)
   - `as_markdown: bool` (optional, feature-gated)
   - `as_text: bool` (optional, feature-gated)
+  - `save_to_file: Option<String>` (optional, feature-gated via `enable_save_to_file`)
 - `HttpMethod` enum: `Get`, `Head`
   - Case-insensitive parser accepts only GET/HEAD.
 - `FetchResponse`
@@ -71,6 +75,8 @@ Provide a builder to configure tool options, including:
   - `truncated: Option<bool>` (omitted for HEAD/binary)
   - `method: Option<String>` (set to "HEAD" for HEAD)
   - `error: Option<String>` (binary content only)
+  - `saved_path: Option<String>` (set when save_to_file succeeds)
+  - `bytes_written: Option<u64>` (set when save_to_file succeeds)
 - `FetchError` enum
   - Missing url
   - Invalid url scheme
@@ -78,6 +84,8 @@ Provide a builder to configure tool options, including:
   - Blocked URL (prefix list or DNS policy)
   - Client build failure
   - Request error (timeout/connect/other)
+  - Save error (file save failure)
+  - Saver not available (save_to_file requested but feature disabled or no saver)
 - `ToolStatus` (or equivalent)
   - `phase: String` (generic label, e.g., "validate", "connect", "fetch", "convert")
   - `message: Option<String>`
@@ -197,6 +205,19 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 - Include `method: "HEAD"`.
 - Omit `content`, `format`, `truncated`.
 
+#### Save to File
+
+When `save_to_file` is set on the request:
+- Binary content is NOT rejected (accepted for file saves).
+- Raw bytes are saved via the `FileSaver` trait implementation.
+- Response includes `saved_path` and `bytes_written` instead of `content`.
+- `content` is omitted (no inline content when saving).
+- The `FileSaver` trait provides path validation (traversal prevention) and async save.
+- `LocalFileSaver` is the built-in implementation for CLI/local use:
+  - Resolves paths relative to a configurable base directory.
+  - Rejects path traversal via lexical normalization (note: symlinks not resolved).
+  - Creates parent directories as needed.
+
 #### Size
 
 - For binary: `size` from `Content-Length` if present.
@@ -264,6 +285,8 @@ Content is HTML if:
 - Client build failure -> "Failed to create HTTP client".
 - Read errors during streaming: log error, return partial content if any.
 - Non-timeout read errors: if partial content is returned, set `truncated: true`.
+- Save error -> "Failed to save file: <details>".
+- Saver not available -> "File saving not available" (feature disabled or no saver provided).
 
 ### Logging
 

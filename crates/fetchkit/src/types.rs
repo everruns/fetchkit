@@ -72,6 +72,11 @@ pub struct FetchRequest {
     /// Convert HTML to plain text (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub as_text: Option<bool>,
+
+    /// Save response body to this path instead of returning content inline.
+    /// Requires a `FileSaver` to be provided at execution time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save_to_file: Option<String>,
 }
 
 impl FetchRequest {
@@ -98,6 +103,12 @@ impl FetchRequest {
     /// Enable text conversion
     pub fn as_text(mut self) -> Self {
         self.as_text = Some(true);
+        self
+    }
+
+    /// Set save-to-file path
+    pub fn save_to_file(mut self, path: impl Into<String>) -> Self {
+        self.save_to_file = Some(path.into());
         self
     }
 
@@ -182,6 +193,14 @@ pub struct FetchResponse {
     /// Error message (for binary content)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+
+    /// Path where file was saved (when save_to_file was used)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_path: Option<String>,
+
+    /// Bytes written to file
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_written: Option<u64>,
 }
 
 #[cfg(test)]

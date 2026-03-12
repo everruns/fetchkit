@@ -65,7 +65,7 @@ async fn main() {
 
     // Handle --llmtxt flag
     if cli.llmtxt {
-        writeln_safe(TOOL_LLMTXT);
+        writeln_safe(&TOOL_LLMTXT);
         std::process::exit(0);
     }
 
