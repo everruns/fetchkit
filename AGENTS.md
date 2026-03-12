@@ -118,17 +118,33 @@ Requirements:
 
 Note: `fetchkit-python` is not published to crates.io (`publish = false`). Uses PyPI distribution instead.
 
-### Cloud Agent environments
+### Cloud Agent (start here)
 
-When running in cloud-hosted agent environments (e.g., Claude Code on the web), the following secrets are available:
+Use Doppler for all secret-backed commands in cloud agents.
 
-- `GITHUB_TOKEN`: Available for GitHub API operations (PRs, issues, repository access)
-
-These secrets are pre-configured in the environment and do not require manual setup.
-
-If `gh` CLI is not available, use GitHub API directly with `GITHUB_TOKEN`:
 ```bash
-curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/owner/repo/...
+./scripts/init-cloud-env.sh
+```
+
+Disable incremental compilation in cloud (saves ~3 GB, useless for single builds):
+
+```bash
+export CARGO_INCREMENTAL=0
+```
+
+All cloud secrets are in Doppler (`GITHUB_TOKEN`). Project: `everruns-dev`, config: `dev`.
+
+For GitHub CLI, map token explicitly:
+
+```bash
+doppler run -- bash -lc 'GH_TOKEN="$GITHUB_TOKEN" gh auth status'
+```
+
+Quickcheck:
+
+```bash
+doppler run -- env | rg 'GITHUB_TOKEN'
+doppler run -- bash -lc 'GH_TOKEN="$GITHUB_TOKEN" gh auth status'
 ```
 
 ### Pre-PR checklist

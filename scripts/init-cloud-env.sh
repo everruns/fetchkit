@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# Fast initialization for cloud agent environments (Claude Code on web, CI, etc.)
+# Installs pre-built binaries instead of compiling from source.
+#
+# Usage: ./scripts/init-cloud-env.sh
+#
+# This script installs:
+# - gh: GitHub CLI (for PR/issue operations)
+# - doppler: secrets manager CLI
+#
+# Run this BEFORE any other commands in a fresh cloud environment.
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+# Disable incremental compilation — saves ~3 GB, not useful for single builds
+export CARGO_INCREMENTAL=0
+
+# Ensure ~/.cargo/bin exists and is in PATH
+INSTALL_DIR="${HOME}/.cargo/bin"
+mkdir -p "$INSTALL_DIR"
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    export PATH="$INSTALL_DIR:$PATH"
+fi
+
+install_gh() {
+    if command -v gh &> /dev/null; then
+        info "gh already installed: $(gh --version | head -1)"
+        return 0
+    fi
+
+    info "Installing gh (GitHub CLI, pre-built binary)..."
+
+    # Detect architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  GH_ARCH="amd64" ;;
+        aarch64) GH_ARCH="arm64" ;;
+        armv7l)  GH_ARCH="armv6" ;;
+        *)       error "Unsupported architecture: $ARCH" ;;
+    esac
+
+    # Pinned version — skip GitHub API call to avoid rate limits and hangs
+    GH_VERSION="2.63.2"
+
+    GH_TARBALL="gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"
+    GH_URL="https://github.com/cli/cli/releases/download/v${GH_VERSION}/${GH_TARBALL}"
+
+    # Download and extract
+    TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+
+    info "Downloading gh v${GH_VERSION}..."
+    curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 "$GH_URL" -o "$TEMP_DIR/$GH_TARBALL"
+
+    tar -xzf "$TEMP_DIR/$GH_TARBALL" -C "$TEMP_DIR"
+
+    # Install binary
+    cp "$TEMP_DIR/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh" "$INSTALL_DIR/gh"
+    chmod +x "$INSTALL_DIR/gh"
+
+    if command -v gh &> /dev/null; then
+        info "gh installed: $(gh --version | head -1)"
+    else
+        error "Failed to install gh"
+    fi
+}
+
+install_doppler() {
+    if command -v doppler &> /dev/null; then
+        info "doppler already installed: $(doppler --version 2>/dev/null)"
+        return 0
+    fi
+
+    info "Installing Doppler CLI (pre-built binary)..."
+
+    # Detect architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  DOP_ARCH="amd64" ;;
+        aarch64) DOP_ARCH="arm64" ;;
+        *)       error "Unsupported architecture: $ARCH" ;;
+    esac
+
+    # Pinned version — skip GitHub API call to avoid rate limits and hangs
+    DOP_VERSION="3.75.2"
+
+    DOP_TARBALL="doppler_${DOP_VERSION}_linux_${DOP_ARCH}.tar.gz"
+    DOP_URL="https://github.com/DopplerHQ/cli/releases/download/${DOP_VERSION}/${DOP_TARBALL}"
+
+    # Download and extract
+    TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+
+    info "Downloading doppler v${DOP_VERSION}..."
+    curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 "$DOP_URL" -o "$TEMP_DIR/$DOP_TARBALL"
+
+    tar -xzf "$TEMP_DIR/$DOP_TARBALL" -C "$TEMP_DIR"
+
+    # Install binary
+    cp "$TEMP_DIR/doppler" "$INSTALL_DIR/doppler"
+    chmod +x "$INSTALL_DIR/doppler"
+
+    if command -v doppler &> /dev/null; then
+        info "doppler installed: $(doppler --version 2>/dev/null)"
+    else
+        error "Failed to install doppler"
+    fi
+}
+
+configure_gh_repo() {
+    # Set default repo for gh CLI (needed when git remote uses local proxy)
+    local remote_url repo
+
+    remote_url=$(git remote get-url origin 2>/dev/null || echo "")
+    if [[ -z "$remote_url" ]]; then
+        warn "No git remote found, skipping gh repo configuration"
+        return 0
+    fi
+
+    # Extract owner/repo from URL patterns:
+    # - https://github.com/owner/repo.git
+    # - git@github.com:owner/repo.git
+    # - http://proxy@127.0.0.1:PORT/git/owner/repo
+    if [[ "$remote_url" =~ github\.com[:/]([^/]+/[^/.]+) ]]; then
+        repo="${BASH_REMATCH[1]}"
+    elif [[ "$remote_url" =~ /git/([^/]+/[^/.]+) ]]; then
+        repo="${BASH_REMATCH[1]}"
+    else
+        warn "Could not extract repo from remote URL: $remote_url"
+        return 0
+    fi
+
+    # Remove .git suffix if present
+    repo="${repo%.git}"
+
+    # Check current default
+    local current_default
+    current_default=$(gh repo set-default --view 2>/dev/null || echo "")
+
+    if [[ "$current_default" == *"$repo"* ]]; then
+        info "gh default repo already set: $repo"
+        return 0
+    fi
+
+    # gh repo set-default requires a remote pointing to GitHub
+    # Add a 'github' remote if origin uses a proxy
+    if [[ ! "$remote_url" =~ github\.com ]]; then
+        local github_url="https://github.com/${repo}.git"
+        if ! git remote get-url github &>/dev/null; then
+            info "Adding 'github' remote: $github_url"
+            git remote add github "$github_url"
+        fi
+        if ! git rev-parse --verify github/main &>/dev/null; then
+            info "Fetching main branch from github remote..."
+            git fetch github main 2>/dev/null || warn "Failed to fetch github/main"
+        fi
+        gh repo set-default github 2>/dev/null && info "gh default repo set: $repo" || warn "Failed to set default repo"
+    else
+        gh repo set-default "$repo" 2>/dev/null && info "gh default repo set: $repo" || warn "Failed to set default repo"
+    fi
+}
+
+configure_doppler() {
+    if [[ -z "${DOPPLER_TOKEN:-}" ]]; then
+        warn "DOPPLER_TOKEN not set, skipping Doppler configuration"
+        return 0
+    fi
+
+    if ! command -v doppler &> /dev/null; then
+        warn "doppler not installed, skipping configuration"
+        return 0
+    fi
+
+    info "Configuring Doppler (project: everruns-dev, config: dev)..."
+    doppler setup --project everruns-dev --config dev --no-interactive 2>/dev/null \
+        && info "Doppler configured for everruns-dev/dev" \
+        || warn "Failed to configure Doppler"
+}
+
+configure_gh_auth() {
+    if ! command -v gh &> /dev/null; then
+        warn "gh not installed, skipping GitHub auth check"
+        return 0
+    fi
+
+    # Prefer Doppler-managed token for non-interactive cloud auth.
+    if command -v doppler &> /dev/null; then
+        if doppler run -- bash -lc 'GH_TOKEN="$GITHUB_TOKEN" gh auth status >/dev/null 2>&1'; then
+            info "gh authenticated via Doppler token"
+            return 0
+        fi
+    fi
+
+    # Fallback: direct environment token (if present).
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        if GH_TOKEN="$GITHUB_TOKEN" gh auth status >/dev/null 2>&1; then
+            info "gh authenticated via GITHUB_TOKEN"
+        else
+            warn "GITHUB_TOKEN present but gh auth check failed"
+        fi
+        return 0
+    fi
+
+    warn "gh not authenticated. Run: doppler run -- bash -lc 'GH_TOKEN=\"\$GITHUB_TOKEN\" gh auth status'"
+}
+
+main() {
+    echo "================================================"
+    echo "  Cloud Environment Initialization"
+    echo "  Installing pre-built binaries for fast setup"
+    echo "================================================"
+    echo ""
+
+    START_TIME=$(date +%s)
+
+    # Install tools in parallel for faster setup
+    install_gh & PID_GH=$!
+    install_doppler & PID_DOPPLER=$!
+
+    INSTALL_FAILED=0
+    wait $PID_GH       || INSTALL_FAILED=1
+    wait $PID_DOPPLER  || INSTALL_FAILED=1
+
+    if [[ "$INSTALL_FAILED" -eq 1 ]]; then
+        error "One or more tool installs failed"
+    fi
+
+    configure_gh_repo
+    configure_doppler
+    configure_gh_auth
+
+    END_TIME=$(date +%s)
+    ELAPSED=$((END_TIME - START_TIME))
+
+    echo ""
+    echo "================================================"
+    info "Cloud environment ready in ${ELAPSED}s"
+    echo ""
+    echo "Installed tools:"
+    echo "  - gh $(gh --version 2>/dev/null | head -1 || echo '(not in PATH)')"
+    echo "  - doppler $(doppler --version 2>/dev/null || echo '(not in PATH)')"
+    echo ""
+    echo "Next steps:"
+    echo "  cargo build --workspace    # Build all crates"
+    echo "  cargo test --workspace     # Run all tests"
+    echo "  doppler run -- bash -lc 'GH_TOKEN=\"\$GITHUB_TOKEN\" gh auth status'"
+    echo "================================================"
+}
+
+main "$@"

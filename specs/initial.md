@@ -47,7 +47,7 @@ Provide a builder to configure tool options, including:
 - Support for `as_markdown` argument.
 - Support allow/block list of URL prefixes.
 - Support enabling/disabling request options (feature gating).
-- Support User-Agent override (e.g., `allow_ua`).
+- Support User-Agent override (e.g., `user_agent`).
 - Support `block_private_ips(bool)` for SSRF prevention (default: `true`).
 
 #### Types
