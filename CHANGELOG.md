@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Highlights
+
+- Hardened redirect handling to revalidate every hop against FetchKit's SSRF policy
+- Tightened allow/block prefix matching to use parsed URL components instead of raw string prefixes
+
+### What's Changed
+
+* fix(security): harden redirect validation and URL policy matching
+
 ## [0.1.2] - 2026-02-16
 
 ### Highlights

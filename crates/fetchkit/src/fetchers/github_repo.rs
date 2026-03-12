@@ -159,13 +159,15 @@ impl Fetcher for GitHubRepoFetcher {
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
         let mut client_builder = reqwest::Client::builder()
             .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT);
+            .timeout(API_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none());
 
         if options.dns_policy.block_private {
             let validated_addr = options
                 .dns_policy
                 .resolve_and_validate("api.github.com", 443)
                 .map_err(|_| FetchError::BlockedUrl)?;
+            // THREAT[TM-SSRF-010]: Disable redirects and pin GitHub API DNS to avoid cross-host hops.
             client_builder = client_builder.resolve("api.github.com", validated_addr);
         }
 

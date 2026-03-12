@@ -9,7 +9,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **HTML-to-Text** - Plain text extraction with clean formatting
 - **Binary detection** - Returns metadata only for images, PDFs, etc.
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
-- **URL filtering** - Allow/block lists for controlled access
+- **URL filtering** - URL-aware allow/block lists for controlled access
 - **SSRF protection** - Resolve-then-check blocks private IPs by default
 - **MCP server** - Model Context Protocol support for AI tool integration
 
@@ -189,6 +189,7 @@ let tool = Tool::builder()
 ```
 
 DNS pinning prevents DNS rebinding attacks. IPv6-mapped IPv4 addresses are canonicalized before validation.
+Redirects are followed manually in the default fetcher so each hop is revalidated against scheme and DNS policy. Allow/block prefixes are matched against parsed URLs rather than raw strings, which prevents lookalike host overmatches such as `allowed.example.com.evil.test`.
 
 See [`specs/threat-model.md`](specs/threat-model.md) for the full threat model.
 

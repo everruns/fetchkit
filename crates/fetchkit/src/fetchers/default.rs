@@ -13,7 +13,7 @@ use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_DISPOSITION, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_DISPOSITION, LOCATION, USER_AGENT};
 use std::time::Duration;
 use tracing::{error, warn};
 use url::Url;
@@ -40,6 +40,9 @@ const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Body timeout (total)
 const BODY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum redirects to follow manually
+const MAX_REDIRECTS: usize = 10;
 
 /// Timeout message appended to truncated content
 const TIMEOUT_MESSAGE: &str = "\n\n[..more content timed out...]";
@@ -110,43 +113,15 @@ impl Fetcher for DefaultFetcher {
         };
         headers.insert(ACCEPT, HeaderValue::from_static(accept));
 
-        // THREAT[TM-SSRF-001]: Resolve-then-check — validate resolved IP before connecting
-        // THREAT[TM-SSRF-005]: Pin DNS resolution to prevent DNS rebinding
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
-        let mut client_builder = reqwest::Client::builder()
-            .default_headers(headers)
-            .connect_timeout(FIRST_BYTE_TIMEOUT)
-            .timeout(FIRST_BYTE_TIMEOUT);
-
-        if options.dns_policy.block_private {
-            if let Some(host) = parsed_url.host_str() {
-                let port = parsed_url.port_or_known_default().unwrap_or(80);
-                let validated_addr = options
-                    .dns_policy
-                    .resolve_and_validate(host, port)
-                    .map_err(|_| FetchError::BlockedUrl)?;
-                // Pin the connection to the validated IP to prevent DNS rebinding
-                client_builder = client_builder.resolve(host, validated_addr);
-            }
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
-        // Build request
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
             HttpMethod::Head => reqwest::Method::HEAD,
         };
 
-        let http_request = client.request(reqwest_method, &request.url);
-
-        // Send request
-        let response = http_request
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        // THREAT[TM-SSRF-010]: Follow redirects manually so every hop is re-validated.
+        let response =
+            send_request_following_redirects(parsed_url, reqwest_method, headers, options).await?;
 
         let status_code = response.status().as_u16();
         let resp_headers = response.headers().clone();
@@ -243,6 +218,93 @@ impl Fetcher for DefaultFetcher {
             ..Default::default()
         })
     }
+}
+
+async fn send_request_following_redirects(
+    initial_url: Url,
+    method: reqwest::Method,
+    headers: HeaderMap,
+    options: &FetchOptions,
+) -> Result<reqwest::Response, FetchError> {
+    let mut current_url = initial_url;
+
+    for redirect_count in 0..=MAX_REDIRECTS {
+        let client = build_client_for_url(&current_url, headers.clone(), options)?;
+        let response = client
+            .request(method.clone(), current_url.clone())
+            .send()
+            .await
+            .map_err(FetchError::from_reqwest)?;
+
+        let Some(next_url) = redirect_target(&current_url, &response)? else {
+            return Ok(response);
+        };
+
+        if redirect_count == MAX_REDIRECTS {
+            return Err(FetchError::RequestError("too many redirects".to_string()));
+        }
+
+        current_url = next_url;
+    }
+
+    unreachable!("redirect loop must return before exhausting iterations");
+}
+
+fn build_client_for_url(
+    url: &Url,
+    headers: HeaderMap,
+    options: &FetchOptions,
+) -> Result<reqwest::Client, FetchError> {
+    let mut client_builder = reqwest::Client::builder()
+        .default_headers(headers)
+        .connect_timeout(FIRST_BYTE_TIMEOUT)
+        .timeout(FIRST_BYTE_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none());
+
+    if options.dns_policy.block_private {
+        if let Some(host) = url.host_str() {
+            let port = url.port_or_known_default().unwrap_or(80);
+            let validated_addr = options
+                .dns_policy
+                .resolve_and_validate(host, port)
+                .map_err(|_| FetchError::BlockedUrl)?;
+            // THREAT[TM-SSRF-001]: Resolve-then-check — validate resolved IP before connecting.
+            // THREAT[TM-SSRF-005]: Pin DNS resolution to prevent DNS rebinding attacks.
+            client_builder = client_builder.resolve(host, validated_addr);
+        }
+    }
+
+    client_builder.build().map_err(FetchError::ClientBuildError)
+}
+
+fn redirect_target(
+    base_url: &Url,
+    response: &reqwest::Response,
+) -> Result<Option<Url>, FetchError> {
+    if !response.status().is_redirection() {
+        return Ok(None);
+    }
+
+    let location = response
+        .headers()
+        .get(LOCATION)
+        .ok_or_else(|| {
+            FetchError::RequestError("redirect response missing Location header".to_string())
+        })?
+        .to_str()
+        .map_err(|_| {
+            FetchError::RequestError("redirect Location header is not valid UTF-8".to_string())
+        })?;
+
+    let next_url = base_url.join(location).map_err(|_| {
+        FetchError::RequestError("redirect Location is not a valid URL".to_string())
+    })?;
+
+    if next_url.scheme() != "http" && next_url.scheme() != "https" {
+        return Err(FetchError::InvalidUrlScheme);
+    }
+
+    Ok(Some(next_url))
 }
 
 /// Check if content type indicates binary content
@@ -342,6 +404,10 @@ async fn read_body_with_timeout(response: reqwest::Response, timeout: Duration) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::DnsPolicy;
+    use crate::types::FetchRequest;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn test_is_binary_content_type() {
@@ -403,5 +469,87 @@ mod tests {
 
         let url = Url::parse("https://github.com/owner/repo").unwrap();
         assert!(fetcher.matches(&url));
+    }
+
+    #[tokio::test]
+    async fn test_manual_redirect_following() {
+        let destination = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/final"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("redirected")
+                    .insert_header("content-type", "text/plain"),
+            )
+            .mount(&destination)
+            .await;
+
+        let origin = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/start"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", format!("{}/final", destination.uri())),
+            )
+            .mount(&origin)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            enable_text: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/start", origin.uri())).as_markdown();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.content.as_deref(), Some("redirected"));
+    }
+
+    #[tokio::test]
+    async fn test_redirect_target_handles_relative_location() {
+        let origin = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/start"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "/final"))
+            .mount(&origin)
+            .await;
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let base_url = Url::parse(&format!("{}/start", origin.uri())).unwrap();
+        let response = client.get(base_url.clone()).send().await.unwrap();
+
+        let redirect = redirect_target(&base_url, &response).unwrap();
+        assert_eq!(
+            redirect.unwrap(),
+            Url::parse(&format!("{}/final", origin.uri())).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redirect_target_rejects_non_http_location() {
+        let origin = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/start"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("location", "file:///etc/passwd"),
+            )
+            .mount(&origin)
+            .await;
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let base_url = Url::parse(&format!("{}/start", origin.uri())).unwrap();
+        let response = client.get(base_url.clone()).send().await.unwrap();
+
+        let redirect = redirect_target(&base_url, &response);
+        assert!(matches!(redirect, Err(FetchError::InvalidUrlScheme)));
     }
 }

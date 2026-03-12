@@ -122,7 +122,7 @@ impl FetcherRegistry {
             let allowed = options
                 .allow_prefixes
                 .iter()
-                .any(|prefix| request.url.starts_with(prefix));
+                .any(|prefix| url_matches_policy_prefix(&parsed_url, prefix));
             if !allowed {
                 return Err(FetchError::BlockedUrl);
             }
@@ -131,7 +131,7 @@ impl FetcherRegistry {
         if options
             .block_prefixes
             .iter()
-            .any(|prefix| request.url.starts_with(prefix))
+            .any(|prefix| url_matches_policy_prefix(&parsed_url, prefix))
         {
             return Err(FetchError::BlockedUrl);
         }
@@ -151,6 +151,57 @@ impl FetcherRegistry {
     }
 }
 
+fn url_matches_policy_prefix(url: &Url, prefix: &str) -> bool {
+    let Ok(prefix_url) = Url::parse(prefix) else {
+        tracing::warn!(
+            prefix,
+            "Invalid policy prefix; falling back to raw string matching"
+        );
+        return url.as_str().starts_with(prefix);
+    };
+
+    if url.scheme() != prefix_url.scheme() {
+        return false;
+    }
+
+    if normalized_host(url) != normalized_host(&prefix_url) {
+        return false;
+    }
+
+    if prefix_url.port().is_some()
+        && url.port_or_known_default() != prefix_url.port_or_known_default()
+    {
+        return false;
+    }
+
+    if !path_matches_prefix(url.path(), prefix_url.path()) {
+        return false;
+    }
+
+    match prefix_url.query() {
+        Some(prefix_query) => url.query() == Some(prefix_query),
+        None => true,
+    }
+}
+
+fn normalized_host(url: &Url) -> Option<String> {
+    url.host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+}
+
+fn path_matches_prefix(path: &str, prefix_path: &str) -> bool {
+    if prefix_path == "/" {
+        return true;
+    }
+
+    if path == prefix_path {
+        return true;
+    }
+
+    path.strip_prefix(prefix_path)
+        .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +218,34 @@ mod tests {
     fn test_empty_registry() {
         let registry = FetcherRegistry::new();
         assert!(registry.fetchers.is_empty());
+    }
+
+    #[test]
+    fn test_policy_prefix_matches_same_origin_and_path_boundary() {
+        let url = Url::parse("https://docs.example.com/api/v1").unwrap();
+        assert!(url_matches_policy_prefix(
+            &url,
+            "https://docs.example.com/api"
+        ));
+        assert!(url_matches_policy_prefix(&url, "https://docs.example.com"));
+        assert!(!url_matches_policy_prefix(
+            &url,
+            "https://docs.example.com/ap"
+        ));
+    }
+
+    #[test]
+    fn test_policy_prefix_rejects_lookalike_hosts() {
+        let url = Url::parse("https://docs.example.com.evil.test/path").unwrap();
+        assert!(!url_matches_policy_prefix(&url, "https://docs.example.com"));
+    }
+
+    #[test]
+    fn test_policy_prefix_normalizes_case_default_port_and_trailing_dot() {
+        let url = Url::parse("https://docs.example.com/path").unwrap();
+        assert!(url_matches_policy_prefix(
+            &url,
+            "HTTPS://DOCS.EXAMPLE.COM.:443"
+        ));
     }
 }
