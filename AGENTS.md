@@ -42,12 +42,26 @@ Available specs:
 
 Specification format: Abstract and Requirements sections.
 
+### Shipping
+
+Implement → test → `/ship`. The `/ship` command (`.claude/commands/ship.md`) runs a 10-phase workflow: pre-flight, test coverage, code simplification, security review, artifact updates, smoke testing, quality gates, push+PR, CI wait+merge, post-merge report.
+
+Phases 2–6 (tests, simplification, security, artifacts, smoke) are the quality core — never skip.
+
+When asked to "fix and ship": implement fix first, then run `/ship`.
+
 ### Skills
 
 `.claude/skills/` contains development skills following the [Agent Skills Specification](https://agentskills.io/specification).
 
 Available skills:
-- None configured yet
+- `/ship` — 10-phase shipping workflow (`.claude/commands/ship.md`)
+
+### Agent-portable paths
+
+`.agents/` mirrors `.claude/` via symlinks for agent-agnostic access:
+- `.agents/commands/` → `.claude/commands/`
+- `.agents/skills/` → `.claude/skills/`
 
 
 ### Public Documentation
