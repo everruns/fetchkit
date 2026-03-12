@@ -429,6 +429,7 @@ version = "0.1.2"
 dependencies = [
  "fetchkit",
  "pyo3",
+ "pyo3-build-config",
  "serde_json",
  "tokio",
 ]

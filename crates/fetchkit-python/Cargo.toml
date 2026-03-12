@@ -17,3 +17,6 @@ fetchkit = { path = "../fetchkit" }
 pyo3 = { version = "0.28", features = ["extension-module"] }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = "0.28"
