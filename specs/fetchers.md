@@ -13,6 +13,7 @@ Each fetcher must implement:
 1. **`name()`** - Unique identifier string for logging/debugging
 2. **`matches(url)`** - Returns true if this fetcher handles the URL
 3. **`fetch(request, options)`** - Async fetch returning `FetchResponse` or error
+4. **`fetch_to_file(request, options, saver)`** - Optional. Default implementation calls `fetch()` then saves string content via `FileSaver`. Fetchers may override for binary-aware saving (e.g., `DefaultFetcher` accepts binary content when saving to file).
 
 ### Fetcher Registry
 
@@ -23,6 +24,7 @@ Central dispatcher that:
 3. Falls back to default fetcher if none match
 4. Provides `register()` for adding custom fetchers
 5. Validates URL scheme and allow/block lists before dispatching
+6. Provides `fetch_to_file()` that dispatches to matched fetcher's `fetch_to_file()`
 
 ### Built-in Fetchers
 
@@ -35,6 +37,7 @@ Central dispatcher that:
   - HTML to markdown/text conversion (when enabled)
   - Binary content detection (returns metadata only)
   - Timeout handling with partial content support
+  - Binary-aware file saving via `fetch_to_file()` override (accepts binary content when saving)
 - Returns: Standard `FetchResponse` with format `"markdown"`, `"text"`, or `"raw"`
 
 #### GitHubRepoFetcher
@@ -66,6 +69,7 @@ Fetchers receive `FetchOptions` for:
 - `block_prefixes` - URL prefix block list
 - `enable_markdown` - Enable markdown conversion
 - `enable_text` - Enable text conversion
+- `enable_save_to_file` - Enable file saving support
 - `dns_policy` - DNS resolution policy for SSRF prevention (default: block private IPs)
 
 ### Extensibility
@@ -97,9 +101,10 @@ Both built-in fetchers integrate resolve-then-check DNS validation:
 ```
 crates/fetchkit/src/
 ├── dns.rs               # DnsPolicy - SSRF prevention via resolve-then-check
+├── file_saver.rs        # FileSaver trait, LocalFileSaver, SaveResult, FileSaveError
 ├── fetchers/
 │   ├── mod.rs           # Fetcher trait, FetcherRegistry
-│   ├── default.rs       # DefaultFetcher
+│   ├── default.rs       # DefaultFetcher (with binary-aware fetch_to_file override)
 │   └── github_repo.rs   # GitHubRepoFetcher
 ```
 
@@ -113,6 +118,9 @@ pub trait Fetcher: Send + Sync {
     fn matches(&self, url: &Url) -> bool;
     async fn fetch(&self, request: &FetchRequest, options: &FetchOptions)
         -> Result<FetchResponse, FetchError>;
+    async fn fetch_to_file(&self, request: &FetchRequest, options: &FetchOptions,
+        saver: &dyn FileSaver) -> Result<FetchResponse, FetchError>;
+        // Default: delegates to fetch(), then saves content through saver
 }
 
 // Registry
@@ -126,6 +134,8 @@ impl FetcherRegistry {
     pub fn register(&mut self, fetcher: Box<dyn Fetcher>);
     pub async fn fetch(&self, request: FetchRequest, options: FetchOptions)
         -> Result<FetchResponse, FetchError>;
+    pub async fn fetch_to_file(&self, request: FetchRequest, options: FetchOptions,
+        saver: &dyn FileSaver) -> Result<FetchResponse, FetchError>;
 }
 
 // Convenience functions

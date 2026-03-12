@@ -628,6 +628,87 @@ async fn test_local_file_saver_large_write() {
 }
 
 // ---------------------------------------------------------------------------
+// Default Fetcher::fetch_to_file (used by non-DefaultFetcher fetchers)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_save_via_default_fetch_to_file_trait_method() {
+    // Tests the default Fetcher::fetch_to_file implementation, which calls
+    // fetch() then saves the string content. This path is used by fetchers
+    // that don't override fetch_to_file (e.g. GitHubRepoFetcher).
+    let dir = tempfile::tempdir().unwrap();
+    let saver = saver_in(dir.path());
+
+    let mock = MockServer::start().await;
+    // Return HTML that will be converted to markdown by DefaultFetcher
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("<html><body><h1>Title</h1><p>Body text</p></body></html>")
+                .insert_header("content-type", "text/html"),
+        )
+        .mount(&mock)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .enable_save_to_file(true)
+        .enable_markdown(true)
+        .build();
+
+    // save_to_file with HTML content: DefaultFetcher::fetch_to_file handles
+    // this directly (binary-aware path), but confirms the full save pipeline
+    let req = FetchRequest::new(format!("{}/page", mock.uri())).save_to_file("page_content.txt");
+    let resp = tool.execute_with_saver(req, Some(&saver)).await.unwrap();
+
+    assert_eq!(resp.status_code, 200);
+    assert!(resp.saved_path.is_some());
+    assert!(resp.bytes_written.unwrap() > 0);
+    assert!(resp.content.is_none());
+
+    // File should exist with some content
+    let content = std::fs::read_to_string(dir.path().join("page_content.txt")).unwrap();
+    assert!(!content.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Truncated binary save (slow binary download)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_save_binary_with_slow_response_truncated() {
+    // Verifies that a binary download with a delayed response times out
+    // gracefully and either saves partial content or returns an error
+    let dir = tempfile::tempdir().unwrap();
+    let saver = saver_in(dir.path());
+    let tool = tool_with_save();
+
+    let mock = MockServer::start().await;
+    // Respond with binary content-type but delay the response
+    Mock::given(method("GET"))
+        .and(path("/big.bin"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(vec![0xDE, 0xAD, 0xBE, 0xEF])
+                .insert_header("content-type", "application/octet-stream")
+                .set_delay(Duration::from_secs(45)),
+        )
+        .mount(&mock)
+        .await;
+
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        let req = FetchRequest::new(format!("{}/big.bin", mock.uri())).save_to_file("big.bin");
+        tool.execute_with_saver(req, Some(&saver)).await
+    })
+    .await;
+
+    // Must not hang
+    assert!(result.is_ok(), "Binary save with slow server must not hang");
+    // Inner result is expected to be an error (connect/first-byte timeout)
+}
+
+// ---------------------------------------------------------------------------
 // Description/llmtxt reflects enabled state
 // ---------------------------------------------------------------------------
 

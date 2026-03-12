@@ -74,6 +74,48 @@ impl Default for DefaultFetcher {
     }
 }
 
+/// Build headers for HTTP requests
+fn build_headers(options: &FetchOptions, accept: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_str(user_agent)
+            .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
+    );
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_str(accept).unwrap_or_else(|_| HeaderValue::from_static("*/*")),
+    );
+    headers
+}
+
+/// Extract common response metadata from headers
+struct ResponseMeta {
+    content_type: Option<String>,
+    last_modified: Option<String>,
+    content_length: Option<u64>,
+    filename: Option<String>,
+}
+
+fn extract_response_meta(headers: &HeaderMap, url: &str) -> ResponseMeta {
+    ResponseMeta {
+        content_type: headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string()),
+        last_modified: headers
+            .get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string()),
+        content_length: headers
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok()),
+        filename: extract_filename(headers, url),
+    }
+}
+
 #[async_trait]
 impl Fetcher for DefaultFetcher {
     fn name(&self) -> &'static str {
@@ -90,7 +132,6 @@ impl Fetcher for DefaultFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
-        // Validate URL
         if request.url.is_empty() {
             return Err(FetchError::MissingUrl);
         }
@@ -100,16 +141,6 @@ impl Fetcher for DefaultFetcher {
         let wants_text = options.enable_text && request.wants_text();
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
-        // Build headers
-        let mut headers = HeaderMap::new();
-        let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_str(user_agent)
-                .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
-        );
-
-        // Set Accept header based on conversion mode
         let accept = if wants_markdown {
             "text/html, text/markdown, text/plain, */*;q=0.8"
         } else if wants_text {
@@ -117,8 +148,8 @@ impl Fetcher for DefaultFetcher {
         } else {
             "*/*"
         };
-        headers.insert(ACCEPT, HeaderValue::from_static(accept));
 
+        let headers = build_headers(options, accept);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
@@ -130,51 +161,33 @@ impl Fetcher for DefaultFetcher {
             send_request_following_redirects(parsed_url, reqwest_method, headers, options).await?;
 
         let status_code = response.status().as_u16();
-        let resp_headers = response.headers().clone();
         let final_url = response.url().to_string();
-
-        // Extract metadata
-        let content_type = resp_headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-
-        let last_modified = resp_headers
-            .get("last-modified")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-
-        let content_length: Option<u64> = resp_headers
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok());
-
-        let filename = extract_filename(&resp_headers, &final_url);
+        let meta = extract_response_meta(response.headers(), &final_url);
 
         // Handle HEAD request
         if method == HttpMethod::Head {
             return Ok(FetchResponse {
                 url: final_url,
                 status_code,
-                content_type,
-                size: content_length,
-                last_modified,
-                filename,
+                content_type: meta.content_type,
+                size: meta.content_length,
+                last_modified: meta.last_modified,
+                filename: meta.filename,
                 method: Some("HEAD".to_string()),
                 ..Default::default()
             });
         }
 
         // Check for binary content
-        if let Some(ref ct) = content_type {
+        if let Some(ref ct) = meta.content_type {
             if is_binary_content_type(ct) {
                 return Ok(FetchResponse {
                     url: final_url,
                     status_code,
-                    content_type,
-                    size: content_length,
-                    last_modified,
-                    filename,
+                    content_type: meta.content_type,
+                    size: meta.content_length,
+                    last_modified: meta.last_modified,
+                    filename: meta.filename,
                     error: Some(
                         "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."
                             .to_string(),
@@ -194,7 +207,7 @@ impl Fetcher for DefaultFetcher {
 
         // Determine format and convert if needed
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
-        let (format, final_content) = if is_html(&content_type, &content) {
+        let (format, final_content) = if is_html(&meta.content_type, &content) {
             if wants_markdown {
                 ("markdown".to_string(), html_to_markdown(&content))
             } else if wants_text {
@@ -217,10 +230,10 @@ impl Fetcher for DefaultFetcher {
         Ok(FetchResponse {
             url: final_url,
             status_code,
-            content_type,
+            content_type: meta.content_type,
             size: Some(size),
-            last_modified,
-            filename,
+            last_modified: meta.last_modified,
+            filename: meta.filename,
             format: Some(format),
             content: Some(final_content),
             truncated: if truncated { Some(true) } else { None },
@@ -250,16 +263,7 @@ impl Fetcher for DefaultFetcher {
         let method = request.effective_method();
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
-        // Build headers — accept everything for file downloads
-        let mut headers = HeaderMap::new();
-        let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_str(user_agent)
-                .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
-        );
-        headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
-
+        let headers = build_headers(options, "*/*");
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
@@ -271,35 +275,18 @@ impl Fetcher for DefaultFetcher {
             send_request_following_redirects(parsed_url, reqwest_method, headers, options).await?;
 
         let status_code = response.status().as_u16();
-        let resp_headers = response.headers().clone();
         let final_url = response.url().to_string();
-
-        let content_type = resp_headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-
-        let last_modified = resp_headers
-            .get("last-modified")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-
-        let content_length: Option<u64> = resp_headers
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok());
-
-        let filename = extract_filename(&resp_headers, &final_url);
+        let meta = extract_response_meta(response.headers(), &final_url);
 
         // HEAD request — return metadata only
         if method == HttpMethod::Head {
             return Ok(FetchResponse {
                 url: final_url,
                 status_code,
-                content_type,
-                size: content_length,
-                last_modified,
-                filename,
+                content_type: meta.content_type,
+                size: meta.content_length,
+                last_modified: meta.last_modified,
+                filename: meta.filename,
                 method: Some("HEAD".to_string()),
                 ..Default::default()
             });
@@ -310,7 +297,7 @@ impl Fetcher for DefaultFetcher {
         let size = body.len() as u64;
 
         // Save through the FileSaver
-        let result = saver
+        let save_result = saver
             .save(&save_path, &body)
             .await
             .map_err(|e| FetchError::SaveError(e.to_string()))?;
@@ -318,13 +305,13 @@ impl Fetcher for DefaultFetcher {
         Ok(FetchResponse {
             url: final_url,
             status_code,
-            content_type,
+            content_type: meta.content_type,
             size: Some(size),
-            last_modified,
-            filename,
+            last_modified: meta.last_modified,
+            filename: meta.filename,
             truncated: if truncated { Some(true) } else { None },
-            saved_path: Some(result.path),
-            bytes_written: Some(result.bytes_written),
+            saved_path: Some(save_result.path),
+            bytes_written: Some(save_result.bytes_written),
             // No inline content when saving to file
             ..Default::default()
         })
