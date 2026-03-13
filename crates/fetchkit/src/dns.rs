@@ -253,6 +253,42 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
         return true;
     }
 
+    // THREAT[TM-SSRF-006]: IPv4-compatible IPv6 (deprecated, ::<ipv4>, prefix 0000:0000:...)
+    // Extract embedded IPv4 from the low 32 bits and validate it
+    if segments[0] == 0
+        && segments[1] == 0
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0
+        && !(segments[6] == 0 && segments[7] == 0)
+    // exclude :: (unspecified) and ::1 (loopback)
+    {
+        let ipv4 = Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            segments[6] as u8,
+            (segments[7] >> 8) as u8,
+            segments[7] as u8,
+        );
+        if is_blocked_ipv4(ipv4) {
+            return true;
+        }
+    }
+
+    // THREAT[TM-SSRF-006]: 6to4 addresses (2002::/16) embed IPv4 in bits 16-47
+    // e.g. 2002:7f00:0001:: encodes 127.0.0.1
+    if segments[0] == 0x2002 {
+        let ipv4 = Ipv4Addr::new(
+            (segments[1] >> 8) as u8,
+            segments[1] as u8,
+            (segments[2] >> 8) as u8,
+            segments[2] as u8,
+        );
+        if is_blocked_ipv4(ipv4) {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -400,6 +436,38 @@ mod tests {
         assert!(p.is_blocked_ip("::ffff:169.254.169.254".parse().unwrap()));
         // ::ffff:8.8.8.8 should NOT be blocked (maps to public)
         assert!(!p.is_blocked_ip("::ffff:8.8.8.8".parse().unwrap()));
+    }
+
+    // THREAT[TM-SSRF-011]: IPv4-compatible IPv6 addresses (deprecated)
+    #[test]
+    fn test_ipv4_compatible_ipv6_blocked() {
+        let p = policy();
+        // ::7f00:1 is the hex form of ::127.0.0.1 (IPv4-compatible, deprecated)
+        assert!(p.is_blocked_ip("::7f00:1".parse().unwrap()));
+        // ::a00:1 is ::10.0.0.1 (private)
+        assert!(p.is_blocked_ip("::a00:1".parse().unwrap()));
+        // ::c0a8:1 is ::192.168.0.1 (private)
+        assert!(p.is_blocked_ip("::c0a8:1".parse().unwrap()));
+        // ::a9fe:a9fe is ::169.254.169.254 (metadata)
+        assert!(p.is_blocked_ip("::a9fe:a9fe".parse().unwrap()));
+        // ::808:808 is ::8.8.8.8 (public) — should NOT be blocked
+        assert!(!p.is_blocked_ip("::808:808".parse().unwrap()));
+    }
+
+    // THREAT[TM-SSRF-011]: 6to4 addresses (2002::/16)
+    #[test]
+    fn test_6to4_ipv6_blocked() {
+        let p = policy();
+        // 2002:7f00:1:: encodes 127.0.0.1
+        assert!(p.is_blocked_ip("2002:7f00:1::".parse().unwrap()));
+        // 2002:a00:1:: encodes 10.0.0.1
+        assert!(p.is_blocked_ip("2002:a00:1::".parse().unwrap()));
+        // 2002:c0a8:1:: encodes 192.168.0.1
+        assert!(p.is_blocked_ip("2002:c0a8:1::".parse().unwrap()));
+        // 2002:a9fe:a9fe:: encodes 169.254.169.254
+        assert!(p.is_blocked_ip("2002:a9fe:a9fe::".parse().unwrap()));
+        // 2002:808:808:: encodes 8.8.8.8 (public) — should NOT be blocked
+        assert!(!p.is_blocked_ip("2002:808:808::".parse().unwrap()));
     }
 
     // ==================== Public IPs allowed ====================
