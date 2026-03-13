@@ -61,13 +61,21 @@ pub enum FetchError {
 
 impl FetchError {
     /// Create an error from a reqwest error
+    ///
+    // THREAT[TM-LEAK-001]: Sanitize reqwest errors to avoid leaking internal hostnames/IPs
     pub fn from_reqwest(err: reqwest::Error) -> Self {
         if err.is_timeout() {
             FetchError::FirstByteTimeout
         } else if err.is_connect() {
             FetchError::ConnectError(err)
+        } else if err.is_redirect() {
+            FetchError::RequestError("redirect error".to_string())
+        } else if err.is_body() {
+            FetchError::RequestError("error reading response body".to_string())
+        } else if err.is_decode() {
+            FetchError::RequestError("error decoding response".to_string())
         } else {
-            FetchError::RequestError(err.to_string())
+            FetchError::RequestError("request failed".to_string())
         }
     }
 }
