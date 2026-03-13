@@ -284,8 +284,10 @@ against unbounded responses (TM-DOS-001).
 
 **TM-LEAK-001 — Error message detail (MITIGATED):**
 FetchKit's error types (`FetchError`) use generic messages that don't include
-resolved IP addresses. Connect errors say "Failed to connect to server" without
-revealing the specific IP or port that was attempted.
+resolved IP addresses or internal hostnames. Connect errors say "Failed to connect
+to server" and the `from_reqwest()` fallback path classifies errors by type
+(redirect, body, decode) instead of passing through raw reqwest error strings
+which could contain hostnames or URL details.
 
 ## 6. Content Conversion (TM-CONV)
 

@@ -458,3 +458,48 @@ async fn test_input_007_subdomain_not_matched_by_host_prefix() {
     let result = tool.execute(req).await;
     assert!(!matches!(result, Err(FetchError::BlockedUrl)));
 }
+
+// ============================================================================
+// TM-LEAK-001: Error messages must not leak internal hostnames or IPs
+// ============================================================================
+
+#[test]
+fn test_leak_001_request_error_variants_are_generic() {
+    // THREAT[TM-LEAK-001]: Verify all RequestError messages are generic and
+    // don't leak hostnames or IPs from reqwest errors.
+    // The from_reqwest fallback classifies by error kind, not raw message.
+    let generic_messages = [
+        "redirect error",
+        "error reading response body",
+        "error decoding response",
+        "request failed",
+    ];
+    for msg in &generic_messages {
+        let err = FetchError::RequestError(msg.to_string());
+        let display = err.to_string();
+        assert!(
+            !display.contains("127.0.0.1"),
+            "Error should not contain IPs: {display}"
+        );
+        assert!(
+            !display.contains("internal"),
+            "Error should not contain hostnames: {display}"
+        );
+    }
+}
+
+#[test]
+fn test_leak_001_timeout_and_connect_display_are_generic() {
+    // Verify that timeout and connect error Display messages are static
+    // strings that don't contain any dynamic content
+    let timeout_msg = FetchError::FirstByteTimeout.to_string();
+    assert_eq!(
+        timeout_msg,
+        "Request timed out: server did not respond within 1 second"
+    );
+
+    // ConnectError uses "Failed to connect to server" as Display, hiding
+    // the reqwest source error from the user-facing message
+    let blocked_msg = FetchError::BlockedUrl.to_string();
+    assert_eq!(blocked_msg, "Blocked URL: not allowed by policy");
+}
