@@ -157,7 +157,7 @@ redirect target, not the original host.
 
 | ID | Threat | Severity | Mitigation | Status |
 |----|--------|----------|------------|--------|
-| TM-NET-001 | HTTP downgrade (HTTPS URL redirects to HTTP) | Medium | No scheme validation on redirects; reqwest follows | **ACCEPTED** |
+| TM-NET-001 | HTTP downgrade (HTTPS URL redirects to HTTP) | Medium | Scheme validated per hop (non-HTTP blocked); HTTPS→HTTP downgrade allowed | **ACCEPTED** |
 | TM-NET-002 | TLS certificate validation bypass | Low | Uses reqwest defaults (system certificate store via rustls-platform-verifier) | MITIGATED |
 | TM-NET-003 | Connection reuse leaking context | Low | New reqwest client per request; no connection pooling across requests | MITIGATED |
 | TM-NET-004 | Proxy environment variables (HTTP_PROXY) | Medium | Reqwest respects system proxy env vars; attacker could set these in container | **CALLER RISK** |
@@ -166,8 +166,9 @@ redirect target, not the original host.
 ### Mitigation Details
 
 **TM-NET-001 — HTTP downgrade (ACCEPTED):**
-FetchKit allows both HTTP and HTTPS schemes. If an HTTPS URL redirects to HTTP,
-reqwest will follow the redirect without warning. This is accepted because:
+FetchKit validates the scheme at each redirect hop — non-HTTP(S) schemes are
+rejected (see TM-INPUT-001). However, HTTPS→HTTP downgrade is still allowed.
+This is accepted because:
 - FetchKit is designed for content fetching, not security-sensitive operations
 - The caller controls which URLs to fetch
 - Enforcing HTTPS-only would break many legitimate use cases
@@ -218,7 +219,6 @@ URLs like `http://evil.com@127.0.0.1/path` have `127.0.0.1` as the host (with
 `evil.com` as the username). The `url` crate correctly parses this, and
 resolve-then-check validates the actual host's IP.
 
-<<<<<<< HEAD
 **TM-INPUT-007 — String-based prefix matching (MITIGATED):**
 Prefix matching now parses both the URL and the prefix with the `url` crate,
 then compares scheme, host (exact match), port, and path (segment-boundary

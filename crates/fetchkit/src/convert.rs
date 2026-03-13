@@ -64,7 +64,7 @@ pub fn html_to_markdown(html: &str) -> String {
                 tag_lower.split_whitespace().next().unwrap_or("")
             };
 
-            // Handle skip elements
+            // THREAT[TM-CONV-001]: Strip script/style/iframe/svg to prevent injection
             let skip_tags = ["script", "style", "noscript", "iframe", "svg"];
             if skip_tags.contains(&tag_name) {
                 if is_closing {
@@ -255,7 +255,7 @@ pub fn html_to_text(html: &str) -> String {
                 tag_lower.split_whitespace().next().unwrap_or("")
             };
 
-            // Handle skip elements
+            // THREAT[TM-CONV-001]: Strip script/style/iframe/svg to prevent injection
             let skip_tags = ["script", "style", "noscript", "iframe", "svg"];
             if skip_tags.contains(&tag_name) {
                 if is_closing {
@@ -324,6 +324,7 @@ fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
 }
 
 /// Decode HTML entity starting from ampersand
+// THREAT[TM-CONV-004]: Limited named-entity set; rejects long/unknown sequences
 fn decode_entity(c: char, chars: &mut std::iter::Peekable<std::str::Chars>) -> char {
     if c != '&' {
         return c;

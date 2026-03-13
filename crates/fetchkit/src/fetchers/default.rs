@@ -36,10 +36,10 @@ const BINARY_PREFIXES: &[&str] = &[
     "font/",
 ];
 
-/// First-byte timeout (connect + first response byte)
+// THREAT[TM-DOS-002]: First-byte timeout prevents slowloris / slow-start attacks
 const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Body timeout (total)
+// THREAT[TM-DOS-002]: Body timeout caps total request duration
 const BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Truncation message appended when body is cut short (timeout or size limit)
@@ -360,6 +360,7 @@ fn build_client_for_url(
     headers: HeaderMap,
     options: &FetchOptions,
 ) -> Result<reqwest::Client, FetchError> {
+    // THREAT[TM-NET-003]: New client per request prevents connection-pool state leakage
     let mut client_builder = reqwest::Client::builder()
         .default_headers(headers)
         .connect_timeout(FIRST_BYTE_TIMEOUT)
