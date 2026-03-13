@@ -103,6 +103,7 @@ only allow connections to publicly-routable IP addresses by default.
 | TM-SSRF-004 | Numeric IP variants (octal 0177.0.0.1, hex 0x7f000001, decimal 2130706433) | High | URL parsed by `url` crate which normalizes IP representations; resolved IP validated | MITIGATED |
 | TM-SSRF-005 | DNS rebinding (hostname resolves to public IP, then re-resolves to private) | High | Pin DNS resolution via `reqwest::ClientBuilder::resolve()`; validated IP used for connection | MITIGATED |
 | TM-SSRF-006 | IPv6-mapped IPv4 (::ffff:127.0.0.1) | High | `to_canonical()` extracts IPv4 from mapped addresses before range check | MITIGATED |
+| TM-SSRF-011 | IPv4-compatible IPv6 (::127.0.0.1) and 6to4 (2002:7f00:1::) | Medium | Extract embedded IPv4 from deprecated IPv4-compatible and 6to4 addresses, validate against blocked ranges | MITIGATED |
 | TM-SSRF-007 | DNS names resolving to private IPs | Critical | Post-resolution IP check catches all DNS-to-private-IP scenarios | MITIGATED |
 | TM-SSRF-008 | Kubernetes service DNS (*.svc.cluster.local) | High | Resolves to cluster IPs which are private ranges; blocked by IP check | MITIGATED |
 | TM-SSRF-009 | URL with credentials (http://user:pass@internal) | Medium | Credentials in URL passed through to reqwest; no credential stripping | **ACCEPTED** |
@@ -136,6 +137,12 @@ caught after normalization.
 After validating the resolved IP, FetchKit uses `reqwest::ClientBuilder::resolve(host, addr)`
 to pin the connection to the validated IP. This prevents reqwest from re-resolving
 the hostname during connection establishment.
+
+**TM-SSRF-011 — IPv4-compatible and 6to4 IPv6 addresses (MITIGATED):**
+IPv4-compatible IPv6 addresses (`::<ipv4>`, deprecated RFC 4291) and 6to4
+addresses (`2002::/16`, RFC 3056) embed IPv4 addresses that `to_canonical()`
+does not extract. `is_blocked_ipv6()` now detects both formats, extracts
+the embedded IPv4, and validates it against the blocked ranges.
 
 **TM-SSRF-009 — URL credentials (ACCEPTED):**
 FetchKit passes URLs to reqwest as-is. If credentials are embedded in the URL,
@@ -358,6 +365,7 @@ None — all previously open threats have been mitigated.
 | Private IP blocking | TM-SSRF | `DnsPolicy::block_private_ips()` with resolve-then-check |
 | DNS pinning | TM-SSRF | `reqwest::ClientBuilder::resolve()` per redirect hop |
 | IPv6-mapped-IPv4 canonicalization | TM-SSRF | `IpAddr::to_canonical()` before range check |
+| IPv4-compatible/6to4 extraction | TM-SSRF | Extract embedded IPv4 from `::` and `2002::` prefixes, validate |
 | Manual redirect following | TM-SSRF | `Policy::none()` with IP validation at each hop |
 | First-byte timeout | TM-DOS | 1-second connect+response timeout |
 | Body timeout | TM-DOS | 30-second streaming body timeout |
