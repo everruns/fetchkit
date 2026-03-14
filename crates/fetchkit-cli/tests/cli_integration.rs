@@ -152,6 +152,32 @@ fn test_help_flag() {
     assert!(stdout.contains("fetch") || stdout.contains("mcp"));
 }
 
+#[test]
+fn test_fetch_help_lists_hardening_flags() {
+    let output = Command::new(fetchkit_bin())
+        .args(["fetch", "--help"])
+        .output()
+        .expect("failed to run fetchkit");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("--hardened"));
+    assert!(stdout.contains("--allow-env-proxy"));
+}
+
+#[test]
+fn test_mcp_help_lists_hardening_flags() {
+    let output = Command::new(fetchkit_bin())
+        .args(["mcp", "--help"])
+        .output()
+        .expect("failed to run fetchkit");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("--hardened"));
+    assert!(stdout.contains("--allow-env-proxy"));
+}
+
 // ============================================================================
 // --version flag
 // ============================================================================

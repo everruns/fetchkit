@@ -50,11 +50,16 @@ Provide a builder to configure tool options, including:
 - Support User-Agent override (e.g., `user_agent`).
 - Support `block_private_ips(bool)` for SSRF prevention (default: `true`).
 - Support `max_body_size(usize)` for bounded response bodies.
+- Support `max_body_size(usize)` for bounded response bodies.
+- Support `respect_proxy_env(bool)` to opt in to `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
+  (default: `false`).
+- Support port allow-listing via repeated `allow_port(u16)` calls.
+- Support hostname blocking before DNS via exact host rules and suffix rules.
+- Support `same_host_redirects_only(bool)` for stricter redirect handling.
+- Support `hardened()` preset for production-facing data plane deployments.
 - Support `enable_save_to_file(bool)` for file download (default: `false`).
   When enabled, adds `save_to_file` to input schema and `saved_path`/`bytes_written` to output.
   Requires a `FileSaver` implementation at execution time.
-- Support `respect_proxy_env(bool)` to opt into `HTTP_PROXY`/`HTTPS_PROXY`
-  inheritance (default: `false`).
 
 #### Types
 
@@ -111,7 +116,12 @@ Provide a builder to configure tool options, including:
   - `<URL>` (positional, required)
   - `--output <md|json>` / `-o` (optional, default `md`)
   - `--user-agent <UA>` (optional, overrides default User-Agent)
+  - `--hardened` (optional, applies the hardened outbound policy profile)
+  - `--allow-env-proxy` (optional, opt in to `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`)
   - `--help` (standard help)
+- MCP subcommand options:
+  - `--hardened` (optional, applies the hardened outbound policy profile)
+  - `--allow-env-proxy` (optional, opt in to `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`)
 - Global options:
   - `--llmtxt` (full help with examples and tool details)
   - `--help` (standard help)
@@ -149,6 +159,8 @@ Provide a builder to configure tool options, including:
   - Matching is URL-aware: scheme and host are normalized, trailing dots are ignored,
     path matches respect segment boundaries, and an explicit prefix port must match.
     If the prefix omits a port, any port on the same scheme+host matches.
+- Exact host and hostname suffix block rules (if configured) are applied before DNS resolution.
+- If one or more allowed ports are configured, the URL port must match one of them.
 
 ### SSRF Prevention (DNS Policy)
 
@@ -165,8 +177,8 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 
 - User-Agent: configurable via tool builder or CLI/MCP/Python options
   (default `Everruns FetchKit/1.0`).
-- Proxy env vars are ignored by default. Callers must opt in via
-  `ToolBuilder::respect_proxy_env(true)` if they need environment-configured proxies.
+- Ambient proxy environment variables are ignored by default.
+  - Opt in via `ToolBuilder::respect_proxy_env(true)` or CLI `--allow-env-proxy`.
 - Accept header:
   - Markdown: `text/html, text/markdown, text/plain, */*;q=0.8`
   - Text: `text/html, text/plain, */*;q=0.8`
@@ -175,7 +187,9 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 - Redirects:
   - Follow at most 10 hops.
   - Each hop is resolved and validated independently against the DNS policy.
+  - Each hop is also validated against configured host and port restrictions.
   - Redirects to non-HTTP(S) schemes are rejected.
+  - Optional hardened mode restricts redirects to the original host only.
 
 ### Timeouts
 

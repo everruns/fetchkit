@@ -181,6 +181,7 @@ redirect target, not the original host.
 | TM-NET-002 | TLS certificate validation bypass | Low | Uses reqwest defaults (system certificate store via rustls-platform-verifier) | MITIGATED |
 | TM-NET-003 | Connection reuse leaking context | Low | New reqwest client per request; no connection pooling across requests | MITIGATED |
 | TM-NET-004 | Proxy environment variables (HTTP_PROXY) | Medium | Clients ignore ambient proxy env by default; callers can opt in explicitly | MITIGATED |
+| TM-NET-004 | Proxy environment variables (HTTP_PROXY) | Medium | Ambient proxy env is ignored by default; opt-in required via builder/CLI | MITIGATED |
 | TM-NET-005 | Man-in-the-middle on HTTP (non-TLS) | Medium | HTTP scheme is allowed; content can be intercepted/modified on the wire | **ACCEPTED** |
 
 ### Mitigation Details
@@ -199,10 +200,11 @@ connection pool state from leaking between requests. This is a defense-in-depth
 measure.
 
 **TM-NET-004 — Proxy environment variables (MITIGATED):**
-FetchKit calls `reqwest::ClientBuilder::no_proxy()` by default, so shared runtimes do
-not silently inherit `HTTP_PROXY`, `HTTPS_PROXY`, or `NO_PROXY` from the process
-environment. Callers that need proxy routing must opt in explicitly via
-`ToolBuilder::respect_proxy_env(true)`.
+FetchKit disables ambient `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` handling by
+default via `reqwest::ClientBuilder::no_proxy()`. Callers must opt in explicitly
+via `ToolBuilder::respect_proxy_env(true)` or the CLI `--allow-env-proxy` flag.
+This prevents inherited container proxy settings from silently bypassing the
+expected outbound path.
 
 ## 3. Input Validation (TM-INPUT)
 
@@ -369,6 +371,7 @@ None — all previously open threats have been mitigated.
 | Proxy config | TM-NET-004 | Opt in with `respect_proxy_env(true)` only when an explicit proxy is required |
 | Content filtering | TM-LEAK-003 | Filter sensitive data from responses |
 | URL allow-listing | TM-INPUT-002, TM-INPUT-007 | Use allow_prefixes for positive security model (now URL-aware) |
+| Network isolation | TM-SSRF, TM-NET | Route FetchKit through dedicated egress controls; library checks are defense in depth |
 
 ## Security Controls Matrix
 
@@ -376,11 +379,15 @@ None — all previously open threats have been mitigated.
 |---------|----------|---------------|
 | Scheme validation | TM-INPUT | `starts_with("http://")` check; also enforced at each redirect hop |
 | URL prefix allow/block | TM-INPUT | URL-aware prefix matching via parsed URL components |
+| Hostname block rules | TM-INPUT | Exact host and suffix checks before DNS resolution |
+| Port allow-listing | TM-INPUT | Optional port restrictions validated before connect and on redirects |
 | Private IP blocking | TM-SSRF | `DnsPolicy::block_private_ips()` with resolve-then-check |
 | DNS pinning | TM-SSRF | `reqwest::ClientBuilder::resolve()` per redirect hop |
 | IPv6-mapped-IPv4 canonicalization | TM-SSRF | `IpAddr::to_canonical()` before range check |
 | IPv4-compatible/6to4 extraction | TM-SSRF | Extract embedded IPv4 from `::` and `2002::` prefixes, validate |
 | Manual redirect following | TM-SSRF | `Policy::none()` with IP validation at each hop |
+| Ambient proxy suppression | TM-NET | `reqwest::ClientBuilder::no_proxy()` unless caller opts in |
+| Same-host redirect hardening | TM-NET | Optional `same_host_redirects_only(true)` for hardened deployments |
 | First-byte timeout | TM-DOS | 1-second connect+response timeout |
 | Body timeout | TM-DOS | 30-second streaming body timeout |
 | Body size limit | TM-DOS | Configurable `max_body_size` (default 10 MB) |

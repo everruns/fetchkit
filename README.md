@@ -48,6 +48,9 @@ fetchkit fetch https://example.com -o json
 # Custom user agent
 fetchkit fetch https://example.com --user-agent "MyBot/1.0"
 
+# Hardened outbound policy for cluster/data-plane use
+fetchkit fetch https://example.com --hardened
+
 # Show full documentation
 fetchkit --llmtxt
 ```
@@ -85,6 +88,9 @@ Run as a Model Context Protocol server:
 
 ```bash
 fetchkit mcp
+
+# Hardened profile for cluster/data-plane use
+fetchkit mcp --hardened
 ```
 
 Exposes `fetchkit` tool over JSON-RPC 2.0 stdio transport. Returns markdown with frontmatter (same format as CLI). Compatible with Claude Desktop and other MCP clients.
@@ -127,6 +133,17 @@ let tool = ToolBuilder::new()
 
 let request = FetchRequest::new("https://example.com");
 let response = tool.execute(request).await.unwrap();
+```
+
+### Hardened Tool Profile
+
+```rust
+use fetchkit::Tool;
+
+let tool = Tool::builder()
+    .hardened()
+    .allow_prefix("https://docs.example.com")
+    .build();
 ```
 
 ## Python Bindings
@@ -197,9 +214,10 @@ let tool = Tool::builder()
 
 DNS pinning prevents DNS rebinding attacks. IPv6-mapped IPv4 addresses are canonicalized before validation.
 Redirects are followed manually in the default fetcher so each hop is revalidated against scheme and DNS policy. Allow/block prefixes are matched against parsed URLs rather than raw strings, which prevents lookalike host overmatches such as `allowed.example.com.evil.test`.
-Proxy environment variables are ignored by default; opt in with `ToolBuilder::respect_proxy_env(true)` only when you intentionally want `HTTP_PROXY`/`HTTPS_PROXY` routing.
+Proxy environment variables are ignored by default. Use the hardened profile for cluster-facing deployments and opt in with `ToolBuilder::respect_proxy_env(true)` only when it is part of an intentional egress design.
 
 See [`specs/threat-model.md`](specs/threat-model.md) for the full threat model.
+See [`docs/hardening.md`](docs/hardening.md) for deployment guidance.
 
 ## Configuration
 

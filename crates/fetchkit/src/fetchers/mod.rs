@@ -141,6 +141,8 @@ impl FetcherRegistry {
 
         let parsed_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
+        options.validate_url(&parsed_url)?;
+
         // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
         // encoding-based bypasses (case, trailing dots, default ports)
         // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks
