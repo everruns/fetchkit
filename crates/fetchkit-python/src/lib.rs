@@ -266,7 +266,7 @@ impl PyFetchKitTool {
 
     /// Get tool description
     fn description(&self) -> String {
-        self.inner.description()
+        self.inner.description().to_string()
     }
 
     /// Get system prompt

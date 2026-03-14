@@ -111,9 +111,9 @@ fn test_llmtxt_flag() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("FetchKit Tool"));
-    assert!(stdout.contains("Capabilities"));
-    assert!(stdout.contains("Input Parameters"));
+    assert!(stdout.contains("# Web Fetch"));
+    assert!(stdout.contains("## Parameters"));
+    assert!(stdout.contains("**Name:** `web_fetch`"));
 }
 
 // ============================================================================
@@ -265,7 +265,7 @@ fn test_mcp_initialize() {
     assert_eq!(list_resp["id"], 2);
     let tools = list_resp["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["name"], "fetchkit");
+    assert_eq!(tools[0]["name"], "web_fetch");
     assert!(tools[0]["inputSchema"].is_object());
 }
 

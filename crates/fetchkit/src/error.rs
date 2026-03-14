@@ -80,6 +80,24 @@ impl FetchError {
     }
 }
 
+/// Errors returned by the toolkit-library contract surface.
+#[derive(Debug, Error)]
+pub enum ToolError {
+    /// Safe to surface to an LLM or end user.
+    #[error("{0}")]
+    UserFacing(String),
+    /// Internal/operator-facing failure details.
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl ToolError {
+    /// Whether this error is safe to show to the LLM.
+    pub fn is_user_facing(&self) -> bool {
+        matches!(self, Self::UserFacing(_))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +124,11 @@ mod tests {
             FetchError::FirstByteTimeout.to_string(),
             "Request timed out: server did not respond within 1 second"
         );
+    }
+
+    #[test]
+    fn test_tool_error_classification() {
+        assert!(ToolError::UserFacing("url is required".to_string()).is_user_facing());
+        assert!(!ToolError::Internal("serde failure".to_string()).is_user_facing());
     }
 }
