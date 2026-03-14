@@ -287,6 +287,44 @@ async fn test_size_for_text_content() {
 }
 
 #[tokio::test]
+async fn test_text_body_truncated_at_safety_limit() {
+    let mock_server = MockServer::start().await;
+
+    let body = "A".repeat(1024);
+
+    Mock::given(method("GET"))
+        .and(path("/large"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(body)
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/large", mock_server.uri()));
+    let resp = fetch_with_options(
+        req,
+        FetchOptions {
+            enable_markdown: true,
+            enable_text: true,
+            dns_policy: DnsPolicy::allow_all(),
+            max_body_size: Some(128),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(resp.size, Some(128));
+    assert_eq!(resp.truncated, Some(true));
+
+    let content = resp.content.unwrap();
+    assert!(content.starts_with(&"A".repeat(128)));
+    assert!(content.contains("[..content truncated...]"));
+}
+
+#[tokio::test]
 async fn test_url_prefix_allow_list() {
     let mock_server = MockServer::start().await;
 

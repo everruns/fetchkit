@@ -49,9 +49,12 @@ Provide a builder to configure tool options, including:
 - Support enabling/disabling request options (feature gating).
 - Support User-Agent override (e.g., `user_agent`).
 - Support `block_private_ips(bool)` for SSRF prevention (default: `true`).
+- Support `max_body_size(usize)` for bounded response bodies.
 - Support `enable_save_to_file(bool)` for file download (default: `false`).
   When enabled, adds `save_to_file` to input schema and `saved_path`/`bytes_written` to output.
   Requires a `FileSaver` implementation at execution time.
+- Support `respect_proxy_env(bool)` to opt into `HTTP_PROXY`/`HTTPS_PROXY`
+  inheritance (default: `false`).
 
 #### Types
 
@@ -162,6 +165,8 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 
 - User-Agent: configurable via tool builder or CLI/MCP/Python options
   (default `Everruns FetchKit/1.0`).
+- Proxy env vars are ignored by default. Callers must opt in via
+  `ToolBuilder::respect_proxy_env(true)` if they need environment-configured proxies.
 - Accept header:
   - Markdown: `text/html, text/markdown, text/plain, */*;q=0.8`
   - Text: `text/html, text/plain, */*;q=0.8`
@@ -176,10 +181,15 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 
 - First-byte timeout (connect + first response byte): 1s.
 - Body timeout: 30s total.
+- Maximum response body size: 10 MB by default; configurable via `max_body_size`.
 - On body timeout:
   - Return partial body
   - Set `truncated: true`
-  - Append `\n\n[..more content timed out...]` to content
+  - Append truncation marker to content
+- On body size limit:
+  - Return partial body
+  - Set `truncated: true`
+  - Append truncation marker to content
 
 ### Response Rules
 
@@ -222,6 +232,7 @@ When `save_to_file` is set on the request:
 
 - For binary: `size` from `Content-Length` if present.
 - For text/HTML: `size` equals bytes read from body stream (before conversion).
+- If body truncation happens, `size` equals the captured byte count after limits are applied.
 
 #### Filename
 

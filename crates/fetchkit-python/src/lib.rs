@@ -177,17 +177,20 @@ pub struct PyFetchKitTool {
 impl PyFetchKitTool {
     /// Create a new tool with default options
     #[new]
-    #[pyo3(signature = (enable_markdown=true, enable_text=true, user_agent=None, allow_prefixes=None, block_prefixes=None))]
+    #[pyo3(signature = (enable_markdown=true, enable_text=true, user_agent=None, allow_prefixes=None, block_prefixes=None, max_body_size=None, respect_proxy_env=false))]
     fn new(
         enable_markdown: bool,
         enable_text: bool,
         user_agent: Option<String>,
         allow_prefixes: Option<Vec<String>>,
         block_prefixes: Option<Vec<String>>,
+        max_body_size: Option<usize>,
+        respect_proxy_env: bool,
     ) -> PyResult<Self> {
         let mut builder = ToolBuilder::new()
             .enable_markdown(enable_markdown)
-            .enable_text(enable_text);
+            .enable_text(enable_text)
+            .respect_proxy_env(respect_proxy_env);
 
         if let Some(ua) = user_agent {
             builder = builder.user_agent(ua);
@@ -203,6 +206,10 @@ impl PyFetchKitTool {
             for prefix in prefixes {
                 builder = builder.block_prefix(prefix);
             }
+        }
+
+        if let Some(max_bytes) = max_body_size {
+            builder = builder.max_body_size(max_bytes);
         }
 
         let runtime = tokio::runtime::Runtime::new()
@@ -273,7 +280,7 @@ fn fetch(
     as_markdown: Option<bool>,
     as_text: Option<bool>,
 ) -> PyResult<PyFetchResponse> {
-    let tool = PyFetchKitTool::new(true, true, None, None, None)?;
+    let tool = PyFetchKitTool::new(true, true, None, None, None, None, false)?;
     tool.fetch(url, method, as_markdown, as_text)
 }
 

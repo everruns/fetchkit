@@ -162,6 +162,11 @@ impl Fetcher for GitHubRepoFetcher {
             .timeout(API_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none());
 
+        if !options.respect_proxy_env {
+            // THREAT[TM-NET-004]: Ignore ambient proxy env by default in shared runtimes.
+            client_builder = client_builder.no_proxy();
+        }
+
         if options.dns_policy.block_private {
             let validated_addr = options
                 .dns_policy

@@ -1,3 +1,6 @@
+// Decisions:
+// - Ignore ambient proxy env by default. Shared agent runtimes should not inherit network routing.
+// - Cap decompressed textual bodies. LLM-oriented fetches do not need unbounded response growth.
 //! Default HTTP fetcher
 //!
 //! Handles general HTTP/HTTPS URLs with HTML conversion support.
@@ -366,6 +369,11 @@ fn build_client_for_url(
         .connect_timeout(FIRST_BYTE_TIMEOUT)
         .timeout(FIRST_BYTE_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
+
+    if !options.respect_proxy_env {
+        // THREAT[TM-NET-004]: Ignore ambient proxy env by default in shared runtimes.
+        client_builder = client_builder.no_proxy();
+    }
 
     if options.dns_policy.block_private {
         if let Some(host) = url.host_str() {

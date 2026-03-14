@@ -28,6 +28,8 @@ pub struct FetchOptions {
     pub max_body_size: Option<usize>,
     /// Enable save_to_file parameter in requests
     pub enable_save_to_file: bool,
+    /// Whether to respect HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the environment
+    pub respect_proxy_env: bool,
 }
 
 /// Fetch a URL and return the response
@@ -102,5 +104,8 @@ mod tests {
         assert!(!options.enable_text);
         // Safe by default: private IPs blocked
         assert!(options.dns_policy.block_private);
+        assert!(options.max_body_size.is_none());
+        assert!(!options.enable_save_to_file);
+        assert!(!options.respect_proxy_env);
     }
 }
