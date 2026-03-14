@@ -4,6 +4,8 @@ use fetchkit::{
     fetch_with_options, DnsPolicy, FetchError, FetchOptions, FetchRequest, FetcherRegistry,
     HttpMethod, LocalFileSaver, Tool,
 };
+use serde_json::json;
+use tower::Service;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -917,4 +919,62 @@ async fn test_execute_with_saver_no_save_falls_through() {
     assert!(resp.content.unwrap().contains("Hello"));
     assert!(resp.saved_path.is_none());
     assert!(resp.bytes_written.is_none());
+}
+
+#[tokio::test]
+async fn test_tool_execution_returns_contract_output() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("<h1>Hello</h1>")
+                .insert_header("content-type", "text/html"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = test_tool();
+    let output = tool
+        .execution(json!({
+            "url": format!("{}/", mock_server.uri()),
+            "as_markdown": true
+        }))
+        .unwrap()
+        .execute()
+        .await
+        .unwrap();
+
+    assert_eq!(output.result["status_code"], 200);
+    assert!(output.result["format"].is_string());
+    assert!(output.result["content"].as_str().unwrap().contains("Hello"));
+    assert_eq!(output.metadata.extra["http_status"], 200);
+    assert!(output.images.is_empty());
+}
+
+#[tokio::test]
+async fn test_tool_service_executes_json_calls() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("Hello, Service!")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let mut service = Tool::builder().block_private_ips(false).build_service();
+    let result = service
+        .call(json!({
+            "url": format!("{}/", mock_server.uri())
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(result["status_code"], 200);
+    assert_eq!(result["content"], "Hello, Service!");
 }

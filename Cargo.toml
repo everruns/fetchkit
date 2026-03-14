@@ -48,3 +48,6 @@ tempfile = "3"
 
 # Async traits
 async-trait = "0.1"
+
+# Service trait
+tower = { version = "0.5", features = ["util"] }

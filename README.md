@@ -135,6 +135,21 @@ let request = FetchRequest::new("https://example.com");
 let response = tool.execute(request).await.unwrap();
 ```
 
+### Toolkit Contract Surface
+
+```rust
+use fetchkit::ToolBuilder;
+
+let builder = ToolBuilder::new().enable_save_to_file(true);
+let tool = builder.build();
+
+assert_eq!(tool.name(), "web_fetch");
+assert_eq!(tool.display_name(), "Web Fetch");
+
+let definition = builder.build_tool_definition();
+let mut service = builder.build_service();
+```
+
 ### Hardened Tool Profile
 
 ```rust

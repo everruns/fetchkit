@@ -423,6 +423,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "url",

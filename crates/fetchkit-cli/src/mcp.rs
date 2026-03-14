@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) server implementation
 
-use fetchkit::{FetchRequest, Tool};
+use fetchkit::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -105,23 +105,14 @@ impl McpServer {
     }
 
     fn handle_tools_list(&self, id: Option<Value>) -> JsonRpcResponse {
-        let input_schema = json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to fetch (required, must be http:// or https://)"
-                }
-            },
-            "required": ["url"]
-        });
+        let input_schema = self.tool.input_schema();
 
         JsonRpcResponse::success(
             id,
             json!({
                 "tools": [{
-                    "name": "fetchkit",
-                    "description": "Fetch URL and return markdown with metadata frontmatter. Optimized for LLM consumption.",
+                    "name": self.tool.name(),
+                    "description": self.tool.description(),
                     "inputSchema": input_schema
                 }]
             }),
@@ -134,30 +125,48 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
 
-        if tool_name != "fetchkit" {
+        if tool_name != self.tool.name() {
             return JsonRpcResponse::error(id, -32602, format!("Unknown tool: {}", tool_name));
         }
 
-        self.handle_fetchkit_call(id, params).await
+        self.handle_tool_call(id, params).await
     }
 
-    async fn handle_fetchkit_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
-        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+    async fn handle_tool_call(&self, id: Option<Value>, params: Value) -> JsonRpcResponse {
+        let mut arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+        if let Some(object) = arguments.as_object_mut() {
+            let wants_head = object
+                .get("method")
+                .and_then(|value| value.as_str())
+                .is_some_and(|method| method.eq_ignore_ascii_case("HEAD"));
+            let has_output_mode = object.contains_key("as_markdown")
+                || object.contains_key("as_text")
+                || object.contains_key("save_to_file");
 
-        // Extract URL from arguments
-        let url = match arguments.get("url").and_then(|v| v.as_str()) {
-            Some(u) => u.to_string(),
-            None => {
-                return JsonRpcResponse::error(id, -32602, "Missing required argument: url");
+            if !wants_head && !has_output_mode {
+                object.insert("as_markdown".to_string(), json!(true));
+            }
+        }
+
+        let execution = match self.tool.execution(arguments) {
+            Ok(execution) => execution,
+            Err(err) => {
+                return JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{
+                            "type": "text",
+                            "text": format!("Error: {}", err)
+                        }],
+                        "isError": true
+                    }),
+                );
             }
         };
 
-        // Build request with markdown conversion
-        let request = FetchRequest::new(url).as_markdown();
-
-        // Execute tool
-        match self.tool.execute(request).await {
-            Ok(response) => {
+        match execution.execute().await {
+            Ok(output) => {
+                let response = serde_json::from_value(output.result).unwrap_or_default();
                 let output = format_md_with_frontmatter(&response);
                 JsonRpcResponse::success(
                     id,
