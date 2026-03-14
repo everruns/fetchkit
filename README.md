@@ -9,6 +9,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **HTML-to-Text** - Plain text extraction with clean formatting
 - **Binary detection** - Returns metadata only for images, PDFs, etc.
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
+- **Safety limits** - 10 MB default decompressed body cap with truncation
 - **URL filtering** - URL-aware allow/block lists for controlled access
 - **SSRF protection** - Resolve-then-check blocks private IPs by default
 - **MCP server** - Model Context Protocol support for AI tool integration
@@ -196,17 +197,19 @@ let tool = Tool::builder()
 
 DNS pinning prevents DNS rebinding attacks. IPv6-mapped IPv4 addresses are canonicalized before validation.
 Redirects are followed manually in the default fetcher so each hop is revalidated against scheme and DNS policy. Allow/block prefixes are matched against parsed URLs rather than raw strings, which prevents lookalike host overmatches such as `allowed.example.com.evil.test`.
+Proxy environment variables are ignored by default; opt in with `ToolBuilder::respect_proxy_env(true)` only when you intentionally want `HTTP_PROXY`/`HTTPS_PROXY` routing.
 
 See [`specs/threat-model.md`](specs/threat-model.md) for the full threat model.
 
 ## Configuration
 
-### Timeouts
+### Timeouts And Limits
 
 - **First-byte**: 1 second (connect + initial response)
 - **Body**: 30 seconds total
+- **Body size**: 10 MB decompressed content by default
 
-Partial content is returned on body timeout with `truncated: true`.
+Partial content is returned on body timeout or body-size limit with `truncated: true`.
 
 ### Binary Content
 

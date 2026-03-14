@@ -91,6 +91,8 @@ pub struct ToolBuilder {
     max_body_size: Option<usize>,
     /// Enable save_to_file parameter (opt-in)
     enable_save_to_file: bool,
+    /// Whether to honor proxy environment variables
+    respect_proxy_env: bool,
 }
 
 impl ToolBuilder {
@@ -167,6 +169,15 @@ impl ToolBuilder {
         self
     }
 
+    /// Control whether reqwest inherits proxy configuration from the process environment.
+    ///
+    /// Disabled by default so shared runtimes do not accidentally route requests
+    /// through ambient HTTP(S)_PROXY configuration.
+    pub fn respect_proxy_env(mut self, respect: bool) -> Self {
+        self.respect_proxy_env = respect;
+        self
+    }
+
     /// Build the tool
     pub fn build(self) -> Tool {
         Tool {
@@ -178,6 +189,7 @@ impl ToolBuilder {
             dns_policy: self.dns_policy,
             max_body_size: self.max_body_size,
             enable_save_to_file: self.enable_save_to_file,
+            respect_proxy_env: self.respect_proxy_env,
         }
     }
 }
@@ -222,6 +234,7 @@ pub struct Tool {
     dns_policy: DnsPolicy,
     max_body_size: Option<usize>,
     enable_save_to_file: bool,
+    respect_proxy_env: bool,
 }
 
 impl Default for Tool {
@@ -329,6 +342,7 @@ impl Tool {
             dns_policy: self.dns_policy.clone(),
             max_body_size: self.max_body_size,
             enable_save_to_file: self.enable_save_to_file,
+            respect_proxy_env: self.respect_proxy_env,
         }
     }
 
@@ -378,6 +392,8 @@ mod tests {
             .user_agent("TestAgent/1.0")
             .allow_prefix("https://allowed.com")
             .block_prefix("https://blocked.com")
+            .max_body_size(1024)
+            .respect_proxy_env(true)
             .build();
 
         assert!(!tool.enable_markdown);
@@ -387,12 +403,23 @@ mod tests {
         assert_eq!(tool.block_prefixes, vec!["https://blocked.com"]);
         // Safe by default: private IPs blocked
         assert!(tool.dns_policy.block_private);
+        assert_eq!(tool.max_body_size, Some(1024));
+        assert!(!tool.enable_save_to_file);
+        assert!(tool.respect_proxy_env);
     }
 
     #[test]
     fn test_tool_builder_opt_out_private_ip_blocking() {
         let tool = Tool::builder().block_private_ips(false).build();
         assert!(!tool.dns_policy.block_private);
+    }
+
+    #[test]
+    fn test_tool_builder_security_defaults() {
+        let tool = Tool::builder().build();
+        assert!(tool.max_body_size.is_none());
+        assert!(!tool.enable_save_to_file);
+        assert!(!tool.respect_proxy_env);
     }
 
     #[test]

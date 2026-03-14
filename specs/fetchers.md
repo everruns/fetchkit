@@ -38,6 +38,7 @@ Central dispatcher that:
   - Binary content detection (returns metadata only)
   - Timeout handling with partial content support
   - Binary-aware file saving via `fetch_to_file()` override (accepts binary content when saving)
+  - Decompressed body size cap with partial content truncation
 - Returns: Standard `FetchResponse` with format `"markdown"`, `"text"`, or `"raw"`
 
 #### GitHubRepoFetcher
@@ -71,6 +72,10 @@ Fetchers receive `FetchOptions` for:
 - `enable_text` - Enable text conversion
 - `enable_save_to_file` - Enable file saving support
 - `dns_policy` - DNS resolution policy for SSRF prevention (default: block private IPs)
+- `max_body_size` - Maximum response body size after decompression
+  (default: 10 MB)
+- `respect_proxy_env` - Whether to honor `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
+  from the process environment (default: disabled)
 
 ### Extensibility
 
@@ -94,6 +99,8 @@ Both built-in fetchers integrate resolve-then-check DNS validation:
 - Validate IP against blocked ranges (private, loopback, link-local, etc.)
 - Pin validated IP via `reqwest::ClientBuilder::resolve()` to prevent DNS rebinding
 - Enabled by default via `DnsPolicy::default()` (blocks private IPs)
+- Ignore ambient proxy env by default so shared runtimes do not silently route
+  traffic through operator-provided proxies unless explicitly enabled
 - See `specs/threat-model.md` for threat IDs: TM-SSRF-001 through TM-SSRF-010
 
 ## Module Structure

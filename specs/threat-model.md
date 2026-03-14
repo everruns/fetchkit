@@ -8,6 +8,19 @@ influence which URLs are fetched. This document identifies threats that arise wh
 runs inside a container or cluster with access to internal network resources, and tracks
 mitigations implemented in the library.
 
+## Verification Status
+
+Last verified: 2026-03-13
+
+Verified in this review:
+- `cargo test --workspace -- --nocapture`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- `cargo run -p fetchkit-cli -- fetch https://example.com --output json`
+- `cargo run -p fetchkit-cli -- fetch http://127.0.0.1 --output json`
+- `HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 cargo run -p fetchkit-cli -- fetch https://example.com --output json`
+- JSON-RPC smoke test against `cargo run -p fetchkit-cli -- mcp`
+
 ## Threat ID Scheme
 
 **Format:** `TM-<CATEGORY>-<NNN>`
@@ -167,7 +180,7 @@ redirect target, not the original host.
 | TM-NET-001 | HTTP downgrade (HTTPS URL redirects to HTTP) | Medium | Scheme validated per hop (non-HTTP blocked); HTTPS→HTTP downgrade allowed | **ACCEPTED** |
 | TM-NET-002 | TLS certificate validation bypass | Low | Uses reqwest defaults (system certificate store via rustls-platform-verifier) | MITIGATED |
 | TM-NET-003 | Connection reuse leaking context | Low | New reqwest client per request; no connection pooling across requests | MITIGATED |
-| TM-NET-004 | Proxy environment variables (HTTP_PROXY) | Medium | Reqwest respects system proxy env vars; attacker could set these in container | **CALLER RISK** |
+| TM-NET-004 | Proxy environment variables (HTTP_PROXY) | Medium | Clients ignore ambient proxy env by default; callers can opt in explicitly | MITIGATED |
 | TM-NET-005 | Man-in-the-middle on HTTP (non-TLS) | Medium | HTTP scheme is allowed; content can be intercepted/modified on the wire | **ACCEPTED** |
 
 ### Mitigation Details
@@ -185,10 +198,11 @@ The `DefaultFetcher` creates a new `reqwest::Client` per request, which prevents
 connection pool state from leaking between requests. This is a defense-in-depth
 measure.
 
-**TM-NET-004 — Proxy environment variables (CALLER RISK):**
-Reqwest automatically reads `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment
-variables. In a container environment, these should be controlled by the operator.
-This is the caller's responsibility to configure or clear.
+**TM-NET-004 — Proxy environment variables (MITIGATED):**
+FetchKit calls `reqwest::ClientBuilder::no_proxy()` by default, so shared runtimes do
+not silently inherit `HTTP_PROXY`, `HTTPS_PROXY`, or `NO_PROXY` from the process
+environment. Callers that need proxy routing must opt in explicitly via
+`ToolBuilder::respect_proxy_env(true)`.
 
 ## 3. Input Validation (TM-INPUT)
 
@@ -352,7 +366,7 @@ None — all previously open threats have been mitigated.
 | Responsibility | Related Threats | Description |
 |---------------|----------------|-------------|
 | Rate limiting | TM-DOS-004 | Caller must implement request rate limits |
-| Proxy config | TM-NET-004 | Clear or set HTTP_PROXY env vars appropriately |
+| Proxy config | TM-NET-004 | Opt in with `respect_proxy_env(true)` only when an explicit proxy is required |
 | Content filtering | TM-LEAK-003 | Filter sensitive data from responses |
 | URL allow-listing | TM-INPUT-002, TM-INPUT-007 | Use allow_prefixes for positive security model (now URL-aware) |
 
@@ -373,6 +387,7 @@ None — all previously open threats have been mitigated.
 | Script tag stripping | TM-CONV | Skip `script`/`style`/`noscript`/`iframe`/`svg` |
 | Binary detection | TM-CONV | Content-Type prefix matching |
 | New client per request | TM-NET | No connection pool state leakage |
+| Proxy env isolation | TM-NET | `reqwest::ClientBuilder::no_proxy()` by default |
 | Path traversal prevention | TM-INPUT | Lexical path normalization in `LocalFileSaver` |
 | Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |
 
