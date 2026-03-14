@@ -8,8 +8,77 @@
 //! Tests that need loopback (wiremock) must explicitly opt out.
 
 use fetchkit::{FetchError, FetchRequest, Tool};
+use std::env;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio::time::timeout;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn proxy_env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct ProxyEnvGuard {
+    http_proxy: Option<String>,
+    https_proxy: Option<String>,
+    no_proxy: Option<String>,
+}
+
+impl ProxyEnvGuard {
+    fn set(proxy_url: &str) -> Self {
+        let guard = Self {
+            http_proxy: env::var("HTTP_PROXY").ok(),
+            https_proxy: env::var("HTTPS_PROXY").ok(),
+            no_proxy: env::var("NO_PROXY").ok(),
+        };
+
+        env::set_var("HTTP_PROXY", proxy_url);
+        env::set_var("HTTPS_PROXY", proxy_url);
+        env::remove_var("NO_PROXY");
+
+        guard
+    }
+}
+
+impl Drop for ProxyEnvGuard {
+    fn drop(&mut self) {
+        restore_env_var("HTTP_PROXY", self.http_proxy.as_deref());
+        restore_env_var("HTTPS_PROXY", self.https_proxy.as_deref());
+        restore_env_var("NO_PROXY", self.no_proxy.as_deref());
+    }
+}
+
+fn restore_env_var(key: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        env::set_var(key, value);
+    } else {
+        env::remove_var(key);
+    }
+}
+
+async fn spawn_test_proxy() -> (String, oneshot::Receiver<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        if let Ok(Ok((mut stream, _))) = timeout(Duration::from_secs(2), listener.accept()).await {
+            let mut buf = [0_u8; 1024];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                .await;
+            let _ = tx.send(());
+        }
+    });
+
+    (format!("http://{}", addr), rx)
+}
 
 // ============================================================================
 // TM-SSRF-001: Private IP access via URL (blocked by default)
@@ -372,6 +441,112 @@ async fn test_ssrf_010_redirect_scheme_validation() {
     let req = FetchRequest::new(format!("{}/redirect", mock_server.uri()));
     let result = tool.execute(req).await;
     assert!(matches!(result, Err(FetchError::InvalidUrlScheme)));
+}
+
+#[tokio::test]
+async fn test_ssrf_010_same_host_redirect_policy_blocks_cross_host_redirect() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("Location", "https://other.example/final"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .same_host_redirects_only(true)
+        .build();
+    let req = FetchRequest::new(format!("{}/redirect", mock_server.uri()));
+    let result = tool.execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+}
+
+// ============================================================================
+// TM-NET-004: Ambient proxy environment variables
+// ============================================================================
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_net_004_env_proxy_ignored_by_default() {
+    let _lock = proxy_env_lock().lock().unwrap();
+    let (proxy_url, proxy_hit) = spawn_test_proxy().await;
+    let _env = ProxyEnvGuard::set(&proxy_url);
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("direct")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::builder().block_private_ips(false).build();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let response = tool.execute(req).await.unwrap();
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.content.as_deref(), Some("direct"));
+    assert!(timeout(Duration::from_millis(300), proxy_hit)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_net_004_env_proxy_can_be_opted_in() {
+    let _lock = proxy_env_lock().lock().unwrap();
+    let (proxy_url, proxy_hit) = spawn_test_proxy().await;
+    let _env = ProxyEnvGuard::set(&proxy_url);
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("direct")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .use_env_proxy(true)
+        .build();
+    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let response = tool.execute(req).await.unwrap();
+
+    assert_eq!(response.status_code, 502);
+    assert!(timeout(Duration::from_secs(1), proxy_hit).await.is_ok());
+}
+
+// ============================================================================
+// Hardened profile: host and port restrictions
+// ============================================================================
+
+#[tokio::test]
+async fn test_hardened_profile_blocks_internal_hostname_suffixes() {
+    let tool = Tool::builder().hardened().build();
+    let req = FetchRequest::new("https://api.default.svc/status");
+    let result = tool.execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+}
+
+#[tokio::test]
+async fn test_hardened_profile_blocks_non_standard_ports() {
+    let tool = Tool::builder().hardened().build();
+    let req = FetchRequest::new("https://example.com:8443/");
+    let result = tool.execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
 }
 
 // ============================================================================

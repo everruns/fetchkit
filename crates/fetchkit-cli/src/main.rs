@@ -43,7 +43,15 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Run as MCP (Model Context Protocol) server over stdio
-    Mcp,
+    Mcp {
+        /// Apply the hardened outbound policy profile
+        #[arg(long)]
+        hardened: bool,
+
+        /// Allow HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the environment
+        #[arg(long)]
+        allow_env_proxy: bool,
+    },
     /// Fetch URL and output as markdown with metadata frontmatter
     Fetch {
         /// URL to fetch
@@ -56,6 +64,14 @@ enum Commands {
         /// Custom User-Agent
         #[arg(long)]
         user_agent: Option<String>,
+
+        /// Apply the hardened outbound policy profile
+        #[arg(long)]
+        hardened: bool,
+
+        /// Allow HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the environment
+        #[arg(long)]
+        allow_env_proxy: bool,
     },
 }
 
@@ -70,15 +86,20 @@ async fn main() {
     }
 
     match cli.command {
-        Some(Commands::Mcp) => {
-            mcp::run_server().await;
+        Some(Commands::Mcp {
+            hardened,
+            allow_env_proxy,
+        }) => {
+            mcp::run_server(build_tool(None, hardened, allow_env_proxy)).await;
         }
         Some(Commands::Fetch {
             url,
             output,
             user_agent,
+            hardened,
+            allow_env_proxy,
         }) => {
-            run_fetch(&url, output, user_agent).await;
+            run_fetch(&url, output, user_agent, hardened, allow_env_proxy).await;
         }
         None => {
             eprintln!("Usage: fetchkit fetch <URL>");
@@ -89,18 +110,34 @@ async fn main() {
     }
 }
 
-async fn run_fetch(url: &str, output: OutputFormat, user_agent: Option<String>) {
-    // Build request with markdown conversion
-    let request = FetchRequest::new(url).as_markdown();
-
-    // Build tool
+fn build_tool(user_agent: Option<String>, hardened: bool, allow_env_proxy: bool) -> Tool {
     let mut builder = Tool::builder().enable_markdown(true);
+
+    if hardened {
+        builder = builder.hardened();
+    }
+
+    if allow_env_proxy {
+        builder = builder.use_env_proxy(true);
+    }
 
     if let Some(ua) = user_agent {
         builder = builder.user_agent(ua);
     }
 
-    let tool = builder.build();
+    builder.build()
+}
+
+async fn run_fetch(
+    url: &str,
+    output: OutputFormat,
+    user_agent: Option<String>,
+    hardened: bool,
+    allow_env_proxy: bool,
+) {
+    // Build request with markdown conversion
+    let request = FetchRequest::new(url).as_markdown();
+    let tool = build_tool(user_agent, hardened, allow_env_proxy);
 
     // Execute request
     match tool.execute(request).await {

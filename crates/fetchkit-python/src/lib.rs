@@ -177,7 +177,21 @@ pub struct PyFetchKitTool {
 impl PyFetchKitTool {
     /// Create a new tool with default options
     #[new]
-    #[pyo3(signature = (enable_markdown=true, enable_text=true, user_agent=None, allow_prefixes=None, block_prefixes=None, max_body_size=None, respect_proxy_env=false))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        enable_markdown=true,
+        enable_text=true,
+        user_agent=None,
+        allow_prefixes=None,
+        block_prefixes=None,
+        max_body_size=None,
+        block_private_ips=true,
+        respect_proxy_env=false,
+        allowed_ports=None,
+        blocked_hosts=None,
+        same_host_redirects_only=false,
+        hardened=false
+    ))]
     fn new(
         enable_markdown: bool,
         enable_text: bool,
@@ -185,12 +199,25 @@ impl PyFetchKitTool {
         allow_prefixes: Option<Vec<String>>,
         block_prefixes: Option<Vec<String>>,
         max_body_size: Option<usize>,
+        block_private_ips: bool,
         respect_proxy_env: bool,
+        allowed_ports: Option<Vec<u16>>,
+        blocked_hosts: Option<Vec<String>>,
+        same_host_redirects_only: bool,
+        hardened: bool,
     ) -> PyResult<Self> {
         let mut builder = ToolBuilder::new()
             .enable_markdown(enable_markdown)
             .enable_text(enable_text)
             .respect_proxy_env(respect_proxy_env);
+
+        if hardened {
+            builder = builder.hardened();
+        }
+
+        builder = builder
+            .block_private_ips(block_private_ips)
+            .same_host_redirects_only(same_host_redirects_only);
 
         if let Some(ua) = user_agent {
             builder = builder.user_agent(ua);
@@ -210,6 +237,22 @@ impl PyFetchKitTool {
 
         if let Some(max_bytes) = max_body_size {
             builder = builder.max_body_size(max_bytes);
+        }
+
+        if let Some(ports) = allowed_ports {
+            for port in ports {
+                builder = builder.allow_port(port);
+            }
+        }
+
+        if let Some(hosts) = blocked_hosts {
+            for host in hosts {
+                builder = if host.starts_with('.') {
+                    builder.block_host_suffix(host)
+                } else {
+                    builder.block_host(host)
+                };
+            }
         }
 
         let runtime = tokio::runtime::Runtime::new()
@@ -280,7 +323,9 @@ fn fetch(
     as_markdown: Option<bool>,
     as_text: Option<bool>,
 ) -> PyResult<PyFetchResponse> {
-    let tool = PyFetchKitTool::new(true, true, None, None, None, None, false)?;
+    let tool = PyFetchKitTool::new(
+        true, true, None, None, None, None, true, false, None, None, false, false,
+    )?;
     tool.fetch(url, method, as_markdown, as_text)
 }
 

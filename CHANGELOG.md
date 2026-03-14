@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Highlights
+
+- Added a hardened outbound profile for cluster and data-plane deployments
+- Ambient proxy environment variables are now ignored by default
+- Added hostname, port, and redirect restrictions for tighter egress policy
+
+### What's Changed
+
+- `fix(security): harden outbound fetch policy and add deployment guidance`
+
 ## [0.1.3] - 2026-03-12
 
 ### Highlights

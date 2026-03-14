@@ -337,7 +337,7 @@ async fn send_request_following_redirects(
             .await
             .map_err(FetchError::from_reqwest)?;
 
-        let Some(next_url) = redirect_target(&current_url, &response)? else {
+        let Some(next_url) = redirect_target(&current_url, &response, options)? else {
             return Ok(response);
         };
 
@@ -394,6 +394,7 @@ fn build_client_for_url(
 fn redirect_target(
     base_url: &Url,
     response: &reqwest::Response,
+    options: &FetchOptions,
 ) -> Result<Option<Url>, FetchError> {
     if !response.status().is_redirection() {
         return Ok(None);
@@ -418,6 +419,8 @@ fn redirect_target(
     if next_url.scheme() != "http" && next_url.scheme() != "https" {
         return Err(FetchError::InvalidUrlScheme);
     }
+
+    options.validate_redirect_target(base_url, &next_url)?;
 
     Ok(Some(next_url))
 }
@@ -658,7 +661,7 @@ mod tests {
         let base_url = Url::parse(&format!("{}/start", origin.uri())).unwrap();
         let response = client.get(base_url.clone()).send().await.unwrap();
 
-        let redirect = redirect_target(&base_url, &response).unwrap();
+        let redirect = redirect_target(&base_url, &response, &FetchOptions::default()).unwrap();
         assert_eq!(
             redirect.unwrap(),
             Url::parse(&format!("{}/final", origin.uri())).unwrap()
@@ -683,7 +686,7 @@ mod tests {
         let base_url = Url::parse(&format!("{}/start", origin.uri())).unwrap();
         let response = client.get(base_url.clone()).send().await.unwrap();
 
-        let redirect = redirect_target(&base_url, &response);
+        let redirect = redirect_target(&base_url, &response, &FetchOptions::default());
         assert!(matches!(redirect, Err(FetchError::InvalidUrlScheme)));
     }
 }

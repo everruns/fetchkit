@@ -67,10 +67,8 @@ struct McpServer {
 }
 
 impl McpServer {
-    fn new() -> Self {
-        Self {
-            tool: Tool::default(),
-        }
+    fn new(tool: Tool) -> Self {
+        Self { tool }
     }
 
     async fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
@@ -222,8 +220,8 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
 }
 
 /// Run the MCP server over stdio
-pub async fn run_server() {
-    let server = McpServer::new();
+pub async fn run_server(tool: Tool) {
+    let server = McpServer::new(tool);
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 

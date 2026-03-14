@@ -93,6 +93,12 @@ pub struct ToolBuilder {
     enable_save_to_file: bool,
     /// Whether to honor proxy environment variables
     respect_proxy_env: bool,
+    /// Restrict outbound requests to these ports. Empty means any port.
+    allowed_ports: Vec<u16>,
+    /// Block exact hosts and suffix rules. Leading '.' means suffix match.
+    blocked_hosts: Vec<String>,
+    /// Restrict redirects to the original host only.
+    same_host_redirects_only: bool,
 }
 
 impl ToolBuilder {
@@ -152,6 +158,40 @@ impl ToolBuilder {
         self
     }
 
+    /// Allow outbound requests to a specific port.
+    ///
+    /// If no ports are configured, any URL port is allowed.
+    pub fn allow_port(mut self, port: u16) -> Self {
+        if !self.allowed_ports.contains(&port) {
+            self.allowed_ports.push(port);
+        }
+        self
+    }
+
+    /// Block an exact hostname before DNS resolution.
+    pub fn block_host(mut self, host: impl Into<String>) -> Self {
+        self.blocked_hosts.push(host.into());
+        self
+    }
+
+    /// Block a hostname suffix before DNS resolution.
+    ///
+    /// Suffixes should usually start with `.` such as `.cluster.local`.
+    pub fn block_host_suffix(mut self, suffix: impl Into<String>) -> Self {
+        let mut suffix = suffix.into();
+        if !suffix.starts_with('.') {
+            suffix.insert(0, '.');
+        }
+        self.blocked_hosts.push(suffix);
+        self
+    }
+
+    /// Restrict redirects to the original host only.
+    pub fn same_host_redirects_only(mut self, enable: bool) -> Self {
+        self.same_host_redirects_only = enable;
+        self
+    }
+
     /// Control private/reserved IP range blocking (SSRF prevention)
     ///
     /// Enabled by default. When enabled, FetchKit resolves hostnames to IP
@@ -178,6 +218,32 @@ impl ToolBuilder {
         self
     }
 
+    /// Alias for [`respect_proxy_env`](Self::respect_proxy_env).
+    pub fn use_env_proxy(mut self, enable: bool) -> Self {
+        self.respect_proxy_env = enable;
+        self
+    }
+
+    /// Apply a production-oriented hardening profile.
+    ///
+    /// This preset keeps private IP blocking enabled, ignores ambient proxy
+    /// environment variables, restricts outbound traffic to ports 80 and 443,
+    /// blocks common internal DNS suffixes, and only follows same-host redirects.
+    pub fn hardened(mut self) -> Self {
+        self = self
+            .block_private_ips(true)
+            .use_env_proxy(false)
+            .allow_port(80)
+            .allow_port(443)
+            .block_host("localhost")
+            .block_host_suffix(".local")
+            .block_host_suffix(".internal")
+            .block_host_suffix(".svc")
+            .block_host_suffix(".cluster.local")
+            .same_host_redirects_only(true);
+        self
+    }
+
     /// Build the tool
     pub fn build(self) -> Tool {
         Tool {
@@ -190,6 +256,9 @@ impl ToolBuilder {
             max_body_size: self.max_body_size,
             enable_save_to_file: self.enable_save_to_file,
             respect_proxy_env: self.respect_proxy_env,
+            allowed_ports: self.allowed_ports,
+            blocked_hosts: self.blocked_hosts,
+            same_host_redirects_only: self.same_host_redirects_only,
         }
     }
 }
@@ -235,6 +304,9 @@ pub struct Tool {
     max_body_size: Option<usize>,
     enable_save_to_file: bool,
     respect_proxy_env: bool,
+    allowed_ports: Vec<u16>,
+    blocked_hosts: Vec<String>,
+    same_host_redirects_only: bool,
 }
 
 impl Default for Tool {
@@ -343,6 +415,9 @@ impl Tool {
             max_body_size: self.max_body_size,
             enable_save_to_file: self.enable_save_to_file,
             respect_proxy_env: self.respect_proxy_env,
+            allowed_ports: self.allowed_ports.clone(),
+            blocked_hosts: self.blocked_hosts.clone(),
+            same_host_redirects_only: self.same_host_redirects_only,
         }
     }
 
@@ -406,6 +481,9 @@ mod tests {
         assert_eq!(tool.max_body_size, Some(1024));
         assert!(!tool.enable_save_to_file);
         assert!(tool.respect_proxy_env);
+        assert!(tool.allowed_ports.is_empty());
+        assert!(tool.blocked_hosts.is_empty());
+        assert!(!tool.same_host_redirects_only);
     }
 
     #[test]
@@ -420,6 +498,21 @@ mod tests {
         assert!(tool.max_body_size.is_none());
         assert!(!tool.enable_save_to_file);
         assert!(!tool.respect_proxy_env);
+        assert!(tool.allowed_ports.is_empty());
+        assert!(tool.blocked_hosts.is_empty());
+        assert!(!tool.same_host_redirects_only);
+    }
+
+    #[test]
+    fn test_tool_builder_hardened_profile() {
+        let tool = Tool::builder().hardened().build();
+
+        assert!(tool.dns_policy.block_private);
+        assert!(!tool.respect_proxy_env);
+        assert_eq!(tool.allowed_ports, vec![80, 443]);
+        assert!(tool.blocked_hosts.contains(&"localhost".to_string()));
+        assert!(tool.blocked_hosts.contains(&".cluster.local".to_string()));
+        assert!(tool.same_host_redirects_only);
     }
 
     #[test]
