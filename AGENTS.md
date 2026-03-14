@@ -2,6 +2,8 @@
 
 This repo is intended to be runnable locally and easy for coding agents to work in.
 
+Always make sure you are working on top of latest main from remote. Especially in detached worktrees, fetch `origin/main` and rebase or branch from it before editing.
+
 Style
 Telegraph. Drop filler/grammar. Min tokens (global AGENTS + replies).
 
@@ -178,7 +180,7 @@ doppler run -- bash -lc 'GH_TOKEN="$GITHUB_TOKEN" gh auth status'
 
 Before creating a pull request, ensure:
 
-1. **Branch rebased**: Rebase on latest main to avoid merge conflicts
+1. **Branch rebased**: Rebase on latest main to avoid merge conflicts. In detached worktrees, first create or switch to a topic branch that is based on `origin/main`.
    ```bash
    git fetch origin main && git rebase origin/main
    ```
