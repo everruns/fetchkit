@@ -472,9 +472,7 @@ async fn test_ssrf_010_same_host_redirect_policy_blocks_cross_host_redirect() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_net_004_env_proxy_ignored_by_default() {
-    let _lock = proxy_env_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = proxy_env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (proxy_url, proxy_hit) = spawn_test_proxy().await;
     let _env = ProxyEnvGuard::set(&proxy_url);
 
@@ -503,9 +501,7 @@ async fn test_net_004_env_proxy_ignored_by_default() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_net_004_env_proxy_can_be_opted_in() {
-    let _lock = proxy_env_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _lock = proxy_env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (proxy_url, proxy_hit) = spawn_test_proxy().await;
     let _env = ProxyEnvGuard::set(&proxy_url);
 
