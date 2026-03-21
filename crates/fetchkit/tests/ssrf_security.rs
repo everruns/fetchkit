@@ -472,7 +472,9 @@ async fn test_ssrf_010_same_host_redirect_policy_blocks_cross_host_redirect() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_net_004_env_proxy_ignored_by_default() {
-    let _lock = proxy_env_lock().lock().unwrap();
+    let _lock = proxy_env_lock()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (proxy_url, proxy_hit) = spawn_test_proxy().await;
     let _env = ProxyEnvGuard::set(&proxy_url);
 
@@ -501,26 +503,20 @@ async fn test_net_004_env_proxy_ignored_by_default() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_net_004_env_proxy_can_be_opted_in() {
-    let _lock = proxy_env_lock().lock().unwrap();
+    let _lock = proxy_env_lock()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (proxy_url, proxy_hit) = spawn_test_proxy().await;
     let _env = ProxyEnvGuard::set(&proxy_url);
 
-    let mock_server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string("direct")
-                .insert_header("content-type", "text/plain"),
-        )
-        .mount(&mock_server)
-        .await;
-
+    // Use a non-loopback hostname so reqwest does not bypass the proxy.
+    // The proxy intercepts the CONNECT/request before DNS resolution,
+    // so an unresolvable host is fine — the proxy returns 502.
     let tool = Tool::builder()
         .block_private_ips(false)
         .use_env_proxy(true)
         .build();
-    let req = FetchRequest::new(format!("{}/", mock_server.uri()));
+    let req = FetchRequest::new("http://proxy-test-target.invalid/");
     let response = tool.execute(req).await.unwrap();
 
     assert_eq!(response.status_code, 502);
