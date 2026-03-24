@@ -8,7 +8,10 @@
 //! specialized fetchers.
 
 use crate::client::FetchOptions;
-use crate::convert::{filter_excessive_newlines, html_to_markdown, html_to_text, is_html};
+use crate::convert::{
+    filter_excessive_newlines, html_to_markdown, html_to_text, is_html, is_markdown_content_type,
+    is_plain_text_content_type,
+};
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
 use crate::file_saver::FileSaver;
@@ -210,17 +213,26 @@ impl Fetcher for DefaultFetcher {
 
         // Determine format and convert if needed
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
-        let (format, final_content) = if is_html(&meta.content_type, &content) {
-            if wants_markdown {
-                ("markdown".to_string(), html_to_markdown(&content))
-            } else if wants_text {
-                ("text".to_string(), html_to_text(&content))
+        let (format, final_content) =
+            if is_markdown_content_type(&meta.content_type) && wants_markdown {
+                // Server already returned markdown — skip conversion
+                debug!("Content-type is markdown; skipping HTML conversion");
+                ("markdown".to_string(), content)
+            } else if is_plain_text_content_type(&meta.content_type) && wants_text {
+                // Server already returned plain text — skip conversion
+                debug!("Content-type is plain text; skipping HTML conversion");
+                ("text".to_string(), content)
+            } else if is_html(&meta.content_type, &content) {
+                if wants_markdown {
+                    ("markdown".to_string(), html_to_markdown(&content))
+                } else if wants_text {
+                    ("text".to_string(), html_to_text(&content))
+                } else {
+                    ("raw".to_string(), content)
+                }
             } else {
                 ("raw".to_string(), content)
-            }
-        } else {
-            ("raw".to_string(), content)
-        };
+            };
 
         // Apply newline filtering
         let mut final_content = filter_excessive_newlines(&final_content);
@@ -688,5 +700,67 @@ mod tests {
 
         let redirect = redirect_target(&base_url, &response, &FetchOptions::default());
         assert!(matches!(redirect, Err(FetchError::InvalidUrlScheme)));
+    }
+
+    #[tokio::test]
+    async fn test_skip_conversion_for_markdown_content_type() {
+        let server = MockServer::start().await;
+        let md_body = "# Already Markdown\n\nThis is **already** formatted.";
+        Mock::given(method("GET"))
+            .and(path("/doc"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(md_body, "text/markdown; charset=utf-8"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/doc", server.uri())).as_markdown();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.format.as_deref(), Some("markdown"));
+        // Content should be passed through without HTML conversion mangling
+        assert!(response
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("# Already Markdown"));
+        assert!(response.content.as_deref().unwrap().contains("**already**"));
+    }
+
+    #[tokio::test]
+    async fn test_skip_conversion_for_plain_text_content_type() {
+        let server = MockServer::start().await;
+        let text_body = "Just plain text\nwith newlines.";
+        Mock::given(method("GET"))
+            .and(path("/plain"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(text_body)
+                    .insert_header("content-type", "text/plain"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_text: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/plain", server.uri())).as_text();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.format.as_deref(), Some("text"));
+        assert!(response
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("Just plain text"));
     }
 }
