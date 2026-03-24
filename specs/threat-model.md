@@ -394,6 +394,7 @@ None — all previously open threats have been mitigated.
 | Script tag stripping | TM-CONV | Skip `script`/`style`/`noscript`/`iframe`/`svg` |
 | Binary detection | TM-CONV | Content-Type prefix matching |
 | New client per request | TM-NET | No connection pool state leakage |
+| Fetcher API URL hardcoding | TM-SSRF | Specialized fetchers (GitHub, Twitter) connect to hardcoded API hosts, not user-controlled URLs; DNS validation applied on initial connect |
 | Proxy env isolation | TM-NET | `reqwest::ClientBuilder::no_proxy()` by default |
 | Path traversal prevention | TM-INPUT | Lexical path normalization in `LocalFileSaver` |
 | Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |

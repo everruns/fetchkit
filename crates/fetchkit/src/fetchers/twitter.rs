@@ -787,6 +787,108 @@ mod tests {
         assert!(output.contains("via oEmbed, limited data"));
     }
 
+    #[test]
+    fn test_format_syndication_with_media() {
+        let tweet = SyndicationTweet {
+            text: Some("Look at this".to_string()),
+            user: Some(SyndicationUser {
+                name: Some("Photographer".to_string()),
+                screen_name: Some("photog".to_string()),
+            }),
+            created_at: None,
+            favorite_count: None,
+            conversation_count: None,
+            article: None,
+            media_details: Some(vec![
+                SyndicationMedia {
+                    media_type: Some("photo".to_string()),
+                    media_url_https: Some("https://pbs.twimg.com/media/photo1.jpg".to_string()),
+                    video_info: None,
+                },
+                SyndicationMedia {
+                    media_type: Some("video".to_string()),
+                    media_url_https: Some("https://pbs.twimg.com/media/thumb.jpg".to_string()),
+                    video_info: Some(SyndicationVideoInfo {}),
+                },
+            ]),
+            entities: None,
+            quoted_tweet: None,
+        };
+
+        let output = format_syndication_response(&tweet, "https://x.com/photog/status/1");
+        assert!(output.contains("![Image](https://pbs.twimg.com/media/photo1.jpg)"));
+        assert!(output.contains("![Video thumbnail](https://pbs.twimg.com/media/thumb.jpg)"));
+    }
+
+    #[test]
+    fn test_format_syndication_with_quoted_tweet() {
+        let tweet = SyndicationTweet {
+            text: Some("Interesting take".to_string()),
+            user: Some(SyndicationUser {
+                name: Some("Quoter".to_string()),
+                screen_name: Some("quoter".to_string()),
+            }),
+            created_at: None,
+            favorite_count: None,
+            conversation_count: None,
+            article: None,
+            media_details: None,
+            entities: None,
+            quoted_tweet: Some(Box::new(SyndicationTweet {
+                text: Some("Original thought here".to_string()),
+                user: Some(SyndicationUser {
+                    name: Some("Original Author".to_string()),
+                    screen_name: Some("original".to_string()),
+                }),
+                created_at: None,
+                favorite_count: None,
+                conversation_count: None,
+                article: None,
+                media_details: None,
+                entities: None,
+                quoted_tweet: None,
+            })),
+        };
+
+        let output = format_syndication_response(&tweet, "https://x.com/quoter/status/1");
+        assert!(output.contains("Interesting take"));
+        assert!(output.contains("> **Original Author** (@original):"));
+        assert!(output.contains("> Original thought here"));
+    }
+
+    #[test]
+    fn test_format_syndication_minimal_fields() {
+        let tweet = SyndicationTweet {
+            text: None,
+            user: None,
+            created_at: None,
+            favorite_count: None,
+            conversation_count: None,
+            article: None,
+            media_details: None,
+            entities: None,
+            quoted_tweet: None,
+        };
+
+        let output = format_syndication_response(&tweet, "https://x.com/u/status/1");
+        // Should still produce valid output with source link
+        assert!(output.contains("Source: https://x.com/u/status/1"));
+        assert!(output.contains("---"));
+    }
+
+    #[test]
+    fn test_format_oembed_minimal_fields() {
+        let oembed = OEmbedResponse {
+            author_name: None,
+            author_url: None,
+            html: None,
+        };
+
+        let output = format_oembed_response(&oembed, "https://x.com/u/status/1");
+        assert!(output.contains("@unknown (Unknown)"));
+        assert!(output.contains("Source:"));
+    }
+
     #[tokio::test]
     async fn test_fetch_syndication_with_mock() {
         use wiremock::matchers::{method, path, query_param};
