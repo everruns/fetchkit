@@ -156,6 +156,52 @@ async fn main() {
         }
     }
 
+    // 7. Twitter/X regular tweet via syndication API (soft — third-party API)
+    println!("7. Fetch Twitter/X tweet (soft, third-party API)");
+    println!("   URL: https://x.com/rustlang/status/1821986021505405014");
+    let req = FetchRequest::new("https://x.com/rustlang/status/1821986021505405014");
+    match tool.execute(req).await {
+        Ok(resp) => {
+            println!("   Status: {}", resp.status_code);
+            println!("   Format: {:?}", resp.format);
+            if let Some(ref content) = resp.content {
+                let preview: String = content.chars().take(200).collect();
+                println!("   Preview: {}", preview.replace('\n', " "));
+            }
+            if resp.status_code == 200 && resp.format.as_deref() == Some("twitter_tweet") {
+                println!("   PASS\n");
+            } else {
+                println!("   SKIP (third-party API unavailable)\n");
+            }
+        }
+        Err(e) => {
+            println!("   SKIP (third-party API unavailable: {e})\n");
+        }
+    }
+
+    // 8. Twitter/X article tweet (soft — third-party API)
+    println!("8. Fetch Twitter/X article tweet (soft, third-party API)");
+    println!("   URL: https://x.com/zachlloydtweets/status/2036509756404158559");
+    let req = FetchRequest::new("https://x.com/zachlloydtweets/status/2036509756404158559");
+    match tool.execute(req).await {
+        Ok(resp) => {
+            println!("   Status: {}", resp.status_code);
+            println!("   Format: {:?}", resp.format);
+            if let Some(ref content) = resp.content {
+                let preview: String = content.chars().take(300).collect();
+                println!("   Preview: {}", preview.replace('\n', " "));
+            }
+            if resp.status_code == 200 && resp.format.as_deref() == Some("twitter_tweet") {
+                println!("   PASS\n");
+            } else {
+                println!("   SKIP (third-party API unavailable)\n");
+            }
+        }
+        Err(e) => {
+            println!("   SKIP (third-party API unavailable: {e})\n");
+        }
+    }
+
     println!("=====================");
     println!("Results: {} passed, {} failed", passed, failed);
 

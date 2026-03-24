@@ -60,6 +60,7 @@
 //! Built-in fetchers:
 //! - [`DefaultFetcher`] - General HTTP/HTTPS fetcher with HTML conversion
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
+//! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
 
 pub mod client;
 mod convert;
@@ -74,7 +75,7 @@ pub use client::{fetch, fetch_with_options, FetchOptions};
 pub use convert::{html_to_markdown, html_to_text};
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
-pub use fetchers::{DefaultFetcher, Fetcher, FetcherRegistry, GitHubRepoFetcher};
+pub use fetchers::{DefaultFetcher, Fetcher, FetcherRegistry, GitHubRepoFetcher, TwitterFetcher};
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
     Tool, ToolBuilder, ToolExecution, ToolImage, ToolOutput, ToolOutputMetadata, ToolService,

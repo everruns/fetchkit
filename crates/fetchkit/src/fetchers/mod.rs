@@ -5,9 +5,11 @@
 
 mod default;
 mod github_repo;
+mod twitter;
 
 pub use default::DefaultFetcher;
 pub use github_repo::GitHubRepoFetcher;
+pub use twitter::TwitterFetcher;
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
@@ -110,11 +112,13 @@ impl FetcherRegistry {
     ///
     /// Includes (in order of priority):
     /// 1. GitHubRepoFetcher - handles GitHub repository URLs
-    /// 2. DefaultFetcher - handles all HTTP/HTTPS URLs
+    /// 2. TwitterFetcher - handles Twitter/X tweet URLs
+    /// 3. DefaultFetcher - handles all HTTP/HTTPS URLs
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Register specialized fetchers first (higher priority)
         registry.register(Box::new(GitHubRepoFetcher::new()));
+        registry.register(Box::new(TwitterFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
         registry.register(Box::new(DefaultFetcher::new()));
         registry
@@ -271,9 +275,10 @@ mod tests {
     #[test]
     fn test_registry_with_defaults() {
         let registry = FetcherRegistry::with_defaults();
-        assert_eq!(registry.fetchers.len(), 2);
+        assert_eq!(registry.fetchers.len(), 3);
         assert_eq!(registry.fetchers[0].name(), "github_repo");
-        assert_eq!(registry.fetchers[1].name(), "default");
+        assert_eq!(registry.fetchers[1].name(), "twitter_tweet");
+        assert_eq!(registry.fetchers[2].name(), "default");
     }
 
     #[test]

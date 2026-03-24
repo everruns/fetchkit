@@ -54,6 +54,21 @@ Central dispatcher that:
 - Response format field: `"github_repo"`
 - Metadata includes: stars, forks, issues, language, license, topics, dates
 
+#### TwitterFetcher
+
+- Matches: `https://x.com/{user}/status/{id}` and `https://twitter.com/{user}/status/{id}`
+- Excludes: Reserved paths (i, settings, explore, search, etc.), non-numeric tweet IDs
+- Behavior:
+  1. Try syndication API (`cdn.syndication.twimg.com/tweet-result?id={id}`)
+  2. Fallback to oEmbed API (`publish.x.com/oembed?url={tweet_url}`)
+  3. Format as structured markdown
+- Returns: Markdown with tweet text, author info, engagement metrics
+- Response format field: `"twitter_tweet"`
+- Article tweets: Title as heading, preview text, cover image, link to full article
+- Regular tweets: Author heading, tweet text with expanded URLs, media attachments
+- Quoted tweets rendered as blockquotes
+- Both APIs are unauthenticated; syndication API is undocumented but widely used
+
 ### Response Extensions
 
 `FetchResponse.format` values:
@@ -61,6 +76,7 @@ Central dispatcher that:
 - `"text"` - HTML converted to plain text
 - `"raw"` - Original content unchanged
 - `"github_repo"` - GitHub repository metadata + README
+- `"twitter_tweet"` - Twitter/X tweet content with metadata
 
 ### Configuration
 
@@ -112,7 +128,8 @@ crates/fetchkit/src/
 ├── fetchers/
 │   ├── mod.rs           # Fetcher trait, FetcherRegistry
 │   ├── default.rs       # DefaultFetcher (with binary-aware fetch_to_file override)
-│   └── github_repo.rs   # GitHubRepoFetcher
+│   ├── github_repo.rs   # GitHubRepoFetcher
+│   └── twitter.rs       # TwitterFetcher
 ```
 
 ## API
