@@ -156,6 +156,65 @@ async fn main() {
         }
     }
 
+    // 7. Twitter/X regular tweet via syndication API
+    println!("7. Fetch Twitter/X tweet");
+    println!("   URL: https://x.com/rustlang/status/1821986021505405014");
+    let req = FetchRequest::new("https://x.com/rustlang/status/1821986021505405014");
+    match tool.execute(req).await {
+        Ok(resp) => {
+            println!("   Status: {}", resp.status_code);
+            println!("   Format: {:?}", resp.format);
+            if let Some(ref content) = resp.content {
+                let preview: String = content.chars().take(200).collect();
+                println!("   Preview: {}", preview.replace('\n', " "));
+            }
+            if resp.status_code == 200 && resp.format.as_deref() == Some("twitter_tweet") {
+                println!("   PASS\n");
+                passed += 1;
+            } else {
+                println!("   FAIL (status={}, format={:?})\n", resp.status_code, resp.format);
+                failed += 1;
+            }
+        }
+        Err(e) => {
+            println!("   Error: {e}\n   FAIL\n");
+            failed += 1;
+        }
+    }
+
+    // 8. Twitter/X article tweet
+    println!("8. Fetch Twitter/X article tweet");
+    println!("   URL: https://x.com/zachlloydtweets/status/2036509756404158559");
+    let req =
+        FetchRequest::new("https://x.com/zachlloydtweets/status/2036509756404158559");
+    match tool.execute(req).await {
+        Ok(resp) => {
+            println!("   Status: {}", resp.status_code);
+            println!("   Format: {:?}", resp.format);
+            if let Some(ref content) = resp.content {
+                let preview: String = content.chars().take(300).collect();
+                println!("   Preview: {}", preview.replace('\n', " "));
+            }
+            if resp.status_code == 200
+                && resp.format.as_deref() == Some("twitter_tweet")
+                && resp
+                    .content
+                    .as_deref()
+                    .is_some_and(|c| c.contains("article"))
+            {
+                println!("   PASS\n");
+                passed += 1;
+            } else {
+                println!("   FAIL (status={}, format={:?})\n", resp.status_code, resp.format);
+                failed += 1;
+            }
+        }
+        Err(e) => {
+            println!("   Error: {e}\n   FAIL\n");
+            failed += 1;
+        }
+    }
+
     println!("=====================");
     println!("Results: {} passed, {} failed", passed, failed);
 
