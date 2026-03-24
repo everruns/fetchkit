@@ -763,4 +763,50 @@ mod tests {
             .unwrap()
             .contains("Just plain text"));
     }
+
+    #[tokio::test]
+    async fn test_markdown_content_type_without_markdown_request_returns_raw() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw("# Title", "text/markdown; charset=utf-8"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        // Request without .as_markdown() — wants_markdown is false
+        let request = FetchRequest::new(format!("{}/doc", server.uri()));
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.format.as_deref(), Some("raw"));
+        assert!(response.content.as_deref().unwrap().contains("# Title"));
+    }
+
+    #[tokio::test]
+    async fn test_plain_text_content_type_without_text_request_returns_raw() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/plain"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw("hello world", "text/plain"))
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        // Request without .as_text() — wants_text is false
+        let request = FetchRequest::new(format!("{}/plain", server.uri()));
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.format.as_deref(), Some("raw"));
+    }
 }
