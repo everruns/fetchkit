@@ -1,5 +1,21 @@
 //! HTML conversion utilities
 
+/// Check if content-type indicates markdown (e.g. `text/markdown`).
+pub fn is_markdown_content_type(content_type: &Option<String>) -> bool {
+    content_type
+        .as_deref()
+        .map(|ct| ct.to_lowercase().contains("text/markdown"))
+        .unwrap_or(false)
+}
+
+/// Check if content-type indicates plain text (e.g. `text/plain`).
+pub fn is_plain_text_content_type(content_type: &Option<String>) -> bool {
+    content_type
+        .as_deref()
+        .map(|ct| ct.to_lowercase().contains("text/plain"))
+        .unwrap_or(false)
+}
+
 /// Check if content is HTML based on content type and body
 ///
 /// Returns `true` if the content type contains `text/html` or `application/xhtml`,
@@ -546,6 +562,32 @@ mod tests {
         let input = "  hello   world  \n\n\n\n  test  ";
         let output = clean_whitespace(input);
         assert_eq!(output, "hello world\n\ntest");
+    }
+
+    #[test]
+    fn test_is_markdown_content_type() {
+        assert!(is_markdown_content_type(&Some("text/markdown".to_string())));
+        assert!(is_markdown_content_type(&Some(
+            "text/markdown; charset=utf-8".to_string()
+        )));
+        assert!(is_markdown_content_type(&Some("Text/Markdown".to_string())));
+        assert!(!is_markdown_content_type(&Some("text/html".to_string())));
+        assert!(!is_markdown_content_type(&Some("text/plain".to_string())));
+        assert!(!is_markdown_content_type(&None));
+    }
+
+    #[test]
+    fn test_is_plain_text_content_type() {
+        assert!(is_plain_text_content_type(&Some("text/plain".to_string())));
+        assert!(is_plain_text_content_type(&Some(
+            "text/plain; charset=utf-8".to_string()
+        )));
+        assert!(is_plain_text_content_type(&Some("Text/Plain".to_string())));
+        assert!(!is_plain_text_content_type(&Some("text/html".to_string())));
+        assert!(!is_plain_text_content_type(&Some(
+            "text/markdown".to_string()
+        )));
+        assert!(!is_plain_text_content_type(&None));
     }
 
     #[test]
