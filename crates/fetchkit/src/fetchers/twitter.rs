@@ -68,7 +68,15 @@ impl TwitterFetcher {
             return None;
         }
         // Exclude reserved paths
-        let reserved = ["i", "settings", "explore", "search", "notifications", "messages", "home"];
+        let reserved = [
+            "i",
+            "settings",
+            "explore",
+            "search",
+            "notifications",
+            "messages",
+            "home",
+        ];
         if reserved.contains(&username) {
             return None;
         }
@@ -217,11 +225,7 @@ fn format_metrics(likes: Option<u64>, replies: Option<u64>) -> String {
     let mut parts = Vec::new();
     if let Some(n) = likes {
         if n > 0 {
-            parts.push(format!(
-                "{} {}",
-                n,
-                if n == 1 { "like" } else { "likes" }
-            ));
+            parts.push(format!("{} {}", n, if n == 1 { "like" } else { "likes" }));
         }
     }
     if let Some(n) = replies {
@@ -237,10 +241,7 @@ fn format_metrics(likes: Option<u64>, replies: Option<u64>) -> String {
 }
 
 /// Format syndication tweet data as markdown.
-fn format_syndication_response(
-    tweet: &SyndicationTweet,
-    original_url: &str,
-) -> String {
+fn format_syndication_response(tweet: &SyndicationTweet, original_url: &str) -> String {
     let mut out = String::new();
 
     let author_display = tweet.user.as_ref().map(|u| {
@@ -249,10 +250,7 @@ fn format_syndication_response(
         (name, handle)
     });
 
-    let has_article = tweet
-        .article
-        .as_ref()
-        .is_some_and(|a| a.title.is_some());
+    let has_article = tweet.article.as_ref().is_some_and(|a| a.title.is_some());
 
     if has_article {
         let article = tweet.article.as_ref().unwrap();
@@ -387,7 +385,10 @@ fn format_oembed_response(oembed: &OEmbedResponse, original_url: &str) -> String
     }
 
     out.push_str("---\n");
-    out.push_str(&format!("Source: {} (via oEmbed, limited data)\n", original_url));
+    out.push_str(&format!(
+        "Source: {} (via oEmbed, limited data)\n",
+        original_url
+    ));
 
     out
 }
@@ -613,8 +614,7 @@ mod tests {
         assert!(TwitterFetcher::parse_tweet_url(&url).is_none());
 
         // Too many segments
-        let url =
-            Url::parse("https://x.com/zachlloydtweets/status/123/extra").unwrap();
+        let url = Url::parse("https://x.com/zachlloydtweets/status/123/extra").unwrap();
         assert!(TwitterFetcher::parse_tweet_url(&url).is_none());
 
         // Wrong path structure
@@ -650,8 +650,7 @@ mod tests {
     fn test_fetcher_matches() {
         let fetcher = TwitterFetcher::new();
 
-        let url =
-            Url::parse("https://x.com/zachlloydtweets/status/2036509756404158559").unwrap();
+        let url = Url::parse("https://x.com/zachlloydtweets/status/2036509756404158559").unwrap();
         assert!(fetcher.matches(&url));
 
         let url = Url::parse("https://twitter.com/user/status/123456789").unwrap();
@@ -917,8 +916,7 @@ mod tests {
         // We can't easily override the URL constant in the fetcher,
         // so we test the parsing/formatting path directly.
         let tweet: SyndicationTweet = serde_json::from_value(body).unwrap();
-        let output =
-            format_syndication_response(&tweet, "https://x.com/testuser/status/123456789");
+        let output = format_syndication_response(&tweet, "https://x.com/testuser/status/123456789");
         assert!(output.contains("Test tweet content"));
         assert!(output.contains("@testuser"));
     }

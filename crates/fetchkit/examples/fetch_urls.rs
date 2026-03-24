@@ -172,7 +172,10 @@ async fn main() {
                 println!("   PASS\n");
                 passed += 1;
             } else {
-                println!("   FAIL (status={}, format={:?})\n", resp.status_code, resp.format);
+                println!(
+                    "   FAIL (status={}, format={:?})\n",
+                    resp.status_code, resp.format
+                );
                 failed += 1;
             }
         }
@@ -185,8 +188,7 @@ async fn main() {
     // 8. Twitter/X article tweet
     println!("8. Fetch Twitter/X article tweet");
     println!("   URL: https://x.com/zachlloydtweets/status/2036509756404158559");
-    let req =
-        FetchRequest::new("https://x.com/zachlloydtweets/status/2036509756404158559");
+    let req = FetchRequest::new("https://x.com/zachlloydtweets/status/2036509756404158559");
     match tool.execute(req).await {
         Ok(resp) => {
             println!("   Status: {}", resp.status_code);
@@ -205,7 +207,10 @@ async fn main() {
                 println!("   PASS\n");
                 passed += 1;
             } else {
-                println!("   FAIL (status={}, format={:?})\n", resp.status_code, resp.format);
+                println!(
+                    "   FAIL (status={}, format={:?})\n",
+                    resp.status_code, resp.format
+                );
                 failed += 1;
             }
         }
