@@ -3,6 +3,8 @@
 // DECISION: keep the legacy typed `execute`/`llmtxt` surface as wrappers around the
 // toolkit-library contract so existing fetchkit callers can migrate incrementally.
 
+#[cfg(feature = "bot-auth")]
+use crate::bot_auth::BotAuthConfig;
 use crate::client::{fetch_with_options, FetchOptions};
 use crate::dns::DnsPolicy;
 use crate::error::{FetchError, ToolError};
@@ -140,6 +142,9 @@ pub struct ToolBuilder {
     blocked_hosts: Vec<String>,
     /// Restrict redirects to the original host only.
     same_host_redirects_only: bool,
+    /// Web Bot Authentication config.
+    #[cfg(feature = "bot-auth")]
+    bot_auth: Option<BotAuthConfig>,
 }
 
 impl ToolBuilder {
@@ -272,6 +277,16 @@ impl ToolBuilder {
         self
     }
 
+    /// Set Web Bot Authentication config (draft-meunier-web-bot-auth-architecture).
+    ///
+    /// When configured, all outgoing requests are signed with Ed25519 per RFC 9421.
+    /// Origins can verify bot identity via the `Signature` and `Signature-Input` headers.
+    #[cfg(feature = "bot-auth")]
+    pub fn bot_auth(mut self, config: BotAuthConfig) -> Self {
+        self.bot_auth = Some(config);
+        self
+    }
+
     /// Apply a production-oriented hardening profile.
     ///
     /// This preset keeps private IP blocking enabled, ignores ambient proxy
@@ -311,6 +326,8 @@ impl ToolBuilder {
             allowed_ports: self.allowed_ports.clone(),
             blocked_hosts: self.blocked_hosts.clone(),
             same_host_redirects_only: self.same_host_redirects_only,
+            #[cfg(feature = "bot-auth")]
+            bot_auth: self.bot_auth.clone(),
         }
     }
 
@@ -374,6 +391,8 @@ pub struct Tool {
     allowed_ports: Vec<u16>,
     blocked_hosts: Vec<String>,
     same_host_redirects_only: bool,
+    #[cfg(feature = "bot-auth")]
+    bot_auth: Option<BotAuthConfig>,
 }
 
 impl Default for Tool {
@@ -539,6 +558,8 @@ impl Tool {
             allowed_ports: self.allowed_ports.clone(),
             blocked_hosts: self.blocked_hosts.clone(),
             same_host_redirects_only: self.same_host_redirects_only,
+            #[cfg(feature = "bot-auth")]
+            bot_auth: self.bot_auth.clone(),
         }
     }
 }

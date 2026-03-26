@@ -51,6 +51,14 @@ enum Commands {
         /// Allow HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the environment
         #[arg(long)]
         allow_env_proxy: bool,
+
+        /// Ed25519 secret key seed (base64url, 32 bytes) for Web Bot Auth signing
+        #[arg(long)]
+        bot_auth_key: Option<String>,
+
+        /// Agent FQDN for Signature-Agent header (requires --bot-auth-key)
+        #[arg(long)]
+        bot_auth_agent: Option<String>,
     },
     /// Fetch URL and output as markdown with metadata frontmatter
     Fetch {
@@ -72,6 +80,14 @@ enum Commands {
         /// Allow HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the environment
         #[arg(long)]
         allow_env_proxy: bool,
+
+        /// Ed25519 secret key seed (base64url, 32 bytes) for Web Bot Auth signing
+        #[arg(long)]
+        bot_auth_key: Option<String>,
+
+        /// Agent FQDN for Signature-Agent header (requires --bot-auth-key)
+        #[arg(long)]
+        bot_auth_agent: Option<String>,
     },
 }
 
@@ -89,8 +105,17 @@ async fn main() {
         Some(Commands::Mcp {
             hardened,
             allow_env_proxy,
+            bot_auth_key,
+            bot_auth_agent,
         }) => {
-            mcp::run_server(build_tool(None, hardened, allow_env_proxy)).await;
+            mcp::run_server(build_tool(
+                None,
+                hardened,
+                allow_env_proxy,
+                bot_auth_key,
+                bot_auth_agent,
+            ))
+            .await;
         }
         Some(Commands::Fetch {
             url,
@@ -98,8 +123,19 @@ async fn main() {
             user_agent,
             hardened,
             allow_env_proxy,
+            bot_auth_key,
+            bot_auth_agent,
         }) => {
-            run_fetch(&url, output, user_agent, hardened, allow_env_proxy).await;
+            run_fetch(
+                &url,
+                output,
+                user_agent,
+                hardened,
+                allow_env_proxy,
+                bot_auth_key,
+                bot_auth_agent,
+            )
+            .await;
         }
         None => {
             eprintln!("Usage: fetchkit fetch <URL>");
@@ -110,7 +146,13 @@ async fn main() {
     }
 }
 
-fn build_tool(user_agent: Option<String>, hardened: bool, allow_env_proxy: bool) -> Tool {
+fn build_tool(
+    user_agent: Option<String>,
+    hardened: bool,
+    allow_env_proxy: bool,
+    bot_auth_key: Option<String>,
+    bot_auth_agent: Option<String>,
+) -> Tool {
     let mut builder = Tool::builder().enable_markdown(true);
 
     if hardened {
@@ -125,6 +167,28 @@ fn build_tool(user_agent: Option<String>, hardened: bool, allow_env_proxy: bool)
         builder = builder.user_agent(ua);
     }
 
+    #[cfg(feature = "bot-auth")]
+    if let Some(ref key) = bot_auth_key {
+        let config = fetchkit::BotAuthConfig::from_base64_seed(key).unwrap_or_else(|e| {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        });
+        let config = if let Some(ref fqdn) = bot_auth_agent {
+            config.with_agent_fqdn(fqdn)
+        } else {
+            config
+        };
+        builder = builder.bot_auth(config);
+    }
+
+    #[cfg(not(feature = "bot-auth"))]
+    if bot_auth_key.is_some() {
+        eprintln!("Error: --bot-auth-key requires the bot-auth feature (rebuild with --features bot-auth)");
+        std::process::exit(1);
+    }
+
+    let _ = bot_auth_agent; // suppress unused warning without feature
+
     builder.build()
 }
 
@@ -134,10 +198,18 @@ async fn run_fetch(
     user_agent: Option<String>,
     hardened: bool,
     allow_env_proxy: bool,
+    bot_auth_key: Option<String>,
+    bot_auth_agent: Option<String>,
 ) {
     // Build request with markdown conversion
     let request = FetchRequest::new(url).as_markdown();
-    let tool = build_tool(user_agent, hardened, allow_env_proxy);
+    let tool = build_tool(
+        user_agent,
+        hardened,
+        allow_env_proxy,
+        bot_auth_key,
+        bot_auth_agent,
+    );
 
     // Execute request
     match tool.execute(request).await {

@@ -16,6 +16,10 @@ name = "fetchkit"
 path = "src/main.rs"
 doc = false
 
+[features]
+default = []
+bot-auth = ["fetchkit/bot-auth"]
+
 [dependencies]
 fetchkit = { path = "../fetchkit", version = "0.1.3" }
 tokio = { workspace = true }
