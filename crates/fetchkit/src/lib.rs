@@ -66,6 +66,7 @@
 //! - [`PackageRegistryFetcher`] - PyPI, crates.io, npm package metadata
 //! - [`StackOverflowFetcher`] - Stack Overflow Q&A content
 //! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
+//! - [`WikipediaFetcher`] - Wikipedia article content via MediaWiki API
 
 #[cfg(feature = "bot-auth")]
 pub mod bot_auth;
@@ -86,7 +87,7 @@ pub use error::{FetchError, ToolError};
 pub use fetchers::{
     DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
     GitHubIssueFetcher, GitHubRepoFetcher, PackageRegistryFetcher, StackOverflowFetcher,
-    TwitterFetcher,
+    TwitterFetcher, WikipediaFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
