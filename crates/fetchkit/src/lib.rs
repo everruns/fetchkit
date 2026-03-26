@@ -59,6 +59,7 @@
 //!
 //! Built-in fetchers:
 //! - [`DefaultFetcher`] - General HTTP/HTTPS fetcher with HTML conversion
+//! - [`DocsSiteFetcher`] - llms.txt probe with DefaultFetcher fallback
 //! - [`GitHubCodeFetcher`] - GitHub source file content with language metadata
 //! - [`GitHubIssueFetcher`] - GitHub issue and PR metadata with comments
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
@@ -81,8 +82,8 @@ pub use convert::{html_to_markdown, html_to_text};
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
-    DefaultFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher, GitHubIssueFetcher,
-    GitHubRepoFetcher, TwitterFetcher,
+    DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
+    GitHubIssueFetcher, GitHubRepoFetcher, TwitterFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{

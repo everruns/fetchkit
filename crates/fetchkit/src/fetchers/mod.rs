@@ -4,12 +4,14 @@
 //! FetcherRegistry dispatches to the first matching fetcher.
 
 mod default;
+mod docs_site;
 mod github_code;
 mod github_issue;
 mod github_repo;
 mod twitter;
 
 pub use default::DefaultFetcher;
+pub use docs_site::DocsSiteFetcher;
 pub use github_code::GitHubCodeFetcher;
 pub use github_issue::GitHubIssueFetcher;
 pub use github_repo::GitHubRepoFetcher;
@@ -119,7 +121,8 @@ impl FetcherRegistry {
     /// 2. GitHubIssueFetcher - handles GitHub issue/PR URLs
     /// 3. GitHubRepoFetcher - handles GitHub repository URLs
     /// 4. TwitterFetcher - handles Twitter/X tweet URLs
-    /// 5. DefaultFetcher - handles all HTTP/HTTPS URLs
+    /// 5. DocsSiteFetcher - handles docs sites and llms.txt URLs
+    /// 6. DefaultFetcher - handles all remaining HTTP/HTTPS URLs
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Register specialized fetchers first (higher priority)
@@ -128,6 +131,8 @@ impl FetcherRegistry {
         registry.register(Box::new(GitHubIssueFetcher::new()));
         registry.register(Box::new(GitHubRepoFetcher::new()));
         registry.register(Box::new(TwitterFetcher::new()));
+        // DocsSiteFetcher for docs sites and llms.txt
+        registry.register(Box::new(DocsSiteFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
         registry.register(Box::new(DefaultFetcher::new()));
         registry
@@ -284,12 +289,13 @@ mod tests {
     #[test]
     fn test_registry_with_defaults() {
         let registry = FetcherRegistry::with_defaults();
-        assert_eq!(registry.fetchers.len(), 5);
+        assert_eq!(registry.fetchers.len(), 6);
         assert_eq!(registry.fetchers[0].name(), "github_code");
         assert_eq!(registry.fetchers[1].name(), "github_issue");
         assert_eq!(registry.fetchers[2].name(), "github_repo");
         assert_eq!(registry.fetchers[3].name(), "twitter_tweet");
-        assert_eq!(registry.fetchers[4].name(), "default");
+        assert_eq!(registry.fetchers[4].name(), "docs_site");
+        assert_eq!(registry.fetchers[5].name(), "default");
     }
 
     #[test]
