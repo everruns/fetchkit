@@ -63,6 +63,7 @@
 //! - [`GitHubCodeFetcher`] - GitHub source file content with language metadata
 //! - [`GitHubIssueFetcher`] - GitHub issue and PR metadata with comments
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
+//! - [`PackageRegistryFetcher`] - PyPI, crates.io, npm package metadata
 //! - [`StackOverflowFetcher`] - Stack Overflow Q&A content
 //! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
 
@@ -84,7 +85,8 @@ pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
     DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
-    GitHubIssueFetcher, GitHubRepoFetcher, StackOverflowFetcher, TwitterFetcher,
+    GitHubIssueFetcher, GitHubRepoFetcher, PackageRegistryFetcher, StackOverflowFetcher,
+    TwitterFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{

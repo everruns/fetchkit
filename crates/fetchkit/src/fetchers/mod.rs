@@ -8,6 +8,7 @@ mod docs_site;
 mod github_code;
 mod github_issue;
 mod github_repo;
+mod package_registry;
 mod stackoverflow;
 mod twitter;
 
@@ -16,6 +17,7 @@ pub use docs_site::DocsSiteFetcher;
 pub use github_code::GitHubCodeFetcher;
 pub use github_issue::GitHubIssueFetcher;
 pub use github_repo::GitHubRepoFetcher;
+pub use package_registry::PackageRegistryFetcher;
 pub use stackoverflow::StackOverflowFetcher;
 pub use twitter::TwitterFetcher;
 
@@ -135,6 +137,7 @@ impl FetcherRegistry {
         registry.register(Box::new(GitHubRepoFetcher::new()));
         registry.register(Box::new(TwitterFetcher::new()));
         registry.register(Box::new(StackOverflowFetcher::new()));
+        registry.register(Box::new(PackageRegistryFetcher::new()));
         // DocsSiteFetcher for docs sites and llms.txt
         registry.register(Box::new(DocsSiteFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
@@ -293,14 +296,15 @@ mod tests {
     #[test]
     fn test_registry_with_defaults() {
         let registry = FetcherRegistry::with_defaults();
-        assert_eq!(registry.fetchers.len(), 7);
+        assert_eq!(registry.fetchers.len(), 8);
         assert_eq!(registry.fetchers[0].name(), "github_code");
         assert_eq!(registry.fetchers[1].name(), "github_issue");
         assert_eq!(registry.fetchers[2].name(), "github_repo");
         assert_eq!(registry.fetchers[3].name(), "twitter_tweet");
         assert_eq!(registry.fetchers[4].name(), "stackoverflow");
-        assert_eq!(registry.fetchers[5].name(), "docs_site");
-        assert_eq!(registry.fetchers[6].name(), "default");
+        assert_eq!(registry.fetchers[5].name(), "package_registry");
+        assert_eq!(registry.fetchers[6].name(), "docs_site");
+        assert_eq!(registry.fetchers[7].name(), "default");
     }
 
     #[test]
