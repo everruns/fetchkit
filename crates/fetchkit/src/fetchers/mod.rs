@@ -3,6 +3,7 @@
 //! Design: Each fetcher handles specific URL patterns with custom logic.
 //! FetcherRegistry dispatches to the first matching fetcher.
 
+mod arxiv;
 mod default;
 mod docs_site;
 mod github_code;
@@ -14,6 +15,7 @@ mod twitter;
 mod wikipedia;
 mod youtube;
 
+pub use arxiv::ArXivFetcher;
 pub use default::DefaultFetcher;
 pub use docs_site::DocsSiteFetcher;
 pub use github_code::GitHubCodeFetcher;
@@ -144,6 +146,7 @@ impl FetcherRegistry {
         registry.register(Box::new(PackageRegistryFetcher::new()));
         registry.register(Box::new(WikipediaFetcher::new()));
         registry.register(Box::new(YouTubeFetcher::new()));
+        registry.register(Box::new(ArXivFetcher::new()));
         // DocsSiteFetcher for docs sites and llms.txt
         registry.register(Box::new(DocsSiteFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
@@ -310,9 +313,10 @@ mod tests {
         assert_eq!(registry.fetchers[5].name(), "package_registry");
         assert_eq!(registry.fetchers[6].name(), "wikipedia");
         assert_eq!(registry.fetchers[7].name(), "youtube");
-        assert_eq!(registry.fetchers[8].name(), "docs_site");
-        assert_eq!(registry.fetchers[9].name(), "default");
-        assert_eq!(registry.fetchers.len(), 10);
+        assert_eq!(registry.fetchers[8].name(), "arxiv");
+        assert_eq!(registry.fetchers[9].name(), "docs_site");
+        assert_eq!(registry.fetchers[10].name(), "default");
+        assert_eq!(registry.fetchers.len(), 11);
     }
 
     #[test]
