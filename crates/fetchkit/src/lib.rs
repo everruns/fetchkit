@@ -66,6 +66,7 @@
 //! - [`GitHubIssueFetcher`] - GitHub issue and PR metadata with comments
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
 //! - [`PackageRegistryFetcher`] - PyPI, crates.io, npm package metadata
+//! - [`RSSFeedFetcher`] - RSS/Atom feed parsing
 //! - [`StackOverflowFetcher`] - Stack Overflow Q&A content
 //! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
 //! - [`WikipediaFetcher`] - Wikipedia article content via MediaWiki API
@@ -90,7 +91,7 @@ pub use error::{FetchError, ToolError};
 pub use fetchers::{
     ArXivFetcher, DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
     GitHubIssueFetcher, GitHubRepoFetcher, HackerNewsFetcher, PackageRegistryFetcher,
-    StackOverflowFetcher, TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
+    RSSFeedFetcher, StackOverflowFetcher, TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
