@@ -1,0 +1,347 @@
+//! Hacker News thread fetcher
+//!
+//! Handles news.ycombinator.com/item?id={id} URLs, returning structured
+//! thread content via the HN Firebase API.
+
+use crate::client::FetchOptions;
+use crate::error::FetchError;
+use crate::fetchers::Fetcher;
+use crate::types::{FetchRequest, FetchResponse};
+use crate::DEFAULT_USER_AGENT;
+use async_trait::async_trait;
+use reqwest::header::{HeaderValue, USER_AGENT};
+use serde::Deserialize;
+use std::time::Duration;
+use url::Url;
+
+const API_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Max top-level comments to fetch
+const MAX_COMMENTS: usize = 20;
+
+/// Hacker News fetcher
+///
+/// Matches `news.ycombinator.com/item?id={id}`, returning structured
+/// thread content via the HN Firebase API.
+pub struct HackerNewsFetcher;
+
+impl HackerNewsFetcher {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn parse_url(url: &Url) -> Option<u64> {
+        let host = url.host_str()?;
+        if host != "news.ycombinator.com" {
+            return None;
+        }
+
+        let segments: Vec<&str> = url.path_segments().map(|s| s.collect()).unwrap_or_default();
+        if segments.first() != Some(&"item") {
+            return None;
+        }
+
+        url.query_pairs()
+            .find(|(k, _)| k == "id")
+            .and_then(|(_, v)| v.parse().ok())
+    }
+}
+
+impl Default for HackerNewsFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct HNItem {
+    id: u64,
+    #[serde(rename = "type")]
+    item_type: Option<String>,
+    title: Option<String>,
+    text: Option<String>,
+    url: Option<String>,
+    by: Option<String>,
+    score: Option<i64>,
+    descendants: Option<u64>,
+    kids: Option<Vec<u64>>,
+}
+
+#[async_trait]
+impl Fetcher for HackerNewsFetcher {
+    fn name(&self) -> &'static str {
+        "hackernews"
+    }
+
+    fn matches(&self, url: &Url) -> bool {
+        Self::parse_url(url).is_some()
+    }
+
+    async fn fetch(
+        &self,
+        request: &FetchRequest,
+        options: &FetchOptions,
+    ) -> Result<FetchResponse, FetchError> {
+        let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+
+        let item_id = Self::parse_url(&url)
+            .ok_or_else(|| FetchError::FetcherError("Not a valid HN URL".to_string()))?;
+
+        let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
+        let mut client_builder = reqwest::Client::builder()
+            .connect_timeout(API_TIMEOUT)
+            .timeout(API_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::limited(3));
+
+        if !options.respect_proxy_env {
+            client_builder = client_builder.no_proxy();
+        }
+
+        let client = client_builder
+            .build()
+            .map_err(FetchError::ClientBuildError)?;
+
+        let ua_header = HeaderValue::from_str(user_agent)
+            .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
+
+        // Fetch the item
+        let item = fetch_item(&client, &ua_header, item_id).await?;
+
+        // Fetch top-level comments
+        let comments = if let Some(kids) = &item.kids {
+            let mut comments = Vec::new();
+            for &kid_id in kids.iter().take(MAX_COMMENTS) {
+                if let Ok(comment) = fetch_item(&client, &ua_header, kid_id).await {
+                    // Fetch one level of replies
+                    let replies = if let Some(reply_ids) = &comment.kids {
+                        let mut replies = Vec::new();
+                        for &reply_id in reply_ids.iter().take(5) {
+                            if let Ok(reply) = fetch_item(&client, &ua_header, reply_id).await {
+                                replies.push(reply);
+                            }
+                        }
+                        replies
+                    } else {
+                        Vec::new()
+                    };
+                    comments.push((comment, replies));
+                }
+            }
+            comments
+        } else {
+            Vec::new()
+        };
+
+        let content = format_hn_response(&item, &comments);
+
+        Ok(FetchResponse {
+            url: request.url.clone(),
+            status_code: 200,
+            content_type: Some("text/markdown".to_string()),
+            format: Some("hackernews".to_string()),
+            content: Some(content),
+            ..Default::default()
+        })
+    }
+}
+
+async fn fetch_item(
+    client: &reqwest::Client,
+    ua: &HeaderValue,
+    id: u64,
+) -> Result<HNItem, FetchError> {
+    let url = format!("https://hacker-news.firebaseio.com/v0/item/{}.json", id);
+
+    let resp = client
+        .get(&url)
+        .header(USER_AGENT, ua.clone())
+        .send()
+        .await
+        .map_err(FetchError::from_reqwest)?;
+
+    if !resp.status().is_success() {
+        return Err(FetchError::FetcherError(format!(
+            "HN API error: HTTP {}",
+            resp.status()
+        )));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| FetchError::FetcherError(format!("Failed to parse HN item: {}", e)))
+}
+
+fn format_hn_response(item: &HNItem, comments: &[(HNItem, Vec<HNItem>)]) -> String {
+    let mut out = String::new();
+
+    let item_type = item.item_type.as_deref().unwrap_or("story");
+
+    // Title
+    let title = item.title.as_deref().unwrap_or("Hacker News Item");
+    out.push_str(&format!("# {}\n\n", title));
+
+    // Metadata
+    out.push_str("## Info\n\n");
+    out.push_str(&format!("- **Type:** {}\n", item_type));
+
+    if let Some(by) = &item.by {
+        out.push_str(&format!("- **By:** {}\n", by));
+    }
+    if let Some(score) = item.score {
+        out.push_str(&format!("- **Score:** {}\n", score));
+    }
+    if let Some(descendants) = item.descendants {
+        out.push_str(&format!("- **Comments:** {}\n", descendants));
+    }
+    if let Some(url) = &item.url {
+        out.push_str(&format!("- **Link:** {}\n", url));
+    }
+    out.push_str(&format!(
+        "- **HN URL:** https://news.ycombinator.com/item?id={}\n",
+        item.id
+    ));
+
+    // Story text (for Ask HN, Show HN, etc.)
+    if let Some(text) = &item.text {
+        let cleaned = strip_html_tags(text);
+        out.push_str(&format!("\n{}\n", cleaned));
+    }
+
+    // Comments
+    if !comments.is_empty() {
+        let total = item.descendants.unwrap_or(0);
+        let shown: usize = comments.len() + comments.iter().map(|(_, r)| r.len()).sum::<usize>();
+        if shown < total as usize {
+            out.push_str(&format!("\n---\n\n## Comments ({} of {})\n", shown, total));
+        } else {
+            out.push_str(&format!("\n---\n\n## Comments ({})\n", shown));
+        }
+
+        for (comment, replies) in comments {
+            format_comment(&mut out, comment, 0);
+            for reply in replies {
+                format_comment(&mut out, reply, 1);
+            }
+        }
+    }
+
+    out
+}
+
+fn format_comment(out: &mut String, comment: &HNItem, depth: usize) {
+    let indent = "> ".repeat(depth);
+    let by = comment.by.as_deref().unwrap_or("anonymous");
+
+    out.push_str(&format!("\n{}**{}**\n\n", indent, by));
+
+    if let Some(text) = &comment.text {
+        let cleaned = strip_html_tags(text);
+        for line in cleaned.lines() {
+            out.push_str(&format!("{}{}\n", indent, line));
+        }
+        out.push('\n');
+    }
+}
+
+/// Simple HTML tag stripper for HN comment text
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+
+    for c in html.chars() {
+        match c {
+            '<' => {
+                in_tag = true;
+                // Check for <p> tags -> newlines
+                let rest: String = html[html.len() - (html.len() - result.len())..]
+                    .chars()
+                    .take(3)
+                    .collect();
+                if rest.starts_with("p>") || rest.starts_with("br") {
+                    result.push('\n');
+                }
+            }
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+
+    // Decode common HTML entities
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+        .replace("&#x2F;", "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hn_url() {
+        let url = Url::parse("https://news.ycombinator.com/item?id=12345").unwrap();
+        assert_eq!(HackerNewsFetcher::parse_url(&url), Some(12345));
+    }
+
+    #[test]
+    fn test_rejects_non_hn() {
+        let url = Url::parse("https://example.com/item?id=123").unwrap();
+        assert_eq!(HackerNewsFetcher::parse_url(&url), None);
+    }
+
+    #[test]
+    fn test_rejects_non_item_path() {
+        let url = Url::parse("https://news.ycombinator.com/newest").unwrap();
+        assert_eq!(HackerNewsFetcher::parse_url(&url), None);
+    }
+
+    #[test]
+    fn test_rejects_no_id() {
+        let url = Url::parse("https://news.ycombinator.com/item").unwrap();
+        assert_eq!(HackerNewsFetcher::parse_url(&url), None);
+    }
+
+    #[test]
+    fn test_fetcher_matches() {
+        let fetcher = HackerNewsFetcher::new();
+
+        let url = Url::parse("https://news.ycombinator.com/item?id=123").unwrap();
+        assert!(fetcher.matches(&url));
+
+        let url = Url::parse("https://example.com/item?id=123").unwrap();
+        assert!(!fetcher.matches(&url));
+    }
+
+    #[test]
+    fn test_strip_html_tags() {
+        assert_eq!(strip_html_tags("Hello <b>world</b>"), "Hello world");
+        assert_eq!(strip_html_tags("a &amp; b"), "a & b");
+    }
+
+    #[test]
+    fn test_format_hn_response() {
+        let item = HNItem {
+            id: 42,
+            item_type: Some("story".to_string()),
+            title: Some("Show HN: My Project".to_string()),
+            text: None,
+            url: Some("https://example.com".to_string()),
+            by: Some("pg".to_string()),
+            score: Some(100),
+            descendants: Some(5),
+            kids: None,
+        };
+
+        let output = format_hn_response(&item, &[]);
+
+        assert!(output.contains("# Show HN: My Project"));
+        assert!(output.contains("**By:** pg"));
+        assert!(output.contains("**Score:** 100"));
+        assert!(output.contains("https://example.com"));
+    }
+}

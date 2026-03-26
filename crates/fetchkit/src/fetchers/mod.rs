@@ -9,6 +9,7 @@ mod docs_site;
 mod github_code;
 mod github_issue;
 mod github_repo;
+mod hackernews;
 mod package_registry;
 mod stackoverflow;
 mod twitter;
@@ -21,6 +22,7 @@ pub use docs_site::DocsSiteFetcher;
 pub use github_code::GitHubCodeFetcher;
 pub use github_issue::GitHubIssueFetcher;
 pub use github_repo::GitHubRepoFetcher;
+pub use hackernews::HackerNewsFetcher;
 pub use package_registry::PackageRegistryFetcher;
 pub use stackoverflow::StackOverflowFetcher;
 pub use twitter::TwitterFetcher;
@@ -147,6 +149,7 @@ impl FetcherRegistry {
         registry.register(Box::new(WikipediaFetcher::new()));
         registry.register(Box::new(YouTubeFetcher::new()));
         registry.register(Box::new(ArXivFetcher::new()));
+        registry.register(Box::new(HackerNewsFetcher::new()));
         // DocsSiteFetcher for docs sites and llms.txt
         registry.register(Box::new(DocsSiteFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
@@ -314,9 +317,10 @@ mod tests {
         assert_eq!(registry.fetchers[6].name(), "wikipedia");
         assert_eq!(registry.fetchers[7].name(), "youtube");
         assert_eq!(registry.fetchers[8].name(), "arxiv");
-        assert_eq!(registry.fetchers[9].name(), "docs_site");
-        assert_eq!(registry.fetchers[10].name(), "default");
-        assert_eq!(registry.fetchers.len(), 11);
+        assert_eq!(registry.fetchers[9].name(), "hackernews");
+        assert_eq!(registry.fetchers[10].name(), "docs_site");
+        assert_eq!(registry.fetchers[11].name(), "default");
+        assert_eq!(registry.fetchers.len(), 12);
     }
 
     #[test]
