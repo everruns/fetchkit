@@ -33,6 +33,7 @@ Verified in this review:
 | TM-DOS | Denial of Service | Resource exhaustion, slowloris, large payloads |
 | TM-LEAK | Information Leakage | Error messages, metadata exposure, timing |
 | TM-CONV | Content Conversion | HTML parsing abuse, injection via converted content |
+| TM-AUTH | Bot Authentication | Signing key exposure, replay, signature scope |
 
 ### Managing Threat IDs
 
@@ -333,6 +334,37 @@ overflow from deep nesting is unlikely. However, deeply nested structures could
 produce large output. This is accepted as the body size limit (TM-DOS-001)
 provides upstream protection.
 
+## 7. Bot Authentication (TM-AUTH)
+
+Feature-gated behind `bot-auth`. Only relevant when the feature is enabled.
+
+| ID | Threat | Severity | Mitigation | Status |
+|----|--------|----------|------------|--------|
+| TM-AUTH-001 | Signing key held in process memory | Medium | Key is in-memory only; never serialized to disk or logs; lifetime scoped to process | **ACCEPTED** |
+| TM-AUTH-002 | Signature replay by attacker | Low | Nonce (32 random bytes) + short validity window (default 300s) + `created`/`expires` timestamps | MITIGATED |
+| TM-AUTH-003 | Signature scope too broad (covers wrong requests) | Low | Signature covers `@authority` (hostname); different hosts get different signatures | MITIGATED |
+| TM-AUTH-004 | Weak key material from caller | Low | Ed25519 key derived from caller-provided seed; no validation of entropy; caller responsibility | **CALLER RISK** |
+| TM-AUTH-005 | Signing failure blocks requests | Low | Signing errors are logged and the request proceeds unsigned; never causes fetch failure | MITIGATED |
+
+### Mitigation Details
+
+**TM-AUTH-001 — Key in process memory (ACCEPTED):**
+The Ed25519 `SigningKey` lives in the `BotAuthConfig` struct for the process
+lifetime. It is never written to disk, serialized, or included in error messages.
+Accepted because any in-process secret has this property; operators should use
+OS-level memory protections (e.g., encrypted swap, no core dumps) for sensitive
+workloads.
+
+**TM-AUTH-002 — Signature replay (MITIGATED):**
+Each signature includes a cryptographically random 32-byte nonce, a `created`
+timestamp, and an `expires` timestamp (default 5 minutes). Origins can reject
+replayed signatures by checking nonce uniqueness and timestamp validity.
+
+**TM-AUTH-003 — Signature scope (MITIGATED):**
+The signature base includes `@authority` (the target hostname per RFC 9421).
+Signatures for `example.com` are not valid for `other.com`. Optionally,
+`signature-agent` is also covered when configured.
+
 ## Vulnerability Summary
 
 ### Open Threats (Require Action)
@@ -362,6 +394,7 @@ None — all previously open threats have been mitigated.
 | TM-LEAK-002 | DNS error detail | Hostname visible but not internal IPs |
 | TM-LEAK-005 | Timing channels | Low risk; timeout masks some signal |
 | TM-CONV-002 | Deep HTML nesting | Iterative parser; upstream size limits |
+| TM-AUTH-001 | Signing key in memory | Same as any in-process secret; OS protections apply |
 
 ### Caller Responsibilities
 
@@ -372,6 +405,7 @@ None — all previously open threats have been mitigated.
 | Content filtering | TM-LEAK-003 | Filter sensitive data from responses |
 | URL allow-listing | TM-INPUT-002, TM-INPUT-007 | Use allow_prefixes for positive security model (now URL-aware) |
 | Network isolation | TM-SSRF, TM-NET | Route FetchKit through dedicated egress controls; library checks are defense in depth |
+| Key entropy | TM-AUTH-004 | Provide high-entropy Ed25519 seeds; library does not validate seed randomness |
 
 ## Security Controls Matrix
 
@@ -398,6 +432,10 @@ None — all previously open threats have been mitigated.
 | Proxy env isolation | TM-NET | `reqwest::ClientBuilder::no_proxy()` by default |
 | Path traversal prevention | TM-INPUT | Lexical path normalization in `LocalFileSaver` |
 | Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |
+| Bot-auth feature gating | TM-AUTH | `bot-auth` Cargo feature disabled by default; no crypto deps unless opted in |
+| Signature nonce + timestamps | TM-AUTH | 32-byte random nonce + created/expires per signature prevents replay |
+| Authority-scoped signatures | TM-AUTH | Signature covers `@authority`; per-host binding |
+| Graceful signing failure | TM-AUTH | Signing errors logged, request proceeds unsigned |
 
 ## References
 
