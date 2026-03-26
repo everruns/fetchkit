@@ -58,6 +58,7 @@
 //! requests to the appropriate fetcher based on URL matching.
 //!
 //! Built-in fetchers:
+//! - [`ArXivFetcher`] - arXiv paper metadata and abstract
 //! - [`DefaultFetcher`] - General HTTP/HTTPS fetcher with HTML conversion
 //! - [`DocsSiteFetcher`] - llms.txt probe with DefaultFetcher fallback
 //! - [`GitHubCodeFetcher`] - GitHub source file content with language metadata
@@ -86,7 +87,7 @@ pub use convert::{html_to_markdown, html_to_text};
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
-    DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
+    ArXivFetcher, DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
     GitHubIssueFetcher, GitHubRepoFetcher, PackageRegistryFetcher, StackOverflowFetcher,
     TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
 };
