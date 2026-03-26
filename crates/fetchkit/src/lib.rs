@@ -62,6 +62,7 @@
 //! - [`DefaultFetcher`] - General HTTP/HTTPS fetcher with HTML conversion
 //! - [`DocsSiteFetcher`] - llms.txt probe with DefaultFetcher fallback
 //! - [`GitHubCodeFetcher`] - GitHub source file content with language metadata
+//! - [`HackerNewsFetcher`] - Hacker News thread content via Firebase API
 //! - [`GitHubIssueFetcher`] - GitHub issue and PR metadata with comments
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
 //! - [`PackageRegistryFetcher`] - PyPI, crates.io, npm package metadata
@@ -88,8 +89,8 @@ pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
     ArXivFetcher, DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
-    GitHubIssueFetcher, GitHubRepoFetcher, PackageRegistryFetcher, StackOverflowFetcher,
-    TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
+    GitHubIssueFetcher, GitHubRepoFetcher, HackerNewsFetcher, PackageRegistryFetcher,
+    StackOverflowFetcher, TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
