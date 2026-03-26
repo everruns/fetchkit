@@ -12,6 +12,7 @@ mod package_registry;
 mod stackoverflow;
 mod twitter;
 mod wikipedia;
+mod youtube;
 
 pub use default::DefaultFetcher;
 pub use docs_site::DocsSiteFetcher;
@@ -22,6 +23,7 @@ pub use package_registry::PackageRegistryFetcher;
 pub use stackoverflow::StackOverflowFetcher;
 pub use twitter::TwitterFetcher;
 pub use wikipedia::WikipediaFetcher;
+pub use youtube::YouTubeFetcher;
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
@@ -141,6 +143,7 @@ impl FetcherRegistry {
         registry.register(Box::new(StackOverflowFetcher::new()));
         registry.register(Box::new(PackageRegistryFetcher::new()));
         registry.register(Box::new(WikipediaFetcher::new()));
+        registry.register(Box::new(YouTubeFetcher::new()));
         // DocsSiteFetcher for docs sites and llms.txt
         registry.register(Box::new(DocsSiteFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
@@ -306,9 +309,10 @@ mod tests {
         assert_eq!(registry.fetchers[4].name(), "stackoverflow");
         assert_eq!(registry.fetchers[5].name(), "package_registry");
         assert_eq!(registry.fetchers[6].name(), "wikipedia");
-        assert_eq!(registry.fetchers[7].name(), "docs_site");
-        assert_eq!(registry.fetchers[8].name(), "default");
-        assert_eq!(registry.fetchers.len(), 9);
+        assert_eq!(registry.fetchers[7].name(), "youtube");
+        assert_eq!(registry.fetchers[8].name(), "docs_site");
+        assert_eq!(registry.fetchers[9].name(), "default");
+        assert_eq!(registry.fetchers.len(), 10);
     }
 
     #[test]
