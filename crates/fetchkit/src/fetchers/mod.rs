@@ -4,10 +4,12 @@
 //! FetcherRegistry dispatches to the first matching fetcher.
 
 mod default;
+mod github_issue;
 mod github_repo;
 mod twitter;
 
 pub use default::DefaultFetcher;
+pub use github_issue::GitHubIssueFetcher;
 pub use github_repo::GitHubRepoFetcher;
 pub use twitter::TwitterFetcher;
 
@@ -117,6 +119,8 @@ impl FetcherRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Register specialized fetchers first (higher priority)
+        // GitHubIssueFetcher before GitHubRepoFetcher (more specific path)
+        registry.register(Box::new(GitHubIssueFetcher::new()));
         registry.register(Box::new(GitHubRepoFetcher::new()));
         registry.register(Box::new(TwitterFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
@@ -275,10 +279,11 @@ mod tests {
     #[test]
     fn test_registry_with_defaults() {
         let registry = FetcherRegistry::with_defaults();
-        assert_eq!(registry.fetchers.len(), 3);
-        assert_eq!(registry.fetchers[0].name(), "github_repo");
-        assert_eq!(registry.fetchers[1].name(), "twitter_tweet");
-        assert_eq!(registry.fetchers[2].name(), "default");
+        assert_eq!(registry.fetchers.len(), 4);
+        assert_eq!(registry.fetchers[0].name(), "github_issue");
+        assert_eq!(registry.fetchers[1].name(), "github_repo");
+        assert_eq!(registry.fetchers[2].name(), "twitter_tweet");
+        assert_eq!(registry.fetchers[3].name(), "default");
     }
 
     #[test]
