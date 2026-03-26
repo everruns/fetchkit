@@ -49,6 +49,7 @@ Available specs:
 - `specs/release-process.md` - Agent-driven release and publish workflow
 - `specs/maintenance.md` - Periodic maintenance checklist (deps, docs, spec-code alignment)
 - `specs/threat-model.md` - Security threat model (SSRF, network, input validation, DoS)
+- `specs/bot-auth.md` - Web Bot Authentication (draft-meunier-web-bot-auth-architecture)
 
 Specification format: Abstract and Requirements sections.
 

@@ -96,6 +96,43 @@ fn build_headers(options: &FetchOptions, accept: &str) -> HeaderMap {
     headers
 }
 
+/// Apply bot-auth signature headers when the feature is enabled and configured.
+#[cfg(feature = "bot-auth")]
+fn apply_bot_auth_if_enabled(
+    mut headers: HeaderMap,
+    options: &FetchOptions,
+    url: &Url,
+) -> HeaderMap {
+    if let Some(ref bot_auth) = options.bot_auth {
+        if let Some(authority) = url.host_str() {
+            match bot_auth.sign_request(authority) {
+                Ok(auth_headers) => {
+                    if let Ok(v) = HeaderValue::from_str(&auth_headers.signature) {
+                        headers.insert("signature", v);
+                    }
+                    if let Ok(v) = HeaderValue::from_str(&auth_headers.signature_input) {
+                        headers.insert("signature-input", v);
+                    }
+                    if let Some(ref fqdn) = auth_headers.signature_agent {
+                        if let Ok(v) = HeaderValue::from_str(fqdn) {
+                            headers.insert("signature-agent", v);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Bot-auth signing failed: {e}");
+                }
+            }
+        }
+    }
+    headers
+}
+
+#[cfg(not(feature = "bot-auth"))]
+fn apply_bot_auth_if_enabled(headers: HeaderMap, _options: &FetchOptions, _url: &Url) -> HeaderMap {
+    headers
+}
+
 /// Extract common response metadata from headers
 struct ResponseMeta {
     content_type: Option<String>,
@@ -157,6 +194,8 @@ impl Fetcher for DefaultFetcher {
 
         let headers = build_headers(options, accept);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
+
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
             HttpMethod::Head => reqwest::Method::HEAD,
@@ -280,6 +319,8 @@ impl Fetcher for DefaultFetcher {
 
         let headers = build_headers(options, "*/*");
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
+
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
             HttpMethod::Head => reqwest::Method::HEAD,
@@ -808,5 +849,66 @@ mod tests {
         let response = fetcher.fetch(&request, &options).await.unwrap();
 
         assert_eq!(response.format.as_deref(), Some("raw"));
+    }
+
+    #[cfg(feature = "bot-auth")]
+    #[tokio::test]
+    async fn test_bot_auth_headers_sent() {
+        use crate::bot_auth::BotAuthConfig;
+        use wiremock::matchers::header_exists;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/authed"))
+            .and(header_exists("signature"))
+            .and(header_exists("signature-input"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("ok")
+                    .insert_header("content-type", "text/plain"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            bot_auth: Some(BotAuthConfig::from_seed([10u8; 32])),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/authed", server.uri())).as_markdown();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.content.as_deref(), Some("ok"));
+    }
+
+    #[cfg(feature = "bot-auth")]
+    #[tokio::test]
+    async fn test_bot_auth_signature_agent_header_sent() {
+        use crate::bot_auth::BotAuthConfig;
+        use wiremock::matchers::{header, header_exists};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agent"))
+            .and(header_exists("signature"))
+            .and(header_exists("signature-input"))
+            .and(header("signature-agent", "bot.example.com"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("agent ok"))
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            dns_policy: DnsPolicy::allow_all(),
+            bot_auth: Some(BotAuthConfig::from_seed([11u8; 32]).with_agent_fqdn("bot.example.com")),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/agent", server.uri()));
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.status_code, 200);
     }
 }

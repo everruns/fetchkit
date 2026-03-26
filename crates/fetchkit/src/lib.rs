@@ -62,6 +62,9 @@
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
 //! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
 
+#[cfg(feature = "bot-auth")]
+pub mod bot_auth;
+
 pub mod client;
 mod convert;
 mod dns;
@@ -82,6 +85,9 @@ pub use tool::{
     ToolStatus,
 };
 pub use types::{FetchRequest, FetchResponse, HttpMethod};
+
+#[cfg(feature = "bot-auth")]
+pub use bot_auth::{BotAuthConfig, BotAuthError};
 
 /// Default User-Agent string
 pub const DEFAULT_USER_AGENT: &str = "Everruns FetchKit/1.0";

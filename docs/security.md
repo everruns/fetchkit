@@ -32,3 +32,31 @@ let tool = ToolBuilder::new()
 ```
 
 See [`specs/threat-model.md`](../specs/threat-model.md) for the full threat inventory.
+
+## Web Bot Authentication
+
+FetchKit optionally supports the [Web Bot Authentication Architecture](https://datatracker.ietf.org/doc/html/draft-meunier-web-bot-auth-architecture),
+which signs outgoing requests with Ed25519 signatures per RFC 9421. This lets
+origins verify bot identity cryptographically instead of relying on User-Agent
+strings.
+
+Enable the `bot-auth` Cargo feature and configure a signing key:
+
+```rust
+use fetchkit::{ToolBuilder, BotAuthConfig};
+
+let tool = ToolBuilder::new()
+    .bot_auth(
+        BotAuthConfig::from_seed([/* 32-byte Ed25519 seed */; 32])
+            .with_agent_fqdn("bot.example.com")
+    )
+    .build();
+```
+
+CLI usage:
+
+```bash
+fetchkit fetch https://example.com --bot-auth-key <base64url-seed> --bot-auth-agent bot.example.com
+```
+
+See [`specs/bot-auth.md`](../specs/bot-auth.md) for the full specification.

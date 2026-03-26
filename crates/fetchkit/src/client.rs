@@ -3,6 +3,8 @@
 //! This module provides the main entry points for fetching URLs.
 //! The actual fetch logic is implemented by fetchers in the [`fetchers`](crate::fetchers) module.
 
+#[cfg(feature = "bot-auth")]
+use crate::bot_auth::BotAuthConfig;
 use crate::dns::DnsPolicy;
 use crate::error::FetchError;
 use crate::fetchers::FetcherRegistry;
@@ -37,6 +39,10 @@ pub struct FetchOptions {
     pub blocked_hosts: Vec<String>,
     /// Restrict redirects to the original host only.
     pub same_host_redirects_only: bool,
+    /// Web Bot Authentication config (draft-meunier-web-bot-auth-architecture).
+    /// When set, outgoing requests are signed with Ed25519.
+    #[cfg(feature = "bot-auth")]
+    pub bot_auth: Option<BotAuthConfig>,
 }
 
 impl FetchOptions {
