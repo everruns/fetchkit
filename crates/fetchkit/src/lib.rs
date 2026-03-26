@@ -59,6 +59,7 @@
 //!
 //! Built-in fetchers:
 //! - [`DefaultFetcher`] - General HTTP/HTTPS fetcher with HTML conversion
+//! - [`GitHubCodeFetcher`] - GitHub source file content with language metadata
 //! - [`GitHubIssueFetcher`] - GitHub issue and PR metadata with comments
 //! - [`GitHubRepoFetcher`] - GitHub repository metadata and README
 //! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
@@ -80,7 +81,8 @@ pub use convert::{html_to_markdown, html_to_text};
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
-    DefaultFetcher, Fetcher, FetcherRegistry, GitHubIssueFetcher, GitHubRepoFetcher, TwitterFetcher,
+    DefaultFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher, GitHubIssueFetcher,
+    GitHubRepoFetcher, TwitterFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
