@@ -56,9 +56,24 @@ pub fn html_to_markdown(html: &str) -> String {
     let mut output = String::new();
     let mut in_skip_element = 0;
     let mut skip_elements: Vec<String> = Vec::new();
-    let mut list_depth: usize = 0;
     let mut in_pre = false;
     let mut in_blockquote = false;
+
+    // Link tracking: when we see <a href="...">, save href and record the output
+    // position. On </a>, wrap the text collected since then in [text](href).
+    let mut link_href: Option<String> = None;
+    let mut link_start: usize = 0;
+
+    // List tracking: stack of list types (true=ordered, false=unordered) with item counter
+    let mut list_stack: Vec<(bool, usize)> = Vec::new();
+
+    // Table tracking
+    let mut in_table = false;
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut current_row: Vec<String> = Vec::new();
+    let mut in_cell = false;
+    let mut cell_buf = String::new();
+    let mut is_header_row = false;
 
     let mut chars = html.chars().peekable();
 
@@ -103,44 +118,14 @@ pub fn html_to_markdown(html: &str) -> String {
 
             // Handle markdown conversion
             match tag_name {
-                "h1" => {
+                "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+                    let level = tag_name[1..].parse::<usize>().unwrap_or(1);
                     if !is_closing {
-                        output.push_str("\n# ");
-                    } else {
-                        output.push_str("\n\n");
-                    }
-                }
-                "h2" => {
-                    if !is_closing {
-                        output.push_str("\n## ");
-                    } else {
-                        output.push_str("\n\n");
-                    }
-                }
-                "h3" => {
-                    if !is_closing {
-                        output.push_str("\n### ");
-                    } else {
-                        output.push_str("\n\n");
-                    }
-                }
-                "h4" => {
-                    if !is_closing {
-                        output.push_str("\n#### ");
-                    } else {
-                        output.push_str("\n\n");
-                    }
-                }
-                "h5" => {
-                    if !is_closing {
-                        output.push_str("\n##### ");
-                    } else {
-                        output.push_str("\n\n");
-                    }
-                }
-                "h6" => {
-                    if !is_closing {
-                        output.push_str("\n###### ");
+                        output.push('\n');
+                        for _ in 0..level {
+                            output.push('#');
+                        }
+                        output.push(' ');
                     } else {
                         output.push_str("\n\n");
                     }
@@ -156,23 +141,43 @@ pub fn html_to_markdown(html: &str) -> String {
                 "hr" => {
                     output.push_str("\n---\n");
                 }
-                "ul" | "ol" => {
+                "ul" => {
                     if is_closing {
-                        list_depth = list_depth.saturating_sub(1);
-                        if list_depth == 0 {
+                        list_stack.pop();
+                        if list_stack.is_empty() {
                             output.push('\n');
                         }
                     } else {
-                        list_depth += 1;
+                        list_stack.push((false, 0));
+                    }
+                }
+                "ol" => {
+                    if is_closing {
+                        list_stack.pop();
+                        if list_stack.is_empty() {
+                            output.push('\n');
+                        }
+                    } else {
+                        list_stack.push((true, 0));
                     }
                 }
                 "li" => {
                     if !is_closing {
                         output.push('\n');
-                        for _ in 0..list_depth.saturating_sub(1) {
+                        let depth = list_stack.len().saturating_sub(1);
+                        for _ in 0..depth {
                             output.push_str("  ");
                         }
-                        output.push_str("- ");
+                        if let Some((is_ordered, counter)) = list_stack.last_mut() {
+                            if *is_ordered {
+                                *counter += 1;
+                                output.push_str(&format!("{}. ", *counter));
+                            } else {
+                                output.push_str("- ");
+                            }
+                        } else {
+                            output.push_str("- ");
+                        }
                     }
                 }
                 "strong" | "b" => {
@@ -206,13 +211,94 @@ pub fn html_to_markdown(html: &str) -> String {
                 }
                 "a" => {
                     if !is_closing {
-                        // Extract href
                         if let Some(href) = extract_attribute(&tag, "href") {
-                            output.push('[');
-                            // We'll close with ]() format - naive implementation
-                            // Push href placeholder, will be formatted after link text
-                            output.push_str(&format!("]({})", href));
+                            if !href.is_empty() {
+                                link_href = Some(href);
+                                link_start = output.len();
+                            }
                         }
+                    } else if let Some(href) = link_href.take() {
+                        let text = output[link_start..].trim().to_string();
+                        output.truncate(link_start);
+                        if text.is_empty() {
+                            output.push_str(&format!("<{}>", href));
+                        } else {
+                            output.push_str(&format!("[{}]({})", text, href));
+                        }
+                    }
+                }
+                "img" => {
+                    if !is_closing {
+                        let alt = extract_attribute(&tag, "alt").unwrap_or_default();
+                        if let Some(src) = extract_attribute(&tag, "src") {
+                            output.push_str(&format!("![{}]({})", alt, src));
+                        }
+                    }
+                }
+                // Table handling
+                "table" => {
+                    if !is_closing {
+                        in_table = true;
+                        table_rows.clear();
+                    } else {
+                        in_table = false;
+                        render_table(&table_rows, &mut output);
+                        table_rows.clear();
+                    }
+                }
+                "tr" => {
+                    if !is_closing {
+                        current_row.clear();
+                        is_header_row = false;
+                    } else if in_table {
+                        table_rows.push(current_row.clone());
+                        if is_header_row && table_rows.len() == 1 {
+                            let sep: Vec<String> =
+                                current_row.iter().map(|_| "---".to_string()).collect();
+                            table_rows.push(sep);
+                        }
+                        current_row.clear();
+                    }
+                }
+                "th" => {
+                    if !is_closing {
+                        in_cell = true;
+                        cell_buf.clear();
+                        is_header_row = true;
+                    } else {
+                        in_cell = false;
+                        current_row.push(cell_buf.trim().to_string());
+                        cell_buf.clear();
+                    }
+                }
+                "td" => {
+                    if !is_closing {
+                        in_cell = true;
+                        cell_buf.clear();
+                    } else {
+                        in_cell = false;
+                        current_row.push(cell_buf.trim().to_string());
+                        cell_buf.clear();
+                    }
+                }
+                // Definition lists
+                "dl" => {
+                    if is_closing {
+                        output.push_str("\n\n");
+                    }
+                }
+                "dt" => {
+                    if !is_closing {
+                        output.push_str("\n**");
+                    } else {
+                        output.push_str("**\n");
+                    }
+                }
+                "dd" => {
+                    if !is_closing {
+                        output.push_str(": ");
+                    } else {
+                        output.push('\n');
                     }
                 }
                 _ => {}
@@ -220,7 +306,12 @@ pub fn html_to_markdown(html: &str) -> String {
         } else if in_skip_element == 0 {
             // Text content
             let decoded = decode_entity(c, &mut chars);
-            if in_blockquote && decoded == '\n' {
+
+            if in_cell {
+                cell_buf.push(decoded);
+            } else if in_table {
+                // Ignore text outside cells but inside table
+            } else if in_blockquote && decoded == '\n' {
                 output.push_str("\n> ");
             } else {
                 output.push(decoded);
@@ -229,6 +320,20 @@ pub fn html_to_markdown(html: &str) -> String {
     }
 
     clean_whitespace(&output)
+}
+
+/// Render collected table rows as a markdown table.
+fn render_table(rows: &[Vec<String>], output: &mut String) {
+    if rows.is_empty() {
+        return;
+    }
+
+    output.push('\n');
+    for row in rows {
+        output.push_str("| ");
+        output.push_str(&row.join(" | "));
+        output.push_str(" |\n");
+    }
 }
 
 /// Convert HTML to plain text
@@ -366,13 +471,40 @@ fn decode_entity(c: char, chars: &mut std::iter::Peekable<std::str::Chars>) -> c
         "lt" => '<',
         "gt" => '>',
         "quot" => '"',
-        "apos" => '\'',
-        "#39" => '\'',
+        "apos" | "#39" => '\'',
         "nbsp" => ' ',
         "mdash" => '—',
         "ndash" => '–',
         "copy" => '©',
         "reg" => '®',
+        "trade" => '™',
+        "bull" => '•',
+        "hellip" => '…',
+        "laquo" => '«',
+        "raquo" => '»',
+        "lsquo" => '\u{2018}',
+        "rsquo" => '\u{2019}',
+        "ldquo" => '\u{201C}',
+        "rdquo" => '\u{201D}',
+        "euro" => '€',
+        "pound" => '£',
+        "yen" => '¥',
+        "cent" => '¢',
+        "deg" => '°',
+        "micro" => 'µ',
+        "para" => '¶',
+        "sect" => '§',
+        "middot" => '·',
+        "times" => '×',
+        "divide" => '÷',
+        "plusmn" => '±',
+        "frac12" => '½',
+        "frac14" => '¼',
+        "frac34" => '¾',
+        "larr" => '←',
+        "rarr" => '→',
+        "uarr" => '↑',
+        "darr" => '↓',
         _ => {
             // Check for numeric entities
             if let Some(num_str) = entity.strip_prefix('#') {
@@ -395,11 +527,13 @@ fn decode_entity(c: char, chars: &mut std::iter::Peekable<std::str::Chars>) -> c
     }
 }
 
-/// Clean whitespace: collapse runs, trim, keep max 2 newlines
+/// Clean whitespace: collapse runs, trim, keep max 2 newlines.
+/// Preserves indentation (spaces after newlines) for list nesting.
 pub fn clean_whitespace(s: &str) -> String {
     let mut result = String::new();
     let mut last_was_space = false;
     let mut newline_count = 0;
+    let mut at_line_start = true;
 
     for c in s.chars() {
         if c == '\n' {
@@ -408,10 +542,21 @@ pub fn clean_whitespace(s: &str) -> String {
                 result.pop();
             }
             newline_count += 1;
-            // Treat newline as space for next char collapsing
             last_was_space = true;
+            at_line_start = true;
             if newline_count <= 2 {
                 result.push(c);
+            }
+        } else if c == ' ' || c == '\t' {
+            if at_line_start {
+                // Preserve indentation at line start
+                result.push(c);
+            } else {
+                newline_count = 0;
+                if !last_was_space {
+                    result.push(' ');
+                    last_was_space = true;
+                }
             }
         } else if c.is_whitespace() {
             newline_count = 0;
@@ -422,6 +567,7 @@ pub fn clean_whitespace(s: &str) -> String {
         } else {
             newline_count = 0;
             last_was_space = false;
+            at_line_start = false;
             result.push(c);
         }
     }
@@ -1082,7 +1228,14 @@ mod tests {
     fn test_clean_whitespace() {
         let input = "  hello   world  \n\n\n\n  test  ";
         let output = clean_whitespace(input);
-        assert_eq!(output, "hello world\n\ntest");
+        assert_eq!(output, "hello world\n\n  test");
+    }
+
+    #[test]
+    fn test_clean_whitespace_preserves_indentation() {
+        let input = "top\n  indented\n    deeper";
+        let output = clean_whitespace(input);
+        assert_eq!(output, "top\n  indented\n    deeper");
     }
 
     #[test]
@@ -1402,5 +1555,110 @@ mod tests {
         assert!(result.contains("Article header"));
         assert!(result.contains("Body"));
         assert!(!result.contains("Site header"));
+    }
+
+    #[test]
+    fn test_html_to_markdown_links() {
+        let html = r#"<p>Visit <a href="https://example.com">Example Site</a> today.</p>"#;
+        let md = html_to_markdown(html);
+        assert!(
+            md.contains("[Example Site](https://example.com)"),
+            "Got: {}",
+            md
+        );
+    }
+
+    #[test]
+    fn test_html_to_markdown_link_no_text() {
+        let html = r#"<a href="https://example.com"></a>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("<https://example.com>"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_images() {
+        let html = r#"<img src="photo.jpg" alt="A photo">"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("![A photo](photo.jpg)"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_image_no_alt() {
+        let html = r#"<img src="photo.jpg">"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("![](photo.jpg)"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_ordered_list() {
+        let html = "<ol><li>First</li><li>Second</li><li>Third</li></ol>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("1. First"), "Got: {}", md);
+        assert!(md.contains("2. Second"), "Got: {}", md);
+        assert!(md.contains("3. Third"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_nested_lists() {
+        let html = "<ul><li>Top<ul><li>Nested</li></ul></li></ul>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("- Top"), "Got: {}", md);
+        assert!(md.contains("  - Nested"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_table() {
+        let html = r#"<table>
+            <tr><th>Name</th><th>Age</th></tr>
+            <tr><td>Alice</td><td>30</td></tr>
+            <tr><td>Bob</td><td>25</td></tr>
+        </table>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("| Name | Age |"), "Got: {}", md);
+        assert!(md.contains("| --- | --- |"), "Got: {}", md);
+        assert!(md.contains("| Alice | 30 |"), "Got: {}", md);
+        assert!(md.contains("| Bob | 25 |"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_table_no_header() {
+        let html = r#"<table>
+            <tr><td>A</td><td>B</td></tr>
+            <tr><td>C</td><td>D</td></tr>
+        </table>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("| A | B |"), "Got: {}", md);
+        assert!(md.contains("| C | D |"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_definition_list() {
+        let html = "<dl><dt>Term</dt><dd>Definition</dd></dl>";
+        let md = html_to_markdown(html);
+        assert!(md.contains("**Term**"), "Got: {}", md);
+        assert!(md.contains(": Definition"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_expanded_entities() {
+        let html = "<p>&trade; &bull; &hellip; &euro; &pound; &larr; &rarr;</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains('™'), "Got: {}", md);
+        assert!(md.contains('•'), "Got: {}", md);
+        assert!(md.contains('…'), "Got: {}", md);
+        assert!(md.contains('€'), "Got: {}", md);
+        assert!(md.contains('£'), "Got: {}", md);
+        assert!(md.contains('←'), "Got: {}", md);
+        assert!(md.contains('→'), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_smart_quotes() {
+        let html = "<p>&ldquo;Hello&rdquo; &lsquo;World&rsquo;</p>";
+        let md = html_to_markdown(html);
+        assert!(md.contains('\u{201C}'), "Got: {}", md);
+        assert!(md.contains('\u{201D}'), "Got: {}", md);
+        assert!(md.contains('\u{2018}'), "Got: {}", md);
+        assert!(md.contains('\u{2019}'), "Got: {}", md);
     }
 }
