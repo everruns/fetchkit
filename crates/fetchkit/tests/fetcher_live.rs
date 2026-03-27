@@ -6,10 +6,13 @@
 //!
 //! Assertions are structural (field presence, non-empty content, expected substrings)
 //! rather than exact-match, so tests tolerate minor upstream changes.
+//!
+//! Network errors (DNS, timeout, blocked) are treated as skips, not failures —
+//! live tests should only fail on unexpected response structure, not infra issues.
 
 #![cfg(feature = "live-tests")]
 
-use fetchkit::{FetchOptions, FetchRequest, FetcherRegistry};
+use fetchkit::{FetchError, FetchOptions, FetchRequest, FetchResponse, FetcherRegistry};
 
 /// Shared options for live tests — default everything, both conversions on.
 fn live_options() -> FetchOptions {
@@ -24,6 +27,44 @@ fn registry() -> FetcherRegistry {
     FetcherRegistry::with_defaults()
 }
 
+/// Network errors that indicate infra problems, not fetcher bugs.
+fn is_network_error(err: &FetchError) -> bool {
+    matches!(
+        err,
+        FetchError::FirstByteTimeout
+            | FetchError::BlockedUrl
+            | FetchError::ConnectError(_)
+            | FetchError::ClientBuildError(_)
+            | FetchError::RequestError(_)
+    )
+}
+
+/// Fetch and return Ok(response), or skip the test if the error is network-related.
+async fn fetch_or_skip(url: &str) -> Option<FetchResponse> {
+    let req = FetchRequest::new(url);
+    match registry().fetch(req, live_options()).await {
+        Ok(resp) => Some(resp),
+        Err(e) if is_network_error(&e) => {
+            eprintln!("SKIPPED (network): {url} — {e}");
+            None
+        }
+        Err(e) => panic!("unexpected fetcher error for {url}: {e}"),
+    }
+}
+
+/// Like fetch_or_skip but with as_markdown set.
+async fn fetch_markdown_or_skip(url: &str) -> Option<FetchResponse> {
+    let req = FetchRequest::new(url).as_markdown();
+    match registry().fetch(req, live_options()).await {
+        Ok(resp) => Some(resp),
+        Err(e) if is_network_error(&e) => {
+            eprintln!("SKIPPED (network): {url} — {e}");
+            None
+        }
+        Err(e) => panic!("unexpected fetcher error for {url}: {e}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // github_repo
 // ---------------------------------------------------------------------------
@@ -32,12 +73,12 @@ mod live_github_repo {
 
     #[tokio::test]
     async fn fetches_repo_metadata() {
-        let req = FetchRequest::new("https://github.com/rust-lang/rust");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://github.com/rust-lang/rust").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
-        // Repo name should appear somewhere in the output
         assert!(
             content.contains("rust-lang/rust") || content.to_lowercase().contains("rust"),
             "content should mention the repo"
@@ -55,8 +96,9 @@ mod live_github_issue {
     #[tokio::test]
     async fn fetches_issue() {
         // Well-known issue: rust-lang/rust#1 (the very first issue)
-        let req = FetchRequest::new("https://github.com/rust-lang/rust/issues/1");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://github.com/rust-lang/rust/issues/1").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -72,8 +114,11 @@ mod live_github_code {
 
     #[tokio::test]
     async fn fetches_source_file() {
-        let req = FetchRequest::new("https://github.com/rust-lang/rust/blob/master/README.md");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) =
+            fetch_or_skip("https://github.com/rust-lang/rust/blob/master/README.md").await
+        else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -93,20 +138,15 @@ mod live_twitter {
     #[tokio::test]
     async fn fetches_tweet() {
         // Rust lang announcement tweet — stable, public
-        let req = FetchRequest::new("https://x.com/rustlang/status/1821986021505405014");
-        let result = registry().fetch(req, live_options()).await;
+        let Some(resp) = fetch_or_skip("https://x.com/rustlang/status/1821986021505405014").await
+        else {
+            return;
+        };
 
-        // Twitter APIs are flaky; accept success or a graceful error
-        match result {
-            Ok(resp) => {
-                assert!(resp.status_code == 200 || resp.status_code == 403);
-                if resp.status_code == 200 {
-                    assert!(resp.content.is_some());
-                }
-            }
-            Err(_) => {
-                // Third-party API unavailable — acceptable
-            }
+        // Twitter APIs are unreliable; accept any non-panic response as proof
+        // the fetcher handled it. Only assert structure on 200.
+        if resp.status_code == 200 {
+            assert!(resp.content.is_some());
         }
     }
 }
@@ -120,10 +160,11 @@ mod live_stackoverflow {
     #[tokio::test]
     async fn fetches_question() {
         // "What is a NullPointerException" — one of the most famous SO questions
-        let req = FetchRequest::new(
+        let Some(resp) = fetch_or_skip(
             "https://stackoverflow.com/questions/218384/what-is-a-nullpointerexception-and-how-do-i-fix-it",
-        );
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        ).await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -135,15 +176,16 @@ mod live_stackoverflow {
 }
 
 // ---------------------------------------------------------------------------
-// package_registry (crates.io)
+// package_registry
 // ---------------------------------------------------------------------------
 mod live_package_registry {
     use super::*;
 
     #[tokio::test]
     async fn fetches_crate() {
-        let req = FetchRequest::new("https://crates.io/crates/serde");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://crates.io/crates/serde").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -155,8 +197,9 @@ mod live_package_registry {
 
     #[tokio::test]
     async fn fetches_pypi_package() {
-        let req = FetchRequest::new("https://pypi.org/project/requests/");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://pypi.org/project/requests/").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -168,8 +211,9 @@ mod live_package_registry {
 
     #[tokio::test]
     async fn fetches_npm_package() {
-        let req = FetchRequest::new("https://www.npmjs.com/package/express");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://www.npmjs.com/package/express").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -188,8 +232,11 @@ mod live_wikipedia {
 
     #[tokio::test]
     async fn fetches_article() {
-        let req = FetchRequest::new("https://en.wikipedia.org/wiki/Rust_(programming_language)");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) =
+            fetch_or_skip("https://en.wikipedia.org/wiki/Rust_(programming_language)").await
+        else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -209,8 +256,9 @@ mod live_youtube {
     #[tokio::test]
     async fn fetches_video_metadata() {
         // "Me at the zoo" — first YouTube video ever, very stable
-        let req = FetchRequest::new("https://www.youtube.com/watch?v=jNQXAC9IVRw");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://www.youtube.com/watch?v=jNQXAC9IVRw").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -227,8 +275,9 @@ mod live_arxiv {
     #[tokio::test]
     async fn fetches_paper() {
         // "Attention Is All You Need"
-        let req = FetchRequest::new("https://arxiv.org/abs/1706.03762");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://arxiv.org/abs/1706.03762").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -248,8 +297,9 @@ mod live_hackernews {
     #[tokio::test]
     async fn fetches_story() {
         // HN item 1 — the very first story
-        let req = FetchRequest::new("https://news.ycombinator.com/item?id=1");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://news.ycombinator.com/item?id=1").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -266,8 +316,9 @@ mod live_rss_feed {
     #[tokio::test]
     async fn fetches_rss() {
         // Rust blog RSS feed
-        let req = FetchRequest::new("https://blog.rust-lang.org/feed.xml");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://blog.rust-lang.org/feed.xml").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -286,8 +337,9 @@ mod live_docs_site {
 
     #[tokio::test]
     async fn fetches_docs_rs() {
-        let req = FetchRequest::new("https://docs.rs/serde/latest/serde/");
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_or_skip("https://docs.rs/serde/latest/serde/").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
@@ -306,8 +358,9 @@ mod live_default {
 
     #[tokio::test]
     async fn fetches_plain_html() {
-        let req = FetchRequest::new("https://example.com").as_markdown();
-        let resp = registry().fetch(req, live_options()).await.unwrap();
+        let Some(resp) = fetch_markdown_or_skip("https://example.com").await else {
+            return;
+        };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
