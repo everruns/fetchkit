@@ -69,6 +69,68 @@ Central dispatcher that:
 - Quoted tweets rendered as blockquotes
 - Both APIs are unauthenticated; syndication API is undocumented but widely used
 
+#### GitHubCodeFetcher
+
+- Matches: `https://github.com/{owner}/{repo}/blob/{ref}/{path}`
+- Excludes: Reserved owner paths (settings, issues, pulls, etc.)
+- Behavior: Fetches raw source files via GitHub API, detects language from extension, handles base64 decoding, returns metadata for files >1MB or binary
+- Response format field: `"github_file"`
+
+#### GitHubIssueFetcher
+
+- Matches: `https://github.com/{owner}/{repo}/issues/{number}` and `https://github.com/{owner}/{repo}/pull/{number}`
+- Excludes: Reserved owner paths, non-numeric IDs
+- Behavior: Fetches issue/PR metadata, labels, assignees, milestone, and up to 100 comments; PRs include diff stats and merge status
+- Response format field: `"github_issue"` or `"github_pull_request"`
+
+#### StackOverflowFetcher
+
+- Matches: `https://{stackoverflow.com|serverfault.com|superuser.com|askubuntu.com|mathoverflow.net|*.stackexchange.com}/questions/{id}`
+- Behavior: Fetches question and top 10 answers sorted by votes via Stack Exchange API
+- Response format field: `"stackoverflow_qa"`
+
+#### PackageRegistryFetcher
+
+- Matches: `https://pypi.org/project/{name}`, `https://crates.io/crates/{name}`, `https://www.npmjs.com/package/{name}` (including @scope/name)
+- Behavior: Fetches package metadata from respective registry APIs
+- Response format field: `"package_registry"`
+
+#### WikipediaFetcher
+
+- Matches: `https://{lang}.wikipedia.org/wiki/{title}`
+- Behavior: Fetches article summary via MediaWiki REST API and full HTML, converts to markdown
+- Response format field: `"wikipedia"`
+
+#### YouTubeFetcher
+
+- Matches: `https://youtube.com/watch?v={id}`, `https://youtu.be/{id}`
+- Behavior: Fetches video metadata via oEmbed API
+- Response format field: `"youtube_video"`
+
+#### ArXivFetcher
+
+- Matches: `https://arxiv.org/abs/{id}` and `https://arxiv.org/pdf/{id}`
+- Behavior: Fetches paper metadata via arXiv Atom XML API
+- Response format field: `"arxiv_paper"`
+
+#### HackerNewsFetcher
+
+- Matches: `https://news.ycombinator.com/item?id={id}`
+- Behavior: Fetches item via HN Firebase API with top 20 comments and one level of replies
+- Response format field: `"hackernews"`
+
+#### RSSFeedFetcher
+
+- Matches: URLs ending with `/feed`, `/rss`, `/atom`, `.rss`, `.xml` variants
+- Behavior: Detects RSS 2.0 or Atom 1.0, parses up to 20 entries
+- Response format field: `"rss_feed"`
+
+#### DocsSiteFetcher
+
+- Matches: Direct `/llms.txt` or `/llms-full.txt` URLs, or known docs sites (ReadTheDocs, docs.rs, GitBook, etc.)
+- Behavior: Probes for llms-full.txt/llms.txt at origin; if not found, fetches page and converts HTML to markdown
+- Response format field: `"documentation"` or `"markdown"`
+
 ### Response Extensions
 
 `FetchResponse.format` values:
@@ -76,7 +138,18 @@ Central dispatcher that:
 - `"text"` - HTML converted to plain text
 - `"raw"` - Original content unchanged
 - `"github_repo"` - GitHub repository metadata + README
+- `"github_file"` - GitHub source file content
+- `"github_issue"` - GitHub issue content
+- `"github_pull_request"` - GitHub pull request content
 - `"twitter_tweet"` - Twitter/X tweet content with metadata
+- `"stackoverflow_qa"` - Stack Overflow Q&A
+- `"package_registry"` - Package registry metadata
+- `"wikipedia"` - Wikipedia article
+- `"youtube_video"` - YouTube video metadata
+- `"arxiv_paper"` - arXiv paper metadata
+- `"hackernews"` - Hacker News item with comments
+- `"rss_feed"` - RSS/Atom feed entries
+- `"documentation"` - Documentation site content
 
 ### Configuration
 
@@ -127,9 +200,19 @@ crates/fetchkit/src/
 ├── file_saver.rs        # FileSaver trait, LocalFileSaver, SaveResult, FileSaveError
 ├── fetchers/
 │   ├── mod.rs           # Fetcher trait, FetcherRegistry
+│   ├── arxiv.rs         # ArXivFetcher
 │   ├── default.rs       # DefaultFetcher (with binary-aware fetch_to_file override)
+│   ├── docs_site.rs     # DocsSiteFetcher
+│   ├── github_code.rs   # GitHubCodeFetcher
+│   ├── github_issue.rs  # GitHubIssueFetcher
 │   ├── github_repo.rs   # GitHubRepoFetcher
-│   └── twitter.rs       # TwitterFetcher
+│   ├── hackernews.rs    # HackerNewsFetcher
+│   ├── package_registry.rs # PackageRegistryFetcher
+│   ├── rss_feed.rs      # RSSFeedFetcher
+│   ├── stackoverflow.rs # StackOverflowFetcher
+│   ├── twitter.rs       # TwitterFetcher
+│   ├── wikipedia.rs     # WikipediaFetcher
+│   └── youtube.rs       # YouTubeFetcher
 ```
 
 ## API
