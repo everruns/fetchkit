@@ -13,6 +13,7 @@ readme = "../../README.md"
 [features]
 default = []
 bot-auth = ["dep:ed25519-dalek", "dep:base64", "dep:sha2", "dep:rand"]
+live-tests = []
 
 [dependencies]
 tokio = { workspace = true }

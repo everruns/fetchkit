@@ -112,6 +112,37 @@ jobs:
           python examples/python_fetchkit.py
         timeout-minutes: 2
 
+  live-tests:
+    name: Live Fetcher Tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Detect changed fetchers
+        id: detect
+        run: |
+          FILTERS=$(bash scripts/changed-fetcher-tests.sh "origin/${{ github.base_ref }}")
+          echo "filters=$FILTERS" >> "$GITHUB_OUTPUT"
+          if [ -z "$FILTERS" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run live tests
+        if: steps.detect.outputs.skip == 'false'
+        run: |
+          for filter in ${{ steps.detect.outputs.filters }}; do
+            echo "::group::Running $filter"
+            cargo test --features live-tests -p fetchkit "$filter" -- --nocapture
+            echo "::endgroup::"
+          done
+        timeout-minutes: 5
+        continue-on-error: true
+
   # Gate job for branch protection.
   check:
     name: Check
