@@ -84,7 +84,7 @@ pub mod file_saver;
 mod tool;
 mod types;
 
-pub use client::{fetch, fetch_with_options, FetchOptions};
+pub use client::{batch_fetch, batch_fetch_with_options, fetch, fetch_with_options, FetchOptions};
 pub use convert::{
     extract_headings, extract_metadata, html_to_markdown, html_to_text, strip_boilerplate,
 };
