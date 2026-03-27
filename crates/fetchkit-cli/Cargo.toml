@@ -21,7 +21,7 @@ default = []
 bot-auth = ["fetchkit/bot-auth"]
 
 [dependencies]
-fetchkit = { path = "../fetchkit", version = "0.1.3" }
+fetchkit = { path = "../fetchkit", version = "0.2.0" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
