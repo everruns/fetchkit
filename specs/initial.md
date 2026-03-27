@@ -137,10 +137,10 @@ Provide a builder to configure tool options, including:
 
 ### MCP Server
 
-- Expose a single `fetchkit` tool over MCP.
-- Input schema: `{ url: string }` (required).
+- Expose a single `web_fetch` tool over MCP.
+- Input schema: derived from `FetchRequest` via tool builder (disabled options omitted).
 - Output: Markdown with YAML frontmatter (same format as CLI `--output md`).
-- Tool description: "Fetch URL and return markdown with metadata frontmatter. Optimized for LLM consumption."
+- Tool description: "Fetch URL content as text or markdown; return metadata for binary responses or save bytes to file."
 
 ### Python Bindings
 
