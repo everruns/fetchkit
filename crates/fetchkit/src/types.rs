@@ -94,6 +94,16 @@ pub struct FetchRequest {
     /// "full" (default) returns everything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_focus: Option<String>,
+
+    /// ETag value for conditional requests (If-None-Match header).
+    /// When set, the server may return 304 Not Modified if content unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub if_none_match: Option<String>,
+
+    /// Last-Modified value for conditional requests (If-Modified-Since header).
+    /// When set, the server may return 304 Not Modified if content unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub if_modified_since: Option<String>,
 }
 
 impl FetchRequest {
@@ -132,6 +142,18 @@ impl FetchRequest {
     /// Set content focus mode ("main" or "full")
     pub fn content_focus(mut self, focus: impl Into<String>) -> Self {
         self.content_focus = Some(focus.into());
+        self
+    }
+
+    /// Set ETag for conditional request
+    pub fn if_none_match(mut self, etag: impl Into<String>) -> Self {
+        self.if_none_match = Some(etag.into());
+        self
+    }
+
+    /// Set If-Modified-Since for conditional request
+    pub fn if_modified_since(mut self, date: impl Into<String>) -> Self {
+        self.if_modified_since = Some(date.into());
         self
     }
 
@@ -278,6 +300,10 @@ pub struct FetchResponse {
     /// Last-Modified header value
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
+
+    /// ETag header value (for conditional requests)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
 
     /// Extracted filename
     #[serde(skip_serializing_if = "Option::is_none")]

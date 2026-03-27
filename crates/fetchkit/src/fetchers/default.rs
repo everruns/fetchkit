@@ -81,7 +81,7 @@ impl Default for DefaultFetcher {
 }
 
 /// Build headers for HTTP requests
-fn build_headers(options: &FetchOptions, accept: &str) -> HeaderMap {
+fn build_headers(options: &FetchOptions, accept: &str, request: &FetchRequest) -> HeaderMap {
     let mut headers = HeaderMap::new();
     let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
     headers.insert(
@@ -93,6 +93,19 @@ fn build_headers(options: &FetchOptions, accept: &str) -> HeaderMap {
         ACCEPT,
         HeaderValue::from_str(accept).unwrap_or_else(|_| HeaderValue::from_static("*/*")),
     );
+
+    // Conditional request headers
+    if let Some(ref etag) = request.if_none_match {
+        if let Ok(v) = HeaderValue::from_str(etag) {
+            headers.insert(reqwest::header::IF_NONE_MATCH, v);
+        }
+    }
+    if let Some(ref date) = request.if_modified_since {
+        if let Ok(v) = HeaderValue::from_str(date) {
+            headers.insert(reqwest::header::IF_MODIFIED_SINCE, v);
+        }
+    }
+
     headers
 }
 
@@ -137,6 +150,7 @@ fn apply_bot_auth_if_enabled(headers: HeaderMap, _options: &FetchOptions, _url: 
 struct ResponseMeta {
     content_type: Option<String>,
     last_modified: Option<String>,
+    etag: Option<String>,
     content_length: Option<u64>,
     filename: Option<String>,
 }
@@ -149,6 +163,10 @@ fn extract_response_meta(headers: &HeaderMap, url: &str) -> ResponseMeta {
             .map(|s| s.to_string()),
         last_modified: headers
             .get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string()),
+        etag: headers
+            .get("etag")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string()),
         content_length: headers
@@ -192,7 +210,7 @@ impl Fetcher for DefaultFetcher {
             "*/*"
         };
 
-        let headers = build_headers(options, accept);
+        let headers = build_headers(options, accept, request);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
 
@@ -209,6 +227,18 @@ impl Fetcher for DefaultFetcher {
         let final_url = response.url().to_string();
         let meta = extract_response_meta(response.headers(), &final_url);
 
+        // Handle 304 Not Modified (conditional request response)
+        if status_code == 304 {
+            return Ok(FetchResponse {
+                url: final_url,
+                status_code,
+                content_type: meta.content_type,
+                last_modified: meta.last_modified,
+                etag: meta.etag,
+                ..Default::default()
+            });
+        }
+
         // Handle HEAD request
         if method == HttpMethod::Head {
             return Ok(FetchResponse {
@@ -217,6 +247,7 @@ impl Fetcher for DefaultFetcher {
                 content_type: meta.content_type,
                 size: meta.content_length,
                 last_modified: meta.last_modified,
+                etag: meta.etag,
                 filename: meta.filename,
                 method: Some("HEAD".to_string()),
                 ..Default::default()
@@ -232,6 +263,7 @@ impl Fetcher for DefaultFetcher {
                     content_type: meta.content_type,
                     size: meta.content_length,
                     last_modified: meta.last_modified,
+                    etag: meta.etag,
                     filename: meta.filename,
                     error: Some(
                         "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."
@@ -309,6 +341,7 @@ impl Fetcher for DefaultFetcher {
             content_type: meta.content_type,
             size: Some(size),
             last_modified: meta.last_modified,
+            etag: meta.etag,
             filename: meta.filename,
             format: Some(format),
             content: Some(final_content),
@@ -340,7 +373,7 @@ impl Fetcher for DefaultFetcher {
         let method = request.effective_method();
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
-        let headers = build_headers(options, "*/*");
+        let headers = build_headers(options, "*/*", request);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
 
@@ -365,6 +398,7 @@ impl Fetcher for DefaultFetcher {
                 content_type: meta.content_type,
                 size: meta.content_length,
                 last_modified: meta.last_modified,
+                etag: meta.etag,
                 filename: meta.filename,
                 method: Some("HEAD".to_string()),
                 ..Default::default()
@@ -387,6 +421,7 @@ impl Fetcher for DefaultFetcher {
             content_type: meta.content_type,
             size: Some(size),
             last_modified: meta.last_modified,
+            etag: meta.etag,
             filename: meta.filename,
             truncated: if truncated { Some(true) } else { None },
             saved_path: Some(save_result.path),
@@ -472,7 +507,8 @@ fn redirect_target(
     response: &reqwest::Response,
     options: &FetchOptions,
 ) -> Result<Option<Url>, FetchError> {
-    if !response.status().is_redirection() {
+    // 304 Not Modified is in the 3xx range but is not a redirect
+    if !response.status().is_redirection() || response.status().as_u16() == 304 {
         return Ok(None);
     }
 
@@ -933,5 +969,83 @@ mod tests {
         let response = fetcher.fetch(&request, &options).await.unwrap();
 
         assert_eq!(response.status_code, 200);
+    }
+
+    #[tokio::test]
+    async fn test_etag_returned_in_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/page"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("content")
+                    .insert_header("content-type", "text/plain")
+                    .insert_header("etag", "\"abc123\""),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/page", server.uri()));
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.etag.as_deref(), Some("\"abc123\""));
+    }
+
+    #[tokio::test]
+    async fn test_conditional_fetch_304_not_modified() {
+        use wiremock::matchers::header;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/page"))
+            .and(header("if-none-match", "\"abc123\""))
+            .respond_with(ResponseTemplate::new(304).insert_header("etag", "\"abc123\""))
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request =
+            FetchRequest::new(format!("{}/page", server.uri())).if_none_match("\"abc123\"");
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.status_code, 304);
+        assert_eq!(response.etag.as_deref(), Some("\"abc123\""));
+        assert!(response.content.is_none());
+        assert!(response.format.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_conditional_fetch_if_modified_since() {
+        use wiremock::matchers::header_exists;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/page"))
+            .and(header_exists("if-modified-since"))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/page", server.uri()))
+            .if_modified_since("Wed, 21 Oct 2015 07:28:00 GMT");
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.status_code, 304);
+        assert!(response.content.is_none());
     }
 }
