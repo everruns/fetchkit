@@ -340,6 +340,18 @@ pub struct FetchResponse {
     /// Structured page metadata extracted from HTML
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<PageMetadata>,
+
+    /// Word count of the final content
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_count: Option<u64>,
+
+    /// Chain of URLs followed during redirects (empty if no redirects)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub redirect_chain: Vec<String>,
+
+    /// Heuristic paywall detection (soft signal, not guaranteed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_paywall: Option<bool>,
 }
 
 #[cfg(test)]
