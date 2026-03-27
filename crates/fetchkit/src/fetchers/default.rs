@@ -10,7 +10,7 @@
 use crate::client::FetchOptions;
 use crate::convert::{
     extract_headings, extract_metadata, filter_excessive_newlines, html_to_markdown, html_to_text,
-    is_html, is_markdown_content_type, is_plain_text_content_type,
+    is_html, is_markdown_content_type, is_plain_text_content_type, strip_boilerplate,
 };
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
@@ -253,8 +253,9 @@ impl Fetcher for DefaultFetcher {
         // Determine format and convert if needed
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
         let is_html_content = is_html(&meta.content_type, &content);
+        let wants_main = request.wants_main_content();
 
-        // Extract structured metadata from HTML content
+        // Extract structured metadata from HTML content (before boilerplate stripping)
         let page_metadata = if is_html_content {
             let mut pm = extract_metadata(&content);
             pm.headings = extract_headings(&content);
@@ -277,12 +278,18 @@ impl Fetcher for DefaultFetcher {
                 debug!("Content-type is plain text; skipping HTML conversion");
                 ("text".to_string(), content)
             } else if is_html_content {
-                if wants_markdown {
-                    ("markdown".to_string(), html_to_markdown(&content))
-                } else if wants_text {
-                    ("text".to_string(), html_to_text(&content))
+                // Strip boilerplate before conversion if content_focus is "main"
+                let html = if wants_main {
+                    strip_boilerplate(&content)
                 } else {
-                    ("raw".to_string(), content)
+                    content
+                };
+                if wants_markdown {
+                    ("markdown".to_string(), html_to_markdown(&html))
+                } else if wants_text {
+                    ("text".to_string(), html_to_text(&html))
+                } else {
+                    ("raw".to_string(), html)
                 }
             } else {
                 ("raw".to_string(), content)
