@@ -140,6 +140,84 @@ impl FetchRequest {
     }
 }
 
+/// A link extracted from the page with its text and href.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::PageLink;
+///
+/// let link = PageLink {
+///     text: "Example".to_string(),
+///     href: "https://example.com".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PageLink {
+    /// Link text
+    pub text: String,
+    /// Link href
+    pub href: String,
+}
+
+/// Structured metadata extracted from an HTML page.
+///
+/// All fields are optional — only populated when the corresponding
+/// HTML elements or meta tags are present.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PageMetadata {
+    /// Page title from `<title>` or `og:title`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Page description from `<meta name="description">` or `og:description`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Language from `<html lang="...">`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+
+    /// Canonical URL from `<link rel="canonical">`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_url: Option<String>,
+
+    /// Author from `<meta name="author">`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+
+    /// Published date from `<meta property="article:published_time">` or `<time>`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published_date: Option<String>,
+
+    /// Modified date from `<meta property="article:modified_time">`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_date: Option<String>,
+
+    /// Links extracted from the page
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub links: Vec<PageLink>,
+
+    /// Headings outline (e.g. `["# Title", "## Section 1", "## Section 2"]`)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub headings: Vec<String>,
+}
+
+impl PageMetadata {
+    /// Returns true if all fields are empty/None.
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.description.is_none()
+            && self.language.is_none()
+            && self.canonical_url.is_none()
+            && self.author.is_none()
+            && self.published_date.is_none()
+            && self.modified_date.is_none()
+            && self.links.is_empty()
+            && self.headings.is_empty()
+    }
+}
+
 /// Response from a fetch operation
 ///
 /// Contains the fetched content along with metadata like status code,
@@ -213,6 +291,10 @@ pub struct FetchResponse {
     /// Bytes written to file
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_written: Option<u64>,
+
+    /// Structured page metadata extracted from HTML
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<PageMetadata>,
 }
 
 #[cfg(test)]

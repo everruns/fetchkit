@@ -9,8 +9,8 @@
 
 use crate::client::FetchOptions;
 use crate::convert::{
-    filter_excessive_newlines, html_to_markdown, html_to_text, is_html, is_markdown_content_type,
-    is_plain_text_content_type,
+    extract_headings, extract_metadata, filter_excessive_newlines, html_to_markdown, html_to_text,
+    is_html, is_markdown_content_type, is_plain_text_content_type,
 };
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
@@ -252,6 +252,21 @@ impl Fetcher for DefaultFetcher {
 
         // Determine format and convert if needed
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
+        let is_html_content = is_html(&meta.content_type, &content);
+
+        // Extract structured metadata from HTML content
+        let page_metadata = if is_html_content {
+            let mut pm = extract_metadata(&content);
+            pm.headings = extract_headings(&content);
+            if pm.is_empty() {
+                None
+            } else {
+                Some(pm)
+            }
+        } else {
+            None
+        };
+
         let (format, final_content) =
             if is_markdown_content_type(&meta.content_type) && wants_markdown {
                 // Server already returned markdown — skip conversion
@@ -261,7 +276,7 @@ impl Fetcher for DefaultFetcher {
                 // Server already returned plain text — skip conversion
                 debug!("Content-type is plain text; skipping HTML conversion");
                 ("text".to_string(), content)
-            } else if is_html(&meta.content_type, &content) {
+            } else if is_html_content {
                 if wants_markdown {
                     ("markdown".to_string(), html_to_markdown(&content))
                 } else if wants_text {
@@ -291,6 +306,7 @@ impl Fetcher for DefaultFetcher {
             format: Some(format),
             content: Some(final_content),
             truncated: if truncated { Some(true) } else { None },
+            metadata: page_metadata,
             ..Default::default()
         })
     }

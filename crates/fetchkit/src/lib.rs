@@ -85,7 +85,7 @@ mod tool;
 mod types;
 
 pub use client::{fetch, fetch_with_options, FetchOptions};
-pub use convert::{html_to_markdown, html_to_text};
+pub use convert::{extract_headings, extract_metadata, html_to_markdown, html_to_text};
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
@@ -98,7 +98,7 @@ pub use tool::{
     Tool, ToolBuilder, ToolExecution, ToolImage, ToolOutput, ToolOutputMetadata, ToolService,
     ToolStatus,
 };
-pub use types::{FetchRequest, FetchResponse, HttpMethod};
+pub use types::{FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata};
 
 #[cfg(feature = "bot-auth")]
 pub use bot_auth::{BotAuthConfig, BotAuthError};

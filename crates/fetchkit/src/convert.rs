@@ -1,5 +1,7 @@
 //! HTML conversion utilities
 
+use crate::types::{PageLink, PageMetadata};
+
 /// Check if content-type indicates markdown (e.g. `text/markdown`).
 pub fn is_markdown_content_type(content_type: &Option<String>) -> bool {
     content_type
@@ -447,6 +449,290 @@ pub fn filter_excessive_newlines(s: &str) -> String {
     result
 }
 
+/// Extract structured metadata from HTML in a single pass.
+///
+/// Extracts title, description, language, canonical URL, author,
+/// published/modified dates, links, and heading outline from HTML.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::{extract_metadata, extract_headings};
+///
+/// let html = r#"<html lang="en"><head><title>Hello</title></head><body><h1>World</h1></body></html>"#;
+/// let mut meta = extract_metadata(html);
+/// meta.headings = extract_headings(html);
+/// assert_eq!(meta.title.as_deref(), Some("Hello"));
+/// assert_eq!(meta.language.as_deref(), Some("en"));
+/// assert_eq!(meta.headings, vec!["# World"]);
+/// ```
+pub fn extract_metadata(html: &str) -> PageMetadata {
+    let mut meta = PageMetadata::default();
+    let mut chars = html.chars().peekable();
+    let mut in_title = false;
+    let mut title_buf = String::new();
+    let mut in_skip_element = 0;
+    let mut skip_elements: Vec<String> = Vec::new();
+    // Track current <a> href for link extraction
+    let mut current_link_href: Option<String> = None;
+    let mut current_link_text = String::new();
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let tag_lower = tag.to_lowercase();
+            let is_closing = tag_lower.starts_with('/');
+            let tag_name = if is_closing {
+                tag_lower[1..].split_whitespace().next().unwrap_or("")
+            } else {
+                tag_lower.split_whitespace().next().unwrap_or("")
+            };
+
+            // Skip dangerous elements
+            let skip_tags = ["script", "style", "noscript", "iframe", "svg"];
+            if skip_tags.contains(&tag_name) {
+                if is_closing {
+                    if let Some(pos) = skip_elements.iter().rposition(|t| t == tag_name) {
+                        skip_elements.remove(pos);
+                        in_skip_element = skip_elements.len();
+                    }
+                } else if !tag.ends_with('/') {
+                    skip_elements.push(tag_name.to_string());
+                    in_skip_element = skip_elements.len();
+                }
+                continue;
+            }
+
+            if in_skip_element > 0 {
+                continue;
+            }
+
+            match tag_name {
+                "html" => {
+                    if !is_closing {
+                        if let Some(lang) = extract_attribute(&tag, "lang") {
+                            if meta.language.is_none() && !lang.is_empty() {
+                                meta.language = Some(lang);
+                            }
+                        }
+                    }
+                }
+                "title" => {
+                    if !is_closing {
+                        in_title = true;
+                        title_buf.clear();
+                    } else {
+                        in_title = false;
+                        let title = title_buf.trim().to_string();
+                        if meta.title.is_none() && !title.is_empty() {
+                            meta.title = Some(title);
+                        }
+                    }
+                }
+                "meta" => {
+                    if !is_closing {
+                        extract_meta_tag(&tag, &mut meta);
+                    }
+                }
+                "link" => {
+                    if !is_closing {
+                        if let Some(rel) = extract_attribute(&tag, "rel") {
+                            if rel == "canonical" {
+                                if let Some(href) = extract_attribute(&tag, "href") {
+                                    if meta.canonical_url.is_none() && !href.is_empty() {
+                                        meta.canonical_url = Some(href);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "time" => {
+                    if !is_closing {
+                        if let Some(datetime) = extract_attribute(&tag, "datetime") {
+                            if meta.published_date.is_none() && !datetime.is_empty() {
+                                meta.published_date = Some(datetime);
+                            }
+                        }
+                    }
+                }
+                "a" => {
+                    if !is_closing {
+                        if let Some(href) = extract_attribute(&tag, "href") {
+                            if !href.is_empty() {
+                                current_link_href = Some(href);
+                                current_link_text.clear();
+                            }
+                        }
+                    } else if let Some(href) = current_link_href.take() {
+                        let text = current_link_text.trim().to_string();
+                        // Cap links at 500 to prevent DoS on link-heavy pages
+                        if meta.links.len() < 500 {
+                            meta.links.push(PageLink { text, href });
+                        }
+                        current_link_text.clear();
+                    }
+                }
+                _ => {}
+            }
+        } else if in_skip_element == 0 {
+            let decoded = decode_entity(c, &mut chars);
+            if in_title {
+                title_buf.push(decoded);
+            }
+            if current_link_href.is_some() {
+                current_link_text.push(decoded);
+            }
+        }
+    }
+
+    meta
+}
+
+/// Second pass specifically for heading extraction (cheap — headings are sparse).
+/// Called after the main metadata extraction to keep the main function clean.
+pub fn extract_headings(html: &str) -> Vec<String> {
+    let mut headings = Vec::new();
+    let mut chars = html.chars().peekable();
+    let mut in_heading: Option<u8> = None; // heading level 1-6
+    let mut heading_buf = String::new();
+    let mut in_skip_element = 0;
+    let mut skip_elements: Vec<String> = Vec::new();
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let tag_lower = tag.to_lowercase();
+            let is_closing = tag_lower.starts_with('/');
+            let tag_name = if is_closing {
+                tag_lower[1..].split_whitespace().next().unwrap_or("")
+            } else {
+                tag_lower.split_whitespace().next().unwrap_or("")
+            };
+
+            let skip_tags = ["script", "style", "noscript", "iframe", "svg"];
+            if skip_tags.contains(&tag_name) {
+                if is_closing {
+                    if let Some(pos) = skip_elements.iter().rposition(|t| t == tag_name) {
+                        skip_elements.remove(pos);
+                        in_skip_element = skip_elements.len();
+                    }
+                } else if !tag.ends_with('/') {
+                    skip_elements.push(tag_name.to_string());
+                    in_skip_element = skip_elements.len();
+                }
+                continue;
+            }
+
+            if in_skip_element > 0 {
+                continue;
+            }
+
+            if let Some(level) = heading_level(tag_name) {
+                if is_closing {
+                    if in_heading == Some(level) {
+                        let text = heading_buf.trim().to_string();
+                        if !text.is_empty() && headings.len() < 200 {
+                            let prefix = "#".repeat(level as usize);
+                            headings.push(format!("{} {}", prefix, text));
+                        }
+                        in_heading = None;
+                        heading_buf.clear();
+                    }
+                } else {
+                    in_heading = Some(level);
+                    heading_buf.clear();
+                }
+            }
+        } else if in_skip_element == 0 {
+            let decoded = decode_entity(c, &mut chars);
+            if in_heading.is_some() {
+                heading_buf.push(decoded);
+            }
+        }
+    }
+
+    headings
+}
+
+fn heading_level(tag_name: &str) -> Option<u8> {
+    match tag_name {
+        "h1" => Some(1),
+        "h2" => Some(2),
+        "h3" => Some(3),
+        "h4" => Some(4),
+        "h5" => Some(5),
+        "h6" => Some(6),
+        _ => None,
+    }
+}
+
+/// Extract metadata from a `<meta>` tag.
+fn extract_meta_tag(tag: &str, meta: &mut PageMetadata) {
+    // <meta name="..." content="...">
+    if let Some(content) = extract_attribute(tag, "content") {
+        if content.is_empty() {
+            return;
+        }
+        // Check name attribute
+        if let Some(name) = extract_attribute(tag, "name") {
+            match name.to_lowercase().as_str() {
+                "description" => {
+                    if meta.description.is_none() {
+                        meta.description = Some(content.clone());
+                    }
+                }
+                "author" => {
+                    if meta.author.is_none() {
+                        meta.author = Some(content.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Check property attribute (Open Graph)
+        if let Some(property) = extract_attribute(tag, "property") {
+            match property.to_lowercase().as_str() {
+                "og:title" => {
+                    // og:title overrides <title>
+                    meta.title = Some(content.clone());
+                }
+                "og:description" => {
+                    // og:description overrides <meta description>
+                    meta.description = Some(content.clone());
+                }
+                "article:published_time" => {
+                    if meta.published_date.is_none() {
+                        meta.published_date = Some(content.clone());
+                    }
+                }
+                "article:modified_time" => {
+                    if meta.modified_date.is_none() {
+                        meta.modified_date = Some(content);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,5 +890,183 @@ mod tests {
             extract_attribute("div class=test", "class"),
             Some("test".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_metadata_title() {
+        let html = "<html><head><title>My Page</title></head><body></body></html>";
+        let meta = extract_metadata(html);
+        assert_eq!(meta.title.as_deref(), Some("My Page"));
+    }
+
+    #[test]
+    fn test_extract_metadata_og_title_overrides() {
+        let html = r#"<html><head>
+            <title>Basic Title</title>
+            <meta property="og:title" content="OG Title">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.title.as_deref(), Some("OG Title"));
+    }
+
+    #[test]
+    fn test_extract_metadata_description() {
+        let html = r#"<html><head>
+            <meta name="description" content="A page about things">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.description.as_deref(), Some("A page about things"));
+    }
+
+    #[test]
+    fn test_extract_metadata_og_description_overrides() {
+        let html = r#"<html><head>
+            <meta name="description" content="Basic desc">
+            <meta property="og:description" content="OG desc">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.description.as_deref(), Some("OG desc"));
+    }
+
+    #[test]
+    fn test_extract_metadata_language() {
+        let html = r#"<html lang="en-US"><head><title>Test</title></head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.language.as_deref(), Some("en-US"));
+    }
+
+    #[test]
+    fn test_extract_metadata_canonical_url() {
+        let html = r#"<html><head>
+            <link rel="canonical" href="https://example.com/page">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(
+            meta.canonical_url.as_deref(),
+            Some("https://example.com/page")
+        );
+    }
+
+    #[test]
+    fn test_extract_metadata_author() {
+        let html = r#"<html><head>
+            <meta name="author" content="Jane Doe">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.author.as_deref(), Some("Jane Doe"));
+    }
+
+    #[test]
+    fn test_extract_metadata_dates() {
+        let html = r#"<html><head>
+            <meta property="article:published_time" content="2024-01-15T10:00:00Z">
+            <meta property="article:modified_time" content="2024-02-20T12:00:00Z">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.published_date.as_deref(), Some("2024-01-15T10:00:00Z"));
+        assert_eq!(meta.modified_date.as_deref(), Some("2024-02-20T12:00:00Z"));
+    }
+
+    #[test]
+    fn test_extract_metadata_time_element() {
+        let html = r#"<html><body>
+            <time datetime="2024-03-01">March 1, 2024</time>
+        </body></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.published_date.as_deref(), Some("2024-03-01"));
+    }
+
+    #[test]
+    fn test_extract_metadata_links() {
+        let html = r#"<html><body>
+            <a href="https://example.com">Example</a>
+            <a href="/about">About Us</a>
+        </body></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.links.len(), 2);
+        assert_eq!(meta.links[0].href, "https://example.com");
+        assert_eq!(meta.links[0].text, "Example");
+        assert_eq!(meta.links[1].href, "/about");
+        assert_eq!(meta.links[1].text, "About Us");
+    }
+
+    #[test]
+    fn test_extract_headings() {
+        let html = "<h1>Title</h1><h2>Section 1</h2><h3>Subsection</h3><h2>Section 2</h2>";
+        let headings = extract_headings(html);
+        assert_eq!(
+            headings,
+            vec!["# Title", "## Section 1", "### Subsection", "## Section 2"]
+        );
+    }
+
+    #[test]
+    fn test_extract_metadata_skips_script_content() {
+        let html = r#"<html><head>
+            <title>Real Title</title>
+            <script>document.title = "Fake";</script>
+        </head><body>
+            <a href="/real">Real Link</a>
+            <script><a href="/fake">Fake</a></script>
+        </body></html>"#;
+        let meta = extract_metadata(html);
+        assert_eq!(meta.title.as_deref(), Some("Real Title"));
+        assert_eq!(meta.links.len(), 1);
+        assert_eq!(meta.links[0].href, "/real");
+    }
+
+    #[test]
+    fn test_extract_metadata_empty_html() {
+        let meta = extract_metadata("");
+        assert!(meta.is_empty());
+    }
+
+    #[test]
+    fn test_extract_metadata_full_page() {
+        let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Article Title</title>
+    <meta name="description" content="An interesting article">
+    <meta name="author" content="John Smith">
+    <meta property="og:title" content="OG Article Title">
+    <meta property="article:published_time" content="2024-06-15">
+    <link rel="canonical" href="https://example.com/article">
+</head>
+<body>
+    <h1>Article Title</h1>
+    <p>Some content with a <a href="https://link.example.com">link</a>.</p>
+    <h2>Section One</h2>
+    <p>More content.</p>
+</body>
+</html>"#;
+        let mut meta = extract_metadata(html);
+        meta.headings = extract_headings(html);
+
+        assert_eq!(meta.title.as_deref(), Some("OG Article Title"));
+        assert_eq!(meta.description.as_deref(), Some("An interesting article"));
+        assert_eq!(meta.author.as_deref(), Some("John Smith"));
+        assert_eq!(meta.language.as_deref(), Some("en"));
+        assert_eq!(
+            meta.canonical_url.as_deref(),
+            Some("https://example.com/article")
+        );
+        assert_eq!(meta.published_date.as_deref(), Some("2024-06-15"));
+        assert_eq!(meta.links.len(), 1);
+        assert_eq!(meta.links[0].text, "link");
+        assert_eq!(meta.headings, vec!["# Article Title", "## Section One"]);
+        assert!(!meta.is_empty());
+    }
+
+    #[test]
+    fn test_page_metadata_is_empty() {
+        let meta = PageMetadata::default();
+        assert!(meta.is_empty());
+
+        let meta = PageMetadata {
+            title: Some("test".to_string()),
+            ..Default::default()
+        };
+        assert!(!meta.is_empty());
     }
 }
