@@ -89,6 +89,11 @@ pub struct FetchRequest {
     /// Requires a `FileSaver` to be provided at execution time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_to_file: Option<String>,
+
+    /// Content extraction focus: "main" strips nav/footer/aside boilerplate,
+    /// "full" (default) returns everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_focus: Option<String>,
 }
 
 impl FetchRequest {
@@ -124,6 +129,12 @@ impl FetchRequest {
         self
     }
 
+    /// Set content focus mode ("main" or "full")
+    pub fn content_focus(mut self, focus: impl Into<String>) -> Self {
+        self.content_focus = Some(focus.into());
+        self
+    }
+
     /// Get the effective method (default to GET)
     pub fn effective_method(&self) -> HttpMethod {
         self.method.unwrap_or_default()
@@ -137,6 +148,14 @@ impl FetchRequest {
     /// Check if text conversion is requested
     pub fn wants_text(&self) -> bool {
         self.as_text.unwrap_or(false)
+    }
+
+    /// Check if main-content focus is requested
+    pub fn wants_main_content(&self) -> bool {
+        self.content_focus
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case("main"))
+            .unwrap_or(false)
     }
 }
 

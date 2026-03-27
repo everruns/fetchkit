@@ -733,6 +733,241 @@ fn extract_meta_tag(tag: &str, meta: &mut PageMetadata) {
     }
 }
 
+/// Strip boilerplate elements from HTML, keeping only main content.
+///
+/// Removes `<nav>`, `<footer>`, `<aside>`, and elements with
+/// `role="navigation"`, `role="banner"`, `role="contentinfo"`.
+/// If `<main>` or `<article>` is present, extracts only their content.
+///
+/// # Examples
+///
+/// ```
+/// use fetchkit::strip_boilerplate;
+///
+/// let html = r#"<nav>Menu</nav><main><p>Content</p></main><footer>Footer</footer>"#;
+/// let result = strip_boilerplate(html);
+/// assert!(result.contains("Content"));
+/// assert!(!result.contains("Menu"));
+/// assert!(!result.contains("Footer"));
+/// ```
+pub fn strip_boilerplate(html: &str) -> String {
+    // Strategy: if <main> or <article> exists, extract just that content.
+    // Otherwise, strip known boilerplate elements.
+
+    // Check if there's a <main> or <article> to focus on
+    if let Some(focused) = extract_main_content(html) {
+        return focused;
+    }
+
+    // Fallback: strip boilerplate elements
+    strip_boilerplate_elements(html)
+}
+
+/// Extract content from `<main>` or `<article>` tag if present.
+fn extract_main_content(html: &str) -> Option<String> {
+    // Try <main> first, then <article>
+    for target_tag in &["main", "article"] {
+        if let Some(content) = extract_tag_content(html, target_tag) {
+            return Some(content);
+        }
+    }
+
+    // Try role="main"
+    extract_role_content(html, "main")
+}
+
+/// Extract the inner content of the first occurrence of a given tag.
+fn extract_tag_content(html: &str, target: &str) -> Option<String> {
+    let mut chars = html.chars().peekable();
+    let mut depth = 0i32;
+    let mut capturing = false;
+    let mut output = String::new();
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let tag_lower = tag.to_lowercase();
+            let is_closing = tag_lower.starts_with('/');
+            let tag_name = if is_closing {
+                tag_lower[1..].split_whitespace().next().unwrap_or("")
+            } else {
+                tag_lower.split_whitespace().next().unwrap_or("")
+            };
+
+            if tag_name == target {
+                if is_closing {
+                    depth -= 1;
+                    if depth == 0 && capturing {
+                        return Some(output);
+                    }
+                } else if !tag.ends_with('/') {
+                    depth += 1;
+                    if depth == 1 && !capturing {
+                        capturing = true;
+                        continue;
+                    }
+                }
+            }
+
+            if capturing {
+                output.push('<');
+                output.push_str(&tag);
+                output.push('>');
+            }
+        } else if capturing {
+            output.push(c);
+        }
+    }
+
+    None
+}
+
+/// Extract content of the first element with a given role attribute.
+fn extract_role_content(html: &str, role: &str) -> Option<String> {
+    let mut chars = html.chars().peekable();
+    let mut capture_tag: Option<String> = None;
+    let mut depth = 0i32;
+    let mut output = String::new();
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let tag_lower = tag.to_lowercase();
+            let is_closing = tag_lower.starts_with('/');
+            let tag_name = if is_closing {
+                tag_lower[1..].split_whitespace().next().unwrap_or("")
+            } else {
+                tag_lower.split_whitespace().next().unwrap_or("")
+            };
+
+            if let Some(ref target) = capture_tag {
+                if tag_name == target.as_str() {
+                    if is_closing {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(output);
+                        }
+                    } else if !tag.ends_with('/') {
+                        depth += 1;
+                    }
+                }
+
+                if depth > 0 {
+                    output.push('<');
+                    output.push_str(&tag);
+                    output.push('>');
+                }
+            } else if !is_closing {
+                // Check for role attribute
+                if let Some(attr_role) = extract_attribute(&tag, "role") {
+                    if attr_role.eq_ignore_ascii_case(role) && !tag.ends_with('/') {
+                        capture_tag = Some(tag_name.to_string());
+                        depth = 1;
+                        continue;
+                    }
+                }
+            }
+        } else if capture_tag.is_some() && depth > 0 {
+            output.push(c);
+        }
+    }
+
+    None
+}
+
+/// Boilerplate tags to strip when no <main>/<article> found.
+const BOILERPLATE_TAGS: &[&str] = &["nav", "footer", "aside", "header"];
+
+/// Roles that indicate boilerplate.
+const BOILERPLATE_ROLES: &[&str] = &["navigation", "banner", "contentinfo", "complementary"];
+
+/// Strip known boilerplate elements from HTML.
+fn strip_boilerplate_elements(html: &str) -> String {
+    let mut output = String::new();
+    let mut chars = html.chars().peekable();
+    let mut skip_depth = 0i32;
+    let mut skip_tag: Option<String> = None;
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let tag_lower = tag.to_lowercase();
+            let is_closing = tag_lower.starts_with('/');
+            let tag_name = if is_closing {
+                tag_lower[1..].split_whitespace().next().unwrap_or("")
+            } else {
+                tag_lower.split_whitespace().next().unwrap_or("")
+            };
+
+            // Track skip state
+            if let Some(ref target) = skip_tag {
+                if tag_name == target.as_str() {
+                    if is_closing {
+                        skip_depth -= 1;
+                        if skip_depth == 0 {
+                            skip_tag = None;
+                            continue;
+                        }
+                    } else if !tag.ends_with('/') {
+                        skip_depth += 1;
+                    }
+                }
+                continue; // Skip everything inside boilerplate
+            }
+
+            // Check if this tag should be skipped
+            if !is_closing && !tag.ends_with('/') {
+                let is_boilerplate_tag = BOILERPLATE_TAGS.contains(&tag_name);
+                let is_boilerplate_role = extract_attribute(&tag, "role")
+                    .map(|r| {
+                        BOILERPLATE_ROLES
+                            .iter()
+                            .any(|br| r.eq_ignore_ascii_case(br))
+                    })
+                    .unwrap_or(false);
+
+                if is_boilerplate_tag || is_boilerplate_role {
+                    skip_tag = Some(tag_name.to_string());
+                    skip_depth = 1;
+                    continue;
+                }
+            }
+
+            output.push('<');
+            output.push_str(&tag);
+            output.push('>');
+        } else if skip_tag.is_none() {
+            output.push(c);
+        }
+    }
+
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1068,5 +1303,104 @@ mod tests {
             ..Default::default()
         };
         assert!(!meta.is_empty());
+    }
+
+    #[test]
+    fn test_strip_boilerplate_extracts_main() {
+        let html = r#"<nav><a href="/">Home</a></nav>
+            <main><p>Important content</p></main>
+            <footer>Copyright 2024</footer>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Important content"));
+        assert!(!result.contains("Home"));
+        assert!(!result.contains("Copyright"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_extracts_article() {
+        let html = r#"<nav>Menu</nav>
+            <article><h1>Title</h1><p>Body text</p></article>
+            <aside>Sidebar</aside>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Title"));
+        assert!(result.contains("Body text"));
+        assert!(!result.contains("Menu"));
+        assert!(!result.contains("Sidebar"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_main_takes_precedence_over_article() {
+        let html = r#"<main><p>Main content</p></main>
+            <article><p>Article content</p></article>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Main content"));
+        // Article is outside main, so not included
+        assert!(!result.contains("Article content"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_fallback_strips_nav_footer_aside() {
+        let html = r#"<div>
+            <nav>Navigation links</nav>
+            <p>Content paragraph</p>
+            <footer>Footer info</footer>
+            <aside>Sidebar widget</aside>
+        </div>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Content paragraph"));
+        assert!(!result.contains("Navigation links"));
+        assert!(!result.contains("Footer info"));
+        assert!(!result.contains("Sidebar widget"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_role_navigation() {
+        let html = r#"<div role="navigation">Nav menu</div>
+            <p>Content</p>
+            <div role="contentinfo">Footer stuff</div>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Content"));
+        assert!(!result.contains("Nav menu"));
+        assert!(!result.contains("Footer stuff"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_role_main() {
+        let html = r#"<nav>Nav</nav>
+            <div role="main"><p>Main content here</p></div>
+            <footer>Foot</footer>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Main content here"));
+        assert!(!result.contains("Nav"));
+        assert!(!result.contains("Foot"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_nested_nav() {
+        let html = r#"<nav><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li></ul></nav>
+            <p>Page content</p>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Page content"));
+        assert!(!result.contains("Home"));
+        assert!(!result.contains("About"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_no_semantic_html() {
+        // No main/article/nav/footer — returns everything
+        let html = "<div><p>Content 1</p></div><div><p>Content 2</p></div>";
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Content 1"));
+        assert!(result.contains("Content 2"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_preserves_header_inside_main() {
+        let html = r#"<header>Site header</header>
+            <main><header><h1>Article header</h1></header><p>Body</p></main>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Article header"));
+        assert!(result.contains("Body"));
+        assert!(!result.contains("Site header"));
     }
 }
