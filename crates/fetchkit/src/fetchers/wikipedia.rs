@@ -65,6 +65,17 @@ struct WikiSummary {
     extract: Option<String>,
     description: Option<String>,
     content_urls: Option<ContentUrls>,
+    /// Redirect target — populated when the requested title redirects
+    #[serde(default)]
+    titles: Option<WikiTitles>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WikiTitles {
+    canonical: Option<String>,
+    #[allow(dead_code)]
+    normalized: Option<String>,
+    display: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,6 +213,15 @@ fn format_wikipedia_response(
         }
     }
 
+    // Show redirect info if the canonical title differs from the display title
+    if let Some(titles) = &summary.titles {
+        if let (Some(canonical), Some(display)) = (&titles.canonical, &titles.display) {
+            if canonical != display {
+                out.push_str(&format!("- **Redirected from:** {}\n", display));
+            }
+        }
+    }
+
     // Use full content if available, otherwise use summary extract
     if let Some(content) = full_content {
         out.push_str(&format!("\n---\n\n{}", content));
@@ -235,6 +255,25 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_subpage_url() {
+        let url = Url::parse("https://en.wikipedia.org/wiki/Rust/History").unwrap();
+        assert_eq!(
+            WikipediaFetcher::parse_url(&url),
+            Some(("en".to_string(), "Rust/History".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_parse_mobile_url() {
+        // Mobile URLs use m.wikipedia.org, not {lang}.wikipedia.org
+        let url = Url::parse("https://m.wikipedia.org/wiki/Rust").unwrap();
+        assert_eq!(
+            WikipediaFetcher::parse_url(&url),
+            Some(("m".to_string(), "Rust".to_string()))
+        );
+    }
+
+    #[test]
     fn test_rejects_non_wiki_path() {
         let url = Url::parse("https://en.wikipedia.org/w/index.php?title=Rust").unwrap();
         assert_eq!(WikipediaFetcher::parse_url(&url), None);
@@ -247,10 +286,26 @@ mod tests {
     }
 
     #[test]
+    fn test_rejects_bare_wiki_path() {
+        let url = Url::parse("https://en.wikipedia.org/wiki").unwrap();
+        assert_eq!(WikipediaFetcher::parse_url(&url), None);
+    }
+
+    #[test]
+    fn test_rejects_subdomain_wikipedia() {
+        // sub.sub.wikipedia.org shouldn't match (contains dot)
+        let url = Url::parse("https://upload.wikimedia.wikipedia.org/wiki/Test").unwrap();
+        assert_eq!(WikipediaFetcher::parse_url(&url), None);
+    }
+
+    #[test]
     fn test_fetcher_matches() {
         let fetcher = WikipediaFetcher::new();
 
         let url = Url::parse("https://en.wikipedia.org/wiki/Rust").unwrap();
+        assert!(fetcher.matches(&url));
+
+        let url = Url::parse("https://fr.wikipedia.org/wiki/Paris").unwrap();
         assert!(fetcher.matches(&url));
 
         let url = Url::parse("https://example.com/wiki/Rust").unwrap();
@@ -258,18 +313,81 @@ mod tests {
     }
 
     #[test]
-    fn test_format_wikipedia_response() {
+    fn test_format_wikipedia_response_summary_only() {
         let summary = WikiSummary {
             title: "Rust (programming language)".to_string(),
             extract: Some("Rust is a systems programming language.".to_string()),
             description: Some("Programming language".to_string()),
             content_urls: None,
+            titles: None,
         };
 
         let output = format_wikipedia_response(&summary, None, "en");
 
         assert!(output.contains("# Rust (programming language)"));
         assert!(output.contains("*Programming language*"));
+        assert!(output.contains("**Language:** en"));
         assert!(output.contains("Rust is a systems programming language."));
+    }
+
+    #[test]
+    fn test_format_wikipedia_response_with_full_content() {
+        let summary = WikiSummary {
+            title: "Rust".to_string(),
+            extract: Some("Short extract.".to_string()),
+            description: None,
+            content_urls: Some(ContentUrls {
+                desktop: Some(DesktopUrl {
+                    page: Some("https://en.wikipedia.org/wiki/Rust".to_string()),
+                }),
+            }),
+            titles: None,
+        };
+
+        let output = format_wikipedia_response(&summary, Some("# Full article content"), "en");
+
+        assert!(output.contains("# Rust"));
+        assert!(output.contains("**URL:** https://en.wikipedia.org/wiki/Rust"));
+        // Full content should be used instead of extract
+        assert!(output.contains("Full article content"));
+        assert!(!output.contains("Short extract."));
+    }
+
+    #[test]
+    fn test_format_wikipedia_response_with_redirect() {
+        let summary = WikiSummary {
+            title: "Rust (programming language)".to_string(),
+            extract: Some("Rust is...".to_string()),
+            description: None,
+            content_urls: None,
+            titles: Some(WikiTitles {
+                canonical: Some("Rust (programming language)".to_string()),
+                normalized: Some("Rust (programming language)".to_string()),
+                display: Some("Rust programming language".to_string()),
+            }),
+        };
+
+        let output = format_wikipedia_response(&summary, None, "en");
+
+        assert!(output.contains("**Redirected from:** Rust programming language"));
+    }
+
+    #[test]
+    fn test_format_wikipedia_response_no_redirect_when_same() {
+        let summary = WikiSummary {
+            title: "Rust".to_string(),
+            extract: Some("Rust is...".to_string()),
+            description: None,
+            content_urls: None,
+            titles: Some(WikiTitles {
+                canonical: Some("Rust".to_string()),
+                normalized: Some("Rust".to_string()),
+                display: Some("Rust".to_string()),
+            }),
+        };
+
+        let output = format_wikipedia_response(&summary, None, "en");
+
+        assert!(!output.contains("Redirected from"));
     }
 }
