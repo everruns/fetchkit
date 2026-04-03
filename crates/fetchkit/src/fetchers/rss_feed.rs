@@ -29,7 +29,10 @@ impl RSSFeedFetcher {
         Self
     }
 
-    /// Check if a URL looks like a feed URL
+    /// Check if a URL looks like a feed URL by path pattern.
+    ///
+    /// Content-type detection (application/rss+xml, application/atom+xml)
+    /// happens at fetch time since we can't know the content-type from the URL alone.
     fn is_feed_url(url: &Url) -> bool {
         let path = url.path().to_lowercase();
 
@@ -49,6 +52,15 @@ impl RSSFeedFetcher {
             || path.ends_with(".rss")
             || path == "/rss"
             || path == "/feed"
+    }
+
+    /// Check if a content-type indicates a feed format
+    fn is_feed_content_type(content_type: &str) -> bool {
+        let ct = content_type.to_lowercase();
+        ct.contains("application/rss+xml")
+            || ct.contains("application/atom+xml")
+            || ct.contains("text/xml")
+            || ct.contains("application/xml")
     }
 }
 
@@ -113,12 +125,21 @@ impl Fetcher for RSSFeedFetcher {
             });
         }
 
+        // Check content-type for feed detection (covers non-URL-pattern feeds)
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
         let body = response
             .text()
             .await
             .map_err(|e| FetchError::RequestError(e.to_string()))?;
 
-        // Detect feed type and parse
+        // Detect feed type: by XML structure first, then content-type
+        let is_feed_by_ct = Self::is_feed_content_type(&content_type);
         let content = if body.contains("<rss") || body.contains("<channel>") {
             parse_rss(&body)
         } else if body.contains("<feed") && body.contains("xmlns=\"http://www.w3.org/2005/Atom\"") {
@@ -126,6 +147,15 @@ impl Fetcher for RSSFeedFetcher {
         } else if body.contains("<feed") {
             // Atom without explicit namespace
             parse_atom(&body)
+        } else if is_feed_by_ct {
+            // Content-type indicates a feed but structure wasn't recognized — return as raw XML
+            return Ok(FetchResponse {
+                url: request.url.clone(),
+                status_code: 200,
+                content: Some(body),
+                format: Some("raw".to_string()),
+                ..Default::default()
+            });
         } else {
             // Not a recognized feed format
             return Ok(FetchResponse {
@@ -191,12 +221,12 @@ fn parse_rss(xml: &str) -> String {
                 out.push_str(&format!("- **Published:** {}\n", date));
             }
             if let Some(desc) = description {
-                let cleaned = strip_html(&desc);
-                if !cleaned.is_empty() {
-                    let truncated = if cleaned.len() > 500 {
-                        format!("{}...", &cleaned[..500])
+                let converted = convert_entry_content(&desc);
+                if !converted.is_empty() {
+                    let truncated = if converted.len() > 500 {
+                        format!("{}...", &converted[..500])
                     } else {
-                        cleaned
+                        converted
                     };
                     out.push_str(&format!("\n{}\n", truncated));
                 }
@@ -251,12 +281,12 @@ fn parse_atom(xml: &str) -> String {
                 out.push_str(&format!("- **Published:** {}\n", date));
             }
             if let Some(summary) = summary {
-                let cleaned = strip_html(&summary);
-                if !cleaned.is_empty() {
-                    let truncated = if cleaned.len() > 500 {
-                        format!("{}...", &cleaned[..500])
+                let converted = convert_entry_content(&summary);
+                if !converted.is_empty() {
+                    let truncated = if converted.len() > 500 {
+                        format!("{}...", &converted[..500])
                     } else {
-                        cleaned
+                        converted
                     };
                     out.push_str(&format!("\n{}\n", truncated));
                 }
@@ -330,21 +360,14 @@ fn decode_entities(s: &str) -> String {
         .replace("&apos;", "'")
 }
 
-/// Simple HTML tag stripper
-fn strip_html(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut in_tag = false;
-
-    for c in html.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(c),
-            _ => {}
-        }
+/// Convert entry content: use html_to_markdown for HTML, plain text for non-HTML
+fn convert_entry_content(content: &str) -> String {
+    if content.contains('<') && content.contains('>') {
+        // Contains HTML tags — convert via html_to_markdown
+        crate::convert::html_to_markdown(content)
+    } else {
+        content.trim().to_string()
     }
-
-    result.trim().to_string()
 }
 
 #[cfg(test)]
@@ -445,7 +468,49 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_html() {
-        assert_eq!(strip_html("<p>Hello <b>world</b></p>"), "Hello world");
+    fn test_is_feed_content_type() {
+        assert!(RSSFeedFetcher::is_feed_content_type("application/rss+xml"));
+        assert!(RSSFeedFetcher::is_feed_content_type(
+            "application/atom+xml; charset=utf-8"
+        ));
+        assert!(RSSFeedFetcher::is_feed_content_type("text/xml"));
+        assert!(RSSFeedFetcher::is_feed_content_type("application/xml"));
+        assert!(!RSSFeedFetcher::is_feed_content_type("text/html"));
+        assert!(!RSSFeedFetcher::is_feed_content_type("application/json"));
+    }
+
+    #[test]
+    fn test_convert_entry_content_html() {
+        let html = "<p>Hello <b>world</b></p>";
+        let result = convert_entry_content(html);
+        assert!(result.contains("Hello"));
+        assert!(result.contains("world"));
+    }
+
+    #[test]
+    fn test_convert_entry_content_plain() {
+        let plain = "Just plain text.";
+        let result = convert_entry_content(plain);
+        assert_eq!(result, "Just plain text.");
+    }
+
+    #[test]
+    fn test_parse_rss_with_cdata() {
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0">
+<channel>
+<title>Test Feed</title>
+<item>
+<title>CDATA Post</title>
+<link>https://example.com/cdata</link>
+<description><![CDATA[<p>Rich <strong>HTML</strong> content</p>]]></description>
+</item>
+</channel>
+</rss>"#;
+
+        let output = parse_rss(xml);
+        assert!(output.contains("# Test Feed"));
+        assert!(output.contains("### CDATA Post"));
+        assert!(output.contains("HTML"));
     }
 }
