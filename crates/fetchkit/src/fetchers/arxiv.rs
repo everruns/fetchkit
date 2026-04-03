@@ -26,7 +26,7 @@ impl ArXivFetcher {
         Self
     }
 
-    /// Extract paper ID from an arXiv URL
+    /// Extract paper ID and whether it was a PDF URL from an arXiv URL
     fn parse_url(url: &Url) -> Option<String> {
         let host = url.host_str()?;
         if host != "arxiv.org" && host != "www.arxiv.org" {
@@ -53,6 +53,13 @@ impl ArXivFetcher {
             }
             _ => None,
         }
+    }
+
+    /// Returns true if this is a /pdf/ URL
+    fn is_pdf_url(url: &Url) -> bool {
+        url.path_segments()
+            .and_then(|mut s| s.next())
+            .is_some_and(|first| first == "pdf")
     }
 }
 
@@ -123,7 +130,8 @@ impl Fetcher for ArXivFetcher {
             .await
             .map_err(|e| FetchError::RequestError(e.to_string()))?;
 
-        let content = parse_arxiv_response(&xml, &paper_id);
+        let is_pdf = Self::is_pdf_url(&url);
+        let content = parse_arxiv_response(&xml, &paper_id, is_pdf);
 
         Ok(FetchResponse {
             url: request.url.clone(),
@@ -138,7 +146,7 @@ impl Fetcher for ArXivFetcher {
 
 /// Parse arXiv Atom XML response into markdown
 /// Uses simple string extraction to avoid XML parser dependency
-fn parse_arxiv_response(xml: &str, paper_id: &str) -> String {
+fn parse_arxiv_response(xml: &str, paper_id: &str, is_pdf: bool) -> String {
     let mut out = String::new();
 
     // Extract title
@@ -192,6 +200,13 @@ fn parse_arxiv_response(xml: &str, paper_id: &str) -> String {
         if let Some(date) = dates.first() {
             out.push_str(&format!("- **Updated:** {}\n", date.trim()));
         }
+    }
+
+    // Indicate binary content for PDF URLs
+    if is_pdf {
+        out.push_str(
+            "- **Note:** Original URL points to PDF (binary content). Metadata shown instead.\n",
+        );
     }
 
     // DOI
@@ -383,11 +398,61 @@ mod tests {
 </entry>
 </feed>"#;
 
-        let output = parse_arxiv_response(xml, "1706.03762");
+        let output = parse_arxiv_response(xml, "1706.03762", false);
         assert!(output.contains("# Attention Is All You Need"));
         assert!(output.contains("Ashish Vaswani"));
         assert!(output.contains("cs.CL"));
         assert!(output.contains("We propose a new architecture"));
         assert!(output.contains("1706.03762"));
+        assert!(output.contains("ar5iv.labs.arxiv.org"));
+        assert!(!output.contains("binary content"));
+    }
+
+    #[test]
+    fn test_parse_arxiv_response_pdf_url() {
+        let xml = r#"<?xml version="1.0"?>
+<feed>
+<title>ArXiv Query</title>
+<entry>
+<title>Test Paper</title>
+<summary>Abstract text.</summary>
+<name>Author A</name>
+</entry>
+</feed>"#;
+
+        let output = parse_arxiv_response(xml, "2301.07041", true);
+        assert!(output.contains("# Test Paper"));
+        assert!(output.contains("binary content"));
+        assert!(output.contains("Metadata shown instead"));
+    }
+
+    #[test]
+    fn test_is_pdf_url() {
+        let url = Url::parse("https://arxiv.org/pdf/2301.07041").unwrap();
+        assert!(ArXivFetcher::is_pdf_url(&url));
+
+        let url = Url::parse("https://arxiv.org/abs/2301.07041").unwrap();
+        assert!(!ArXivFetcher::is_pdf_url(&url));
+    }
+
+    #[test]
+    fn test_parse_arxiv_response_with_doi_and_journal() {
+        let xml = r#"<?xml version="1.0"?>
+<feed>
+<title>ArXiv Query</title>
+<entry>
+<title>Published Paper</title>
+<summary>Results show...</summary>
+<name>Jane Doe</name>
+<arxiv:doi>10.1234/example</arxiv:doi>
+<arxiv:journal_ref>Nature 2024</arxiv:journal_ref>
+<updated>2024-01-15T00:00:00Z</updated>
+</entry>
+</feed>"#;
+
+        let output = parse_arxiv_response(xml, "2401.12345", false);
+        assert!(output.contains("**DOI:** 10.1234/example"));
+        assert!(output.contains("**Journal:** Nature 2024"));
+        assert!(output.contains("**Updated:**"));
     }
 }
