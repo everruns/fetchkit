@@ -63,6 +63,7 @@ struct HNItem {
     url: Option<String>,
     by: Option<String>,
     score: Option<i64>,
+    time: Option<u64>,
     descendants: Option<u64>,
     kids: Option<Vec<u64>>,
 }
@@ -190,6 +191,9 @@ fn format_hn_response(item: &HNItem, comments: &[(HNItem, Vec<HNItem>)]) -> Stri
     if let Some(score) = item.score {
         out.push_str(&format!("- **Score:** {}\n", score));
     }
+    if let Some(time) = item.time {
+        out.push_str(&format!("- **Time:** {}\n", format_unix_timestamp(time)));
+    }
     if let Some(descendants) = item.descendants {
         out.push_str(&format!("- **Comments:** {}\n", descendants));
     }
@@ -226,6 +230,62 @@ fn format_hn_response(item: &HNItem, comments: &[(HNItem, Vec<HNItem>)]) -> Stri
     }
 
     out
+}
+
+/// Format a Unix timestamp as an ISO 8601 UTC date-time string
+fn format_unix_timestamp(ts: u64) -> String {
+    let secs = ts % 60;
+    let mins = (ts / 60) % 60;
+    let hours = (ts / 3600) % 24;
+
+    // Days since epoch
+    let mut days = (ts / 86400) as i64;
+
+    // Calculate year/month/day from days since epoch
+    let mut year = 1970i64;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+
+    let leap = is_leap_year(year);
+    let days_in_months: [i64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+
+    let mut month = 0;
+    for (i, &dim) in days_in_months.iter().enumerate() {
+        if days < dim {
+            month = i + 1;
+            break;
+        }
+        days -= dim;
+    }
+    let day = days + 1;
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hours, mins, secs
+    )
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn format_comment(out: &mut String, comment: &HNItem, depth: usize) {
@@ -333,6 +393,7 @@ mod tests {
             url: Some("https://example.com".to_string()),
             by: Some("pg".to_string()),
             score: Some(100),
+            time: Some(1704067200), // 2024-01-01T00:00:00Z
             descendants: Some(5),
             kids: None,
         };
@@ -342,6 +403,67 @@ mod tests {
         assert!(output.contains("# Show HN: My Project"));
         assert!(output.contains("**By:** pg"));
         assert!(output.contains("**Score:** 100"));
+        assert!(output.contains("**Time:** 2024-01-01T00:00:00Z"));
         assert!(output.contains("https://example.com"));
+    }
+
+    #[test]
+    fn test_format_hn_response_with_comments() {
+        let item = HNItem {
+            id: 42,
+            item_type: Some("story".to_string()),
+            title: Some("Test Story".to_string()),
+            text: None,
+            url: None,
+            by: Some("user1".to_string()),
+            score: Some(50),
+            time: None,
+            descendants: Some(2),
+            kids: None,
+        };
+
+        let comment = HNItem {
+            id: 43,
+            item_type: Some("comment".to_string()),
+            title: None,
+            text: Some("Great post!".to_string()),
+            url: None,
+            by: Some("user2".to_string()),
+            score: None,
+            time: None,
+            descendants: None,
+            kids: None,
+        };
+
+        let output = format_hn_response(&item, &[(comment, vec![])]);
+        assert!(output.contains("## Comments"));
+        assert!(output.contains("**user2**"));
+        assert!(output.contains("Great post!"));
+    }
+
+    #[test]
+    fn test_format_hn_response_ask_hn() {
+        let item = HNItem {
+            id: 100,
+            item_type: Some("story".to_string()),
+            title: Some("Ask HN: Best Rust crates?".to_string()),
+            text: Some("<p>Looking for recommendations.</p>".to_string()),
+            url: None,
+            by: Some("asker".to_string()),
+            score: Some(25),
+            time: None,
+            descendants: Some(0),
+            kids: None,
+        };
+
+        let output = format_hn_response(&item, &[]);
+        assert!(output.contains("Ask HN: Best Rust crates?"));
+        assert!(output.contains("Looking for recommendations."));
+    }
+
+    #[test]
+    fn test_format_unix_timestamp() {
+        assert_eq!(format_unix_timestamp(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_unix_timestamp(1704067200), "2024-01-01T00:00:00Z");
     }
 }
