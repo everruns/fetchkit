@@ -189,7 +189,7 @@ impl PyFetchKitTool {
         respect_proxy_env=false,
         allowed_ports=None,
         blocked_hosts=None,
-        same_host_redirects_only=false,
+        same_host_redirects_only=None,
         hardened=false
     ))]
     fn new(
@@ -203,7 +203,7 @@ impl PyFetchKitTool {
         respect_proxy_env: bool,
         allowed_ports: Option<Vec<u16>>,
         blocked_hosts: Option<Vec<String>>,
-        same_host_redirects_only: bool,
+        same_host_redirects_only: Option<bool>,
         hardened: bool,
     ) -> PyResult<Self> {
         let mut builder = ToolBuilder::new()
@@ -217,7 +217,7 @@ impl PyFetchKitTool {
 
         builder = builder
             .block_private_ips(block_private_ips)
-            .same_host_redirects_only(same_host_redirects_only);
+            .same_host_redirects_only_if_set(same_host_redirects_only);
 
         if let Some(ua) = user_agent {
             builder = builder.user_agent(ua);
@@ -324,7 +324,7 @@ fn fetch(
     as_text: Option<bool>,
 ) -> PyResult<PyFetchResponse> {
     let tool = PyFetchKitTool::new(
-        true, true, None, None, None, None, true, false, None, None, false, false,
+        true, true, None, None, None, None, true, false, None, None, None, false,
     )?;
     tool.fetch(url, method, as_markdown, as_text)
 }

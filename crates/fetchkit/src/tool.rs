@@ -245,6 +245,14 @@ impl ToolBuilder {
         self
     }
 
+    /// Restrict redirects to the original host only when the caller set a value.
+    pub fn same_host_redirects_only_if_set(mut self, enable: Option<bool>) -> Self {
+        if let Some(enable) = enable {
+            self.same_host_redirects_only = enable;
+        }
+        self
+    }
+
     /// Control private/reserved IP range blocking (SSRF prevention)
     ///
     /// Enabled by default. When enabled, FetchKit resolves hostnames to IP
@@ -1110,6 +1118,26 @@ mod tests {
         assert!(tool.blocked_hosts.contains(&"localhost".to_string()));
         assert!(tool.blocked_hosts.contains(&".cluster.local".to_string()));
         assert!(tool.same_host_redirects_only);
+    }
+
+    #[test]
+    fn test_tool_builder_preserves_hardened_redirect_policy_when_override_is_unset() {
+        let tool = Tool::builder()
+            .hardened()
+            .same_host_redirects_only_if_set(None)
+            .build();
+
+        assert!(tool.same_host_redirects_only);
+    }
+
+    #[test]
+    fn test_tool_builder_allows_explicit_redirect_policy_override() {
+        let tool = Tool::builder()
+            .hardened()
+            .same_host_redirects_only_if_set(Some(false))
+            .build();
+
+        assert!(!tool.same_host_redirects_only);
     }
 
     #[test]
