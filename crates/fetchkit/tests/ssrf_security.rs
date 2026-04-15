@@ -717,6 +717,33 @@ async fn test_dos_001_body_within_limit_not_truncated() {
     assert!(resp.content.unwrap().contains("small body"));
 }
 
+#[tokio::test]
+async fn test_dos_001_direct_llms_txt_honors_body_size_limit() {
+    let mock_server = MockServer::start().await;
+    let large_body = "x".repeat(2000);
+
+    Mock::given(method("GET"))
+        .and(path("/llms.txt"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(&large_body)
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .max_body_size(1000)
+        .build();
+    let req = FetchRequest::new(format!("{}/llms.txt", mock_server.uri()));
+    let resp = tool.execute(req).await.unwrap();
+
+    assert_eq!(resp.truncated, Some(true));
+    assert!(resp.size.unwrap() <= 1000);
+    assert!(resp.content.unwrap().contains("[..content truncated...]"));
+}
+
 // ============================================================================
 // TM-INPUT-007: URL-aware prefix matching
 // ============================================================================

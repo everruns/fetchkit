@@ -46,17 +46,17 @@ const BINARY_PREFIXES: &[&str] = &[
 const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(1);
 
 // THREAT[TM-DOS-002]: Body timeout caps total request duration
-const BODY_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Truncation message appended when body is cut short (timeout or size limit)
-const TRUNCATION_MESSAGE: &str = "\n\n[..content truncated...]";
+pub(crate) const TRUNCATION_MESSAGE: &str = "\n\n[..content truncated...]";
 
 // THREAT[TM-SSRF-010]: Maximum redirects to follow with IP validation at each hop
 const MAX_REDIRECTS: usize = 10;
 
 // THREAT[TM-DOS-001]: Default max body size (10 MB) to prevent memory exhaustion
 // THREAT[TM-DOS-003]: Also protects against compressed content bombs (gzip bombs)
-const DEFAULT_MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+pub(crate) const DEFAULT_MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 /// Default HTTP fetcher
 ///
@@ -640,7 +640,7 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
 /// due to timeout or exceeding `max_size`.
 // THREAT[TM-DOS-001]: Configurable max body size prevents unbounded memory usage
 // THREAT[TM-DOS-003]: Decompressed size is checked, catching gzip/brotli bombs
-async fn read_body_with_timeout(
+pub(crate) async fn read_body_with_timeout(
     response: reqwest::Response,
     timeout: Duration,
     max_size: usize,
