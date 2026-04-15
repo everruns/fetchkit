@@ -218,7 +218,7 @@ expected outbound path.
 | TM-INPUT-005 | URL with fragment/query manipulation | Low | Fragments and queries are part of the URL; no special handling needed | **BY DESIGN** |
 | TM-INPUT-006 | Prefix bypass via URL authority (http://evil.com@127.0.0.1) | Medium | `url` crate parses authority correctly; resolve-then-check validates the actual host | MITIGATED |
 | TM-INPUT-007 | Block prefix matching is string-based, not URL-aware | Medium | URL-aware prefix matching compares parsed components (scheme, host, path) | MITIGATED |
-| TM-INPUT-008 | Symlink-based path traversal in LocalFileSaver | Medium | Lexical path normalization; symlinks within base_dir can escape | **ACCEPTED** |
+| TM-INPUT-008 | Symlink-based path traversal in LocalFileSaver | Medium | Save-time parent-directory walk rejects symlinks and re-checks canonical path under base_dir | MITIGATED |
 | TM-INPUT-009 | LocalFileSaver without base_dir allows arbitrary writes | Medium | Documented limitation; callers should always set base_dir in untrusted contexts | **ACCEPTED** |
 
 ### Mitigation Details
@@ -249,13 +249,13 @@ then compares scheme, host (exact match), port, and path (segment-boundary
 matching). `http://internal.example.com` correctly does NOT match
 `http://internal.example.com.evil.com` since hosts differ after parsing.
 
-**TM-INPUT-008 — Symlink-based path traversal (ACCEPTED):**
-`LocalFileSaver` uses lexical normalization (not `canonicalize()`) to prevent `..`
-traversal. If a symlink exists within `base_dir` pointing outside it, the lexical
-check is bypassed. Accepted because:
-- The base_dir is operator-controlled, not user-controlled
-- In containerized deployments, the save directory is freshly created per session
-- Adding `canonicalize()` introduces TOCTOU races and requires the path to exist
+**TM-INPUT-008 — Symlink-based path traversal (MITIGATED):**
+`LocalFileSaver` still performs lexical normalization to block `..` traversal, but
+save-time enforcement now walks each parent directory component under `base_dir`,
+rejects symlinks, canonicalizes each directory after creation/use, and verifies
+the canonical path stays under the canonical base directory. `execute_with_saver()`
+no longer performs a separate `validate_path()` preflight, so path checks now
+happen at write time instead of in a validate-then-write split.
 
 **TM-INPUT-009 — No base_dir allows arbitrary writes (ACCEPTED):**
 `LocalFileSaver::new(None)` only requires absolute paths, with no directory restriction.
@@ -430,7 +430,7 @@ None — all previously open threats have been mitigated.
 | New client per request | TM-NET | No connection pool state leakage |
 | Fetcher API URL hardcoding | TM-SSRF | Specialized fetchers (GitHub, Twitter) connect to hardcoded API hosts, not user-controlled URLs; DNS validation applied on initial connect |
 | Proxy env isolation | TM-NET | `reqwest::ClientBuilder::no_proxy()` by default |
-| Path traversal prevention | TM-INPUT | Lexical path normalization in `LocalFileSaver` |
+| Path traversal prevention | TM-INPUT | Lexical normalization plus save-time parent-directory symlink rejection in `LocalFileSaver` |
 | Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |
 | Bot-auth feature gating | TM-AUTH | `bot-auth` Cargo feature disabled by default; no crypto deps unless opted in |
 | Signature nonce + timestamps | TM-AUTH | 32-byte random nonce + created/expires per signature prevents replay |
