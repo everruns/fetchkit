@@ -5,6 +5,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 ## Features
 
 - **HTTP fetching** - GET and HEAD methods with streaming support
+- **Pluggable fetchers** - URL-aware dispatch to specialized handlers for repos, docs, feeds, videos, papers, and more
 - **HTML-to-Markdown** - Built-in conversion optimized for LLMs
 - **HTML-to-Text** - Plain text extraction with clean formatting
 - **Binary detection** - Returns metadata only for images, PDFs, etc.
@@ -13,6 +14,25 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **URL filtering** - URL-aware allow/block lists for controlled access
 - **SSRF protection** - Resolve-then-check blocks private IPs by default
 - **MCP server** - Model Context Protocol support for AI tool integration
+
+## Built-in Fetchers
+
+FetchKit routes each request through an ordered fetcher registry. Specialized
+fetchers match first; the default fetcher handles everything else.
+
+- `GitHubCodeFetcher` - GitHub source file URLs (`/blob/...`)
+- `GitHubIssueFetcher` - GitHub issue and pull request URLs
+- `GitHubRepoFetcher` - GitHub repository home pages
+- `TwitterFetcher` - X/Twitter status URLs
+- `StackOverflowFetcher` - Stack Overflow and Stack Exchange question URLs
+- `PackageRegistryFetcher` - PyPI, crates.io, and npm package pages
+- `WikipediaFetcher` - Wikipedia article URLs
+- `YouTubeFetcher` - YouTube watch and `youtu.be` URLs
+- `ArXivFetcher` - arXiv abstract and PDF URLs
+- `HackerNewsFetcher` - Hacker News item threads
+- `RSSFeedFetcher` - RSS and Atom feed URLs
+- `DocsSiteFetcher` - docs sites with `llms.txt`/`llms-full.txt` support
+- `DefaultFetcher` - all remaining HTTP/HTTPS URLs with HTML conversion, streaming, timeout handling, and binary detection
 
 ## Installation
 
