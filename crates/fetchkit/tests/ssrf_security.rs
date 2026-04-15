@@ -465,6 +465,70 @@ async fn test_ssrf_010_same_host_redirect_policy_blocks_cross_host_redirect() {
     assert!(matches!(result, Err(FetchError::BlockedUrl)));
 }
 
+#[tokio::test]
+async fn test_ssrf_010_rss_fetcher_blocks_loopback_feed_by_default() {
+    let mock_server = MockServer::start().await;
+    let rss = r#"<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Loopback Feed</title>
+    <item>
+      <title>Entry</title>
+      <description>Hello</description>
+    </item>
+  </channel>
+</rss>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/feed"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(rss, "application/rss+xml"))
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/feed", mock_server.uri()));
+    let result = Tool::default().execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+}
+
+#[tokio::test]
+async fn test_ssrf_010_rss_fetcher_enforces_same_host_redirect_policy() {
+    let mock_server = MockServer::start().await;
+    let server_addr = mock_server.address();
+    let final_feed_url = format!("http://127.0.0.1:{}/final-feed", server_addr.port());
+    let rss = r#"<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Redirected Feed</title>
+    <item>
+      <title>Entry</title>
+      <description>Hello</description>
+    </item>
+  </channel>
+</rss>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/feed"))
+        .respond_with(ResponseTemplate::new(302).insert_header("Location", &final_feed_url))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/final-feed"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(rss, "application/rss+xml"))
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .same_host_redirects_only(true)
+        .build();
+    let req = FetchRequest::new(format!("http://localhost:{}/feed", server_addr.port()));
+    let result = tool.execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+}
+
 // ============================================================================
 // TM-NET-004: Ambient proxy environment variables
 // ============================================================================
