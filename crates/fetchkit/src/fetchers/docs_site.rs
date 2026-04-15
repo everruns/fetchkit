@@ -10,11 +10,12 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{apply_bot_auth_if_enabled, send_request_following_redirects};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use std::time::Duration;
 use url::Url;
 
@@ -102,28 +103,13 @@ impl Fetcher for DocsSiteFetcher {
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
-
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(PROBE_TIMEOUT)
-            .timeout(PROBE_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(5));
-
-        if !options.respect_proxy_env {
-            // THREAT[TM-NET-004]: Ignore ambient proxy env by default
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
 
         // If this IS a direct llms.txt URL, fetch it directly
         if Self::is_llms_txt_url(&url) {
-            return fetch_llms_txt_direct(&client, &request.url, &ua_header, request).await;
+            return fetch_llms_txt_direct(url, ua_header, options).await;
         }
 
         // For docs sites, probe for llms.txt at origin
@@ -141,7 +127,8 @@ impl Fetcher for DocsSiteFetcher {
         ];
 
         for (probe_url, source) in &probe_urls {
-            if let Some(content) = try_fetch_llms_txt(&client, probe_url, &ua_header).await {
+            let probe_url = Url::parse(probe_url).map_err(|_| FetchError::InvalidUrlScheme)?;
+            if let Some(content) = try_fetch_llms_txt(probe_url, ua_header.clone(), options).await {
                 return Ok(FetchResponse {
                     url: request.url.clone(),
                     status_code: 200,
@@ -154,14 +141,24 @@ impl Fetcher for DocsSiteFetcher {
         }
 
         // No llms.txt — fetch the docs page directly and return raw content
-        let response = client
-            .get(&request.url)
-            .header(USER_AGENT, ua_header)
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, ua_header);
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("text/html, text/plain, text/markdown, */*"),
+        );
+        let headers = apply_bot_auth_if_enabled(headers, options, &url);
+        let (response, redirect_chain) = send_request_following_redirects(
+            url,
+            reqwest::Method::GET,
+            headers,
+            options,
+            PROBE_TIMEOUT,
+        )
+        .await?;
 
         let status_code = response.status().as_u16();
+        let final_url = response.url().to_string();
         let content_type = response
             .headers()
             .get("content-type")
@@ -187,11 +184,12 @@ impl Fetcher for DocsSiteFetcher {
         };
 
         Ok(FetchResponse {
-            url: request.url.clone(),
+            url: final_url,
             status_code,
             content_type,
             format: Some(format),
             content: Some(content),
+            redirect_chain,
             ..Default::default()
         })
     }
@@ -199,24 +197,34 @@ impl Fetcher for DocsSiteFetcher {
 
 /// Fetch a direct llms.txt URL
 async fn fetch_llms_txt_direct(
-    client: &reqwest::Client,
-    url: &str,
-    ua_header: &HeaderValue,
-    request: &FetchRequest,
+    url: Url,
+    ua_header: HeaderValue,
+    options: &FetchOptions,
 ) -> Result<FetchResponse, FetchError> {
-    let response = client
-        .get(url)
-        .header(USER_AGENT, ua_header.clone())
-        .send()
-        .await
-        .map_err(FetchError::from_reqwest)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, ua_header);
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static("text/plain, text/markdown, */*"),
+    );
+    let headers = apply_bot_auth_if_enabled(headers, options, &url);
+    let (response, redirect_chain) = send_request_following_redirects(
+        url,
+        reqwest::Method::GET,
+        headers,
+        options,
+        PROBE_TIMEOUT,
+    )
+    .await?;
 
     let status_code = response.status().as_u16();
+    let final_url = response.url().to_string();
 
     if !response.status().is_success() {
         return Ok(FetchResponse {
-            url: request.url.clone(),
+            url: final_url,
             status_code,
+            redirect_chain,
             error: Some(format!("HTTP {}", status_code)),
             ..Default::default()
         });
@@ -228,27 +236,38 @@ async fn fetch_llms_txt_direct(
         .map_err(|e| FetchError::RequestError(e.to_string()))?;
 
     Ok(FetchResponse {
-        url: request.url.clone(),
+        url: final_url,
         status_code: 200,
         content_type: Some("text/plain".to_string()),
         format: Some("documentation".to_string()),
         content: Some(body),
+        redirect_chain,
         ..Default::default()
     })
 }
 
 /// Try to fetch an llms.txt URL. Returns Some(content) on success.
 async fn try_fetch_llms_txt(
-    client: &reqwest::Client,
-    url: &str,
-    ua_header: &HeaderValue,
+    url: Url,
+    ua_header: HeaderValue,
+    options: &FetchOptions,
 ) -> Option<String> {
-    let response = client
-        .get(url)
-        .header(USER_AGENT, ua_header.clone())
-        .send()
-        .await
-        .ok()?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, ua_header);
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static("text/plain, text/markdown, */*"),
+    );
+    let headers = apply_bot_auth_if_enabled(headers, options, &url);
+    let (response, _) = send_request_following_redirects(
+        url,
+        reqwest::Method::GET,
+        headers,
+        options,
+        PROBE_TIMEOUT,
+    )
+    .await
+    .ok()?;
 
     if !response.status().is_success() {
         return None;

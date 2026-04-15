@@ -529,6 +529,58 @@ async fn test_ssrf_010_rss_fetcher_enforces_same_host_redirect_policy() {
     assert!(matches!(result, Err(FetchError::BlockedUrl)));
 }
 
+#[tokio::test]
+async fn test_ssrf_010_docs_site_blocks_loopback_llms_txt_by_default() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/llms.txt"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("Docs for agents")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/llms.txt", mock_server.uri()));
+    let result = Tool::default().execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+}
+
+#[tokio::test]
+async fn test_ssrf_010_docs_site_llms_txt_enforces_same_host_redirect_policy() {
+    let mock_server = MockServer::start().await;
+    let server_addr = mock_server.address();
+    let final_llms_url = format!("http://127.0.0.1:{}/final-llms.txt", server_addr.port());
+
+    Mock::given(method("GET"))
+        .and(path("/llms.txt"))
+        .respond_with(ResponseTemplate::new(302).insert_header("Location", &final_llms_url))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/final-llms.txt"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("Redirected docs for agents")
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .same_host_redirects_only(true)
+        .build();
+    let req = FetchRequest::new(format!("http://localhost:{}/llms.txt", server_addr.port()));
+    let result = tool.execute(req).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+}
+
 // ============================================================================
 // TM-NET-004: Ambient proxy environment variables
 // ============================================================================
