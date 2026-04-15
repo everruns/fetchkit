@@ -532,17 +532,12 @@ impl Tool {
         req: FetchRequest,
         saver: Option<&dyn FileSaver>,
     ) -> Result<FetchResponse, FetchError> {
-        if let Some(path) = &req.save_to_file {
+        if req.save_to_file.is_some() {
             if !self.enable_save_to_file {
                 return Err(FetchError::SaverNotAvailable);
             }
 
             let saver = saver.ok_or(FetchError::SaverNotAvailable)?;
-
-            saver
-                .validate_path(path)
-                .await
-                .map_err(|e| FetchError::SaveError(e.to_string()))?;
 
             let options = self.build_options();
             let registry = FetcherRegistry::with_defaults();

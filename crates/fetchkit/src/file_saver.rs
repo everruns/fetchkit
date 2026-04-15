@@ -90,6 +90,12 @@ impl LocalFileSaver {
 
     /// Resolve and validate a path, returning the normalized absolute path.
     fn resolve_path(&self, path: &str) -> Result<PathBuf, FileSaveError> {
+        if path.is_empty() {
+            return Err(FileSaveError::PathNotAllowed(
+                "Path must name a file".into(),
+            ));
+        }
+
         let input = PathBuf::from(path);
 
         if let Some(base) = &self.base_dir {
@@ -117,22 +123,134 @@ impl LocalFileSaver {
             Ok(normalize_path(&input))
         }
     }
+
+    async fn canonicalize_base_dir(&self, base: &Path) -> Result<PathBuf, FileSaveError> {
+        tokio::fs::create_dir_all(base).await?;
+
+        let meta = tokio::fs::symlink_metadata(base).await?;
+        if meta.file_type().is_symlink() {
+            return Err(FileSaveError::PathNotAllowed(
+                "Base directory must not be a symlink".into(),
+            ));
+        }
+        if !meta.is_dir() {
+            return Err(FileSaveError::PathNotAllowed(
+                "Base directory must be a directory".into(),
+            ));
+        }
+
+        Ok(tokio::fs::canonicalize(base).await?)
+    }
+
+    async fn prepare_parent_dir(&self, resolved: &Path) -> Result<PathBuf, FileSaveError> {
+        let Some(base) = &self.base_dir else {
+            return Ok(resolved
+                .parent()
+                .ok_or_else(|| FileSaveError::PathNotAllowed("Path must name a file".into()))?
+                .to_path_buf());
+        };
+
+        let normalized_base = normalize_path(base);
+        let relative = resolved
+            .strip_prefix(&normalized_base)
+            .map_err(|_| FileSaveError::PathNotAllowed("Path escapes base directory".into()))?;
+        let canonical_base = self.canonicalize_base_dir(base).await?;
+        let mut current = canonical_base.clone();
+
+        for component in relative
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .components()
+        {
+            let Component::Normal(name) = component else {
+                return Err(FileSaveError::PathNotAllowed(format!(
+                    "Unsupported path component in save path: {}",
+                    resolved.display()
+                )));
+            };
+
+            let candidate = current.join(name);
+            let meta = match tokio::fs::symlink_metadata(&candidate).await {
+                Ok(meta) => meta,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    if let Err(create_err) = tokio::fs::create_dir(&candidate).await {
+                        if create_err.kind() != std::io::ErrorKind::AlreadyExists {
+                            return Err(create_err.into());
+                        }
+                    }
+                    tokio::fs::symlink_metadata(&candidate).await?
+                }
+                Err(err) => return Err(err.into()),
+            };
+
+            if meta.file_type().is_symlink() {
+                return Err(FileSaveError::PathNotAllowed(format!(
+                    "Path traverses symlink: {}",
+                    candidate.display()
+                )));
+            }
+            if !meta.is_dir() {
+                return Err(FileSaveError::PathNotAllowed(format!(
+                    "Parent path is not a directory: {}",
+                    candidate.display()
+                )));
+            }
+
+            let canonical_candidate = tokio::fs::canonicalize(&candidate).await?;
+            if !canonical_candidate.starts_with(&canonical_base) {
+                return Err(FileSaveError::PathNotAllowed(format!(
+                    "Path escapes base directory via symlink: {}",
+                    candidate.display()
+                )));
+            }
+            current = canonical_candidate;
+        }
+
+        Ok(current)
+    }
 }
 
 #[async_trait]
 impl FileSaver for LocalFileSaver {
     async fn save(&self, path: &str, bytes: &[u8]) -> Result<SaveResult, FileSaveError> {
         let resolved = self.resolve_path(path)?;
+        if let Some(base_dir) = &self.base_dir {
+            if resolved == normalize_path(base_dir) {
+                return Err(FileSaveError::PathNotAllowed(
+                    "Path must name a file".into(),
+                ));
+            }
+        }
+        let file_name = resolved
+            .file_name()
+            .ok_or_else(|| FileSaveError::PathNotAllowed("Path must name a file".into()))?;
+        let parent_dir = self.prepare_parent_dir(&resolved).await?;
+        let final_path = parent_dir.join(file_name);
 
-        // Create parent directories
-        if let Some(parent) = resolved.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+        if self.base_dir.is_none() {
+            if let Some(parent) = final_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
         }
 
-        tokio::fs::write(&resolved, bytes).await?;
+        match tokio::fs::symlink_metadata(&final_path).await {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(FileSaveError::PathNotAllowed(format!(
+                    "Refusing to write through symlink: {}",
+                    final_path.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+
+        // THREAT[TM-INPUT-008]: Validate and create the final path during save,
+        // so symlink checks happen at write time rather than in a separate preflight step.
+        tokio::fs::write(&final_path, bytes).await?;
 
         Ok(SaveResult {
-            path: resolved.to_string_lossy().to_string(),
+            path: final_path.to_string_lossy().to_string(),
             bytes_written: bytes.len() as u64,
         })
     }

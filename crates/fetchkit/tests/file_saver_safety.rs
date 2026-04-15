@@ -23,6 +23,16 @@ fn saver_in(dir: &std::path::Path) -> LocalFileSaver {
     LocalFileSaver::new(Some(dir.to_path_buf()))
 }
 
+#[cfg(unix)]
+fn symlink_dir(src: &std::path::Path, dst: &std::path::Path) {
+    std::os::unix::fs::symlink(src, dst).unwrap();
+}
+
+#[cfg(windows)]
+fn symlink_dir(src: &std::path::Path, dst: &std::path::Path) {
+    std::os::windows::fs::symlink_dir(src, dst).unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // Path traversal attacks
 // ---------------------------------------------------------------------------
@@ -115,6 +125,47 @@ async fn test_no_base_dir_requires_absolute() {
         result.is_err(),
         "Relative path without base_dir should fail"
     );
+}
+
+#[tokio::test]
+async fn test_path_traversal_symlink_escape_rejected() {
+    use fetchkit::file_saver::FileSaver;
+
+    let base = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let saver = saver_in(base.path());
+
+    symlink_dir(outside.path(), &base.path().join("pivot"));
+
+    let result = saver.save("pivot/escape.txt", b"pwned").await;
+    assert!(result.is_err(), "symlink escape should be rejected");
+    assert!(!outside.path().join("escape.txt").exists());
+}
+
+#[tokio::test]
+async fn test_execute_with_saver_rejects_symlink_escape() {
+    let base = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let saver = saver_in(base.path());
+    let tool = tool_with_save();
+
+    symlink_dir(outside.path(), &base.path().join("pivot"));
+
+    let mock = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("pwned"))
+        .mount(&mock)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/", mock.uri())).save_to_file("pivot/escape.txt");
+    let result = tool.execute_with_saver(req, Some(&saver)).await;
+
+    assert!(
+        result.is_err(),
+        "execute_with_saver should reject symlink escape"
+    );
+    assert!(!outside.path().join("escape.txt").exists());
 }
 
 // ---------------------------------------------------------------------------
