@@ -5,11 +5,12 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{apply_bot_auth_if_enabled, send_request_following_redirects};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use std::time::Duration;
 use url::Url;
 
@@ -86,40 +87,35 @@ impl Fetcher for RSSFeedFetcher {
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(5));
-
-        if !options.respect_proxy_env {
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
+        let mut headers = HeaderMap::new();
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
+        headers.insert(USER_AGENT, ua_header);
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(
+                "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+            ),
+        );
 
-        let response = client
-            .get(&request.url)
-            .header(USER_AGENT, ua_header)
-            .header(
-                ACCEPT,
-                HeaderValue::from_static(
-                    "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-                ),
-            )
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let parsed_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
+        let (response, redirect_chain) = send_request_following_redirects(
+            parsed_url,
+            reqwest::Method::GET,
+            headers,
+            options,
+            API_TIMEOUT,
+        )
+        .await?;
 
         let status_code = response.status().as_u16();
+        let final_url = response.url().to_string();
         if !response.status().is_success() {
             return Ok(FetchResponse {
-                url: request.url.clone(),
+                url: final_url,
                 status_code,
+                redirect_chain,
                 error: Some(format!("HTTP {}", status_code)),
                 ..Default::default()
             });
@@ -150,29 +146,32 @@ impl Fetcher for RSSFeedFetcher {
         } else if is_feed_by_ct {
             // Content-type indicates a feed but structure wasn't recognized — return as raw XML
             return Ok(FetchResponse {
-                url: request.url.clone(),
+                url: final_url,
                 status_code: 200,
                 content: Some(body),
                 format: Some("raw".to_string()),
+                redirect_chain,
                 ..Default::default()
             });
         } else {
             // Not a recognized feed format
             return Ok(FetchResponse {
-                url: request.url.clone(),
+                url: final_url,
                 status_code: 200,
                 content: Some(body),
                 format: Some("raw".to_string()),
+                redirect_chain,
                 ..Default::default()
             });
         };
 
         Ok(FetchResponse {
-            url: request.url.clone(),
+            url: final_url,
             status_code: 200,
             content_type: Some("text/markdown".to_string()),
             format: Some("rss_feed".to_string()),
             content: Some(content),
+            redirect_chain,
             ..Default::default()
         })
     }

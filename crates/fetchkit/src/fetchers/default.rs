@@ -81,7 +81,11 @@ impl Default for DefaultFetcher {
 }
 
 /// Build headers for HTTP requests
-fn build_headers(options: &FetchOptions, accept: &str, request: &FetchRequest) -> HeaderMap {
+pub(crate) fn build_headers(
+    options: &FetchOptions,
+    accept: &str,
+    request: &FetchRequest,
+) -> HeaderMap {
     let mut headers = HeaderMap::new();
     let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
     headers.insert(
@@ -111,7 +115,7 @@ fn build_headers(options: &FetchOptions, accept: &str, request: &FetchRequest) -
 
 /// Apply bot-auth signature headers when the feature is enabled and configured.
 #[cfg(feature = "bot-auth")]
-fn apply_bot_auth_if_enabled(
+pub(crate) fn apply_bot_auth_if_enabled(
     mut headers: HeaderMap,
     options: &FetchOptions,
     url: &Url,
@@ -142,7 +146,11 @@ fn apply_bot_auth_if_enabled(
 }
 
 #[cfg(not(feature = "bot-auth"))]
-fn apply_bot_auth_if_enabled(headers: HeaderMap, _options: &FetchOptions, _url: &Url) -> HeaderMap {
+pub(crate) fn apply_bot_auth_if_enabled(
+    headers: HeaderMap,
+    _options: &FetchOptions,
+    _url: &Url,
+) -> HeaderMap {
     headers
 }
 
@@ -220,8 +228,14 @@ impl Fetcher for DefaultFetcher {
         };
 
         // THREAT[TM-SSRF-010]: Follow redirects manually so every hop is re-validated.
-        let (response, redirect_chain) =
-            send_request_following_redirects(parsed_url, reqwest_method, headers, options).await?;
+        let (response, redirect_chain) = send_request_following_redirects(
+            parsed_url,
+            reqwest_method,
+            headers,
+            options,
+            FIRST_BYTE_TIMEOUT,
+        )
+        .await?;
 
         let status_code = response.status().as_u16();
         let final_url = response.url().to_string();
@@ -394,8 +408,14 @@ impl Fetcher for DefaultFetcher {
         };
 
         // THREAT[TM-SSRF-010]: Follow redirects manually with IP validation at each hop
-        let (response, redirect_chain) =
-            send_request_following_redirects(parsed_url, reqwest_method, headers, options).await?;
+        let (response, redirect_chain) = send_request_following_redirects(
+            parsed_url,
+            reqwest_method,
+            headers,
+            options,
+            FIRST_BYTE_TIMEOUT,
+        )
+        .await?;
 
         let status_code = response.status().as_u16();
         let final_url = response.url().to_string();
@@ -446,17 +466,18 @@ impl Fetcher for DefaultFetcher {
 }
 
 /// Returns `(response, redirect_chain)` where redirect_chain lists intermediate URLs.
-async fn send_request_following_redirects(
+pub(crate) async fn send_request_following_redirects(
     initial_url: Url,
     method: reqwest::Method,
     headers: HeaderMap,
     options: &FetchOptions,
+    timeout: Duration,
 ) -> Result<(reqwest::Response, Vec<String>), FetchError> {
     let mut current_url = initial_url;
     let mut redirect_chain = Vec::new();
 
     for redirect_count in 0..=MAX_REDIRECTS {
-        let client = build_client_for_url(&current_url, headers.clone(), options)?;
+        let client = build_client_for_url(&current_url, headers.clone(), options, timeout)?;
         let response = client
             .request(method.clone(), current_url.clone())
             .send()
@@ -489,12 +510,13 @@ fn build_client_for_url(
     url: &Url,
     headers: HeaderMap,
     options: &FetchOptions,
+    timeout: Duration,
 ) -> Result<reqwest::Client, FetchError> {
     // THREAT[TM-NET-003]: New client per request prevents connection-pool state leakage
     let mut client_builder = reqwest::Client::builder()
         .default_headers(headers)
-        .connect_timeout(FIRST_BYTE_TIMEOUT)
-        .timeout(FIRST_BYTE_TIMEOUT)
+        .connect_timeout(timeout)
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none());
 
     if !options.respect_proxy_env {
