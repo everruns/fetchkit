@@ -292,7 +292,8 @@ impl Fetcher for DefaultFetcher {
 
         // THREAT[TM-DOS-001]: Read body with timeout and size limit
         // THREAT[TM-DOS-003]: Size limit also protects against compressed content bombs
-        let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await;
+        let (body, truncated) =
+            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
         let size = body.len() as u64;
 
         // Convert to string
@@ -438,7 +439,8 @@ impl Fetcher for DefaultFetcher {
         }
 
         // Read raw body (no binary rejection for file saves)
-        let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await;
+        let (body, truncated) =
+            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
         let size = body.len() as u64;
 
         // Save through the FileSaver
@@ -644,7 +646,7 @@ pub(crate) async fn read_body_with_timeout(
     response: reqwest::Response,
     timeout: Duration,
     max_size: usize,
-) -> (Bytes, bool) {
+) -> Result<(Bytes, bool), FetchError> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     let deadline = tokio::time::Instant::now() + timeout;
@@ -660,29 +662,31 @@ pub(crate) async fn read_body_with_timeout(
                         let remaining = max_size.saturating_sub(body.len());
                         if remaining == 0 {
                             warn!("Body size limit reached ({}), truncating", max_size);
-                            return (Bytes::from(body), true);
+                            return Ok((Bytes::from(body), true));
                         }
                         if bytes.len() > remaining {
                             body.extend_from_slice(&bytes[..remaining]);
                             warn!("Body size limit reached ({}), truncating", max_size);
-                            return (Bytes::from(body), true);
+                            return Ok((Bytes::from(body), true));
                         }
                         body.extend_from_slice(&bytes);
                     }
                     Some(Err(e)) => {
                         error!("Error reading body chunk: {}", e);
-                        let has_content = !body.is_empty();
-                        return (Bytes::from(body), has_content);
+                        if body.is_empty() {
+                            return Err(FetchError::from_reqwest(e));
+                        }
+                        return Ok((Bytes::from(body), true));
                     }
                     None => {
                         // Stream complete
-                        return (Bytes::from(body), false);
+                        return Ok((Bytes::from(body), false));
                     }
                 }
             }
             _ = timeout_future => {
                 warn!("Body timeout reached, returning partial content");
-                return (Bytes::from(body), true);
+                return Ok((Bytes::from(body), true));
             }
         }
     }

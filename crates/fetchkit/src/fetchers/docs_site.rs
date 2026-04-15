@@ -239,7 +239,7 @@ async fn fetch_llms_txt_direct(
     }
 
     let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
-    let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await;
+    let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
     let size = body.len() as u64;
     let mut content = String::from_utf8_lossy(&body).to_string();
 

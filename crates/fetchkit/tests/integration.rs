@@ -5,6 +5,8 @@ use fetchkit::{
     HttpMethod, LocalFileSaver, Tool,
 };
 use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tower::Service;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -32,6 +34,25 @@ fn test_tool_with_save() -> Tool {
         .build()
 }
 
+async fn spawn_malformed_chunked_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut buf = [0_u8; 1024];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\nZZ\r\nboom\r\n0\r\n\r\n",
+                )
+                .await;
+        }
+    });
+
+    format!("http://{addr}/")
+}
+
 #[tokio::test]
 async fn test_simple_get() {
     let mock_server = MockServer::start().await;
@@ -53,6 +74,28 @@ async fn test_simple_get() {
     assert_eq!(resp.content_type, Some("text/plain".to_string()));
     assert!(resp.content.unwrap().contains("Hello, World!"));
     assert_eq!(resp.format, Some("raw".to_string()));
+}
+
+#[tokio::test]
+async fn test_malformed_chunked_body_returns_error() {
+    let req = FetchRequest::new(spawn_malformed_chunked_server().await);
+    let result = fetch_with_options(req, test_options()).await;
+
+    assert!(matches!(result, Err(FetchError::RequestError(_))));
+}
+
+#[tokio::test]
+async fn test_save_to_file_malformed_chunked_body_does_not_create_empty_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let req =
+        FetchRequest::new(spawn_malformed_chunked_server().await).save_to_file("malformed.txt");
+    let result = test_tool_with_save()
+        .execute_with_saver(req, Some(&saver))
+        .await;
+
+    assert!(matches!(result, Err(FetchError::RequestError(_))));
+    assert!(!dir.path().join("malformed.txt").exists());
 }
 
 #[tokio::test]
