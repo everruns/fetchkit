@@ -10,7 +10,10 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
-use crate::fetchers::default::{apply_bot_auth_if_enabled, send_request_following_redirects};
+use crate::fetchers::default::{
+    apply_bot_auth_if_enabled, read_body_with_timeout, send_request_following_redirects,
+    BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE, TRUNCATION_MESSAGE,
+};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
@@ -219,6 +222,11 @@ async fn fetch_llms_txt_direct(
 
     let status_code = response.status().as_u16();
     let final_url = response.url().to_string();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     if !response.status().is_success() {
         return Ok(FetchResponse {
@@ -230,17 +238,23 @@ async fn fetch_llms_txt_direct(
         });
     }
 
-    let body = response
-        .text()
-        .await
-        .map_err(|e| FetchError::RequestError(e.to_string()))?;
+    let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+    let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await;
+    let size = body.len() as u64;
+    let mut content = String::from_utf8_lossy(&body).to_string();
+
+    if truncated {
+        content.push_str(TRUNCATION_MESSAGE);
+    }
 
     Ok(FetchResponse {
         url: final_url,
         status_code: 200,
-        content_type: Some("text/plain".to_string()),
+        content_type,
         format: Some("documentation".to_string()),
-        content: Some(body),
+        content: Some(content),
+        size: Some(size),
+        truncated: if truncated { Some(true) } else { None },
         redirect_chain,
         ..Default::default()
     })
