@@ -15,6 +15,8 @@ use std::time::Duration;
 use url::Url;
 
 const API_TIMEOUT: Duration = Duration::from_secs(10);
+const STACKEXCHANGE_API_HOST: &str = "api.stackexchange.com";
+const STACKEXCHANGE_API_PORT: u16 = 443;
 
 /// Max answers to include
 const MAX_ANSWERS: usize = 10;
@@ -127,11 +129,21 @@ impl Fetcher for StackOverflowFetcher {
         let mut client_builder = reqwest::Client::builder()
             .connect_timeout(API_TIMEOUT)
             .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(3));
+            // THREAT[TM-SSRF-010]: no redirect following for API calls
+            .redirect(reqwest::redirect::Policy::none());
 
         if !options.respect_proxy_env {
             // THREAT[TM-NET-004]: Ignore ambient proxy env by default
             client_builder = client_builder.no_proxy();
+        }
+
+        if options.dns_policy.block_private {
+            let validated_addr = options
+                .dns_policy
+                .resolve_and_validate(STACKEXCHANGE_API_HOST, STACKEXCHANGE_API_PORT)
+                .map_err(|_| FetchError::BlockedUrl)?;
+            // THREAT[TM-SSRF-005]: pin validated DNS answer for API host
+            client_builder = client_builder.resolve(STACKEXCHANGE_API_HOST, validated_addr);
         }
 
         let client = client_builder
