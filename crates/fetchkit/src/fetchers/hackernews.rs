@@ -19,6 +19,9 @@ const API_TIMEOUT: Duration = Duration::from_secs(10);
 /// Max top-level comments to fetch
 const MAX_COMMENTS: usize = 20;
 
+/// Upper bound for accepted Unix timestamps (3000-01-01T00:00:00Z)
+const MAX_UNIX_TIMESTAMP: u64 = 32_503_680_000;
+
 /// Hacker News fetcher
 ///
 /// Matches `news.ycombinator.com/item?id={id}`, returning structured
@@ -191,8 +194,8 @@ fn format_hn_response(item: &HNItem, comments: &[(HNItem, Vec<HNItem>)]) -> Stri
     if let Some(score) = item.score {
         out.push_str(&format!("- **Score:** {}\n", score));
     }
-    if let Some(time) = item.time {
-        out.push_str(&format!("- **Time:** {}\n", format_unix_timestamp(time)));
+    if let Some(time) = item.time.and_then(format_unix_timestamp_bounded) {
+        out.push_str(&format!("- **Time:** {}\n", time));
     }
     if let Some(descendants) = item.descendants {
         out.push_str(&format!("- **Comments:** {}\n", descendants));
@@ -230,6 +233,15 @@ fn format_hn_response(item: &HNItem, comments: &[(HNItem, Vec<HNItem>)]) -> Stri
     }
 
     out
+}
+
+/// Format a Unix timestamp as an ISO 8601 UTC date-time string
+fn format_unix_timestamp_bounded(ts: u64) -> Option<String> {
+    if ts > MAX_UNIX_TIMESTAMP {
+        return None;
+    }
+
+    Some(format_unix_timestamp(ts))
 }
 
 /// Format a Unix timestamp as an ISO 8601 UTC date-time string
@@ -308,15 +320,12 @@ fn strip_html_tags(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut in_tag = false;
 
-    for c in html.chars() {
+    for (idx, c) in html.char_indices() {
         match c {
             '<' => {
                 in_tag = true;
                 // Check for <p> tags -> newlines
-                let rest: String = html[html.len() - (html.len() - result.len())..]
-                    .chars()
-                    .take(3)
-                    .collect();
+                let rest: String = html[idx + c.len_utf8()..].chars().take(3).collect();
                 if rest.starts_with("p>") || rest.starts_with("br") {
                     result.push('\n');
                 }
@@ -381,6 +390,7 @@ mod tests {
     fn test_strip_html_tags() {
         assert_eq!(strip_html_tags("Hello <b>world</b>"), "Hello world");
         assert_eq!(strip_html_tags("a &amp; b"), "a & b");
+        assert_eq!(strip_html_tags("ab<é>xy<"), "abxy");
     }
 
     #[test]
@@ -465,5 +475,14 @@ mod tests {
     fn test_format_unix_timestamp() {
         assert_eq!(format_unix_timestamp(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_unix_timestamp(1704067200), "2024-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn test_format_unix_timestamp_bounded() {
+        assert_eq!(
+            format_unix_timestamp_bounded(1704067200),
+            Some("2024-01-01T00:00:00Z".to_string())
+        );
+        assert_eq!(format_unix_timestamp_bounded(u64::MAX), None);
     }
 }

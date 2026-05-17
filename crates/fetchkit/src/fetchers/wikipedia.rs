@@ -5,6 +5,9 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{
+    read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE, TRUNCATION_MESSAGE,
+};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
@@ -154,7 +157,10 @@ impl Fetcher for WikipediaFetcher {
             });
         }
 
-        let summary: WikiSummary = summary_resp.json().await.map_err(|e| {
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+        let (summary_body, _) =
+            read_body_with_timeout(summary_resp, BODY_TIMEOUT, max_body_size).await?;
+        let summary: WikiSummary = serde_json::from_slice(&summary_body).map_err(|e| {
             FetchError::FetcherError(format!("Failed to parse Wikipedia data: {}", e))
         })?;
 
@@ -171,8 +177,14 @@ impl Fetcher for WikipediaFetcher {
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                let html = resp.text().await.ok();
-                html.map(|h| crate::convert::html_to_markdown(&h))
+                let (html_body, truncated) =
+                    read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+                let html = String::from_utf8_lossy(&html_body);
+                let mut markdown = crate::convert::html_to_markdown(&html);
+                if truncated {
+                    markdown.push_str(TRUNCATION_MESSAGE);
+                }
+                Some(markdown)
             }
             _ => None,
         };
