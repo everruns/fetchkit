@@ -320,15 +320,12 @@ fn strip_html_tags(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut in_tag = false;
 
-    for c in html.chars() {
+    for (idx, c) in html.char_indices() {
         match c {
             '<' => {
                 in_tag = true;
                 // Check for <p> tags -> newlines
-                let rest: String = html[html.len() - (html.len() - result.len())..]
-                    .chars()
-                    .take(3)
-                    .collect();
+                let rest: String = html[idx + c.len_utf8()..].chars().take(3).collect();
                 if rest.starts_with("p>") || rest.starts_with("br") {
                     result.push('\n');
                 }
@@ -393,6 +390,7 @@ mod tests {
     fn test_strip_html_tags() {
         assert_eq!(strip_html_tags("Hello <b>world</b>"), "Hello world");
         assert_eq!(strip_html_tags("a &amp; b"), "a & b");
+        assert_eq!(strip_html_tags("ab<é>xy<"), "abxy");
     }
 
     #[test]
