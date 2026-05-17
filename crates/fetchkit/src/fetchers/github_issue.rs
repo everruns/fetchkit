@@ -19,6 +19,7 @@ const API_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Max comments to fetch (first page)
 const MAX_COMMENTS: usize = 100;
+const DEFAULT_MAX_BODY_SIZE: usize = 5 * 1024 * 1024; // 5MB
 
 /// GitHub issue/PR fetcher
 ///
@@ -291,7 +292,12 @@ impl Fetcher for GitHubIssueFetcher {
             "github_issue"
         };
 
-        let content = format_issue_response(&issue, pr_data.as_ref(), comments.as_deref());
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+        let (content, truncated) = truncate_to_max_bytes(
+            format_issue_response(&issue, pr_data.as_ref(), comments.as_deref()),
+            max_body_size,
+        );
+        let size = u64::try_from(content.len()).unwrap_or(u64::MAX);
 
         Ok(FetchResponse {
             url: request.url.clone(),
@@ -299,9 +305,28 @@ impl Fetcher for GitHubIssueFetcher {
             content_type: Some("text/markdown".to_string()),
             format: Some(format.to_string()),
             content: Some(content),
+            size: Some(size),
+            truncated: Some(truncated),
             ..Default::default()
         })
     }
+}
+
+fn truncate_to_max_bytes(mut s: String, max_bytes: usize) -> (String, bool) {
+    if s.len() <= max_bytes {
+        return (s, false);
+    }
+
+    if max_bytes == 0 {
+        return (String::new(), true);
+    }
+
+    let mut end = max_bytes.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+    (s, true)
 }
 
 fn format_issue_response(
@@ -566,5 +591,16 @@ mod tests {
         assert!(output.contains("+50 -10 across 3 files"));
         assert!(output.contains("**Merged:**"));
         assert!(output.contains("**Review comments:** 2"));
+    }
+
+    #[test]
+    fn test_truncate_to_max_bytes() {
+        let (s, truncated) = truncate_to_max_bytes("hello world".to_string(), 5);
+        assert_eq!(s, "hello");
+        assert!(truncated);
+
+        let (s, truncated) = truncate_to_max_bytes("éclair".to_string(), 1);
+        assert_eq!(s, "");
+        assert!(truncated);
     }
 }

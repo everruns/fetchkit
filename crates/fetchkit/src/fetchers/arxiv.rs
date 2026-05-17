@@ -5,6 +5,7 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
@@ -45,16 +46,24 @@ impl ArXivFetcher {
                 let id = segments[1..].join("/");
                 // Strip .pdf suffix if present
                 let id = id.strip_suffix(".pdf").unwrap_or(&id);
-                if id.is_empty() {
-                    None
-                } else {
+                if Self::is_valid_paper_id(id) {
                     Some(id.to_string())
+                } else {
+                    None
                 }
             }
             _ => None,
         }
     }
 
+    fn is_valid_paper_id(id: &str) -> bool {
+        !id.is_empty()
+            && !id.starts_with('/')
+            && !id.ends_with('/')
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/'))
+    }
     /// Returns true if this is a /pdf/ URL
     fn is_pdf_url(url: &Url) -> bool {
         url.path_segments()
@@ -107,7 +116,7 @@ impl Fetcher for ArXivFetcher {
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
 
         // Fetch via arXiv API (returns Atom XML)
-        let api_url = format!("http://export.arxiv.org/api/query?id_list={}", paper_id);
+        let api_url = format!("https://export.arxiv.org/api/query?id_list={}", paper_id);
 
         let response = client
             .get(&api_url)
@@ -125,10 +134,10 @@ impl Fetcher for ArXivFetcher {
             });
         }
 
-        let xml = response
-            .text()
-            .await
-            .map_err(|e| FetchError::RequestError(e.to_string()))?;
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+        let (xml_bytes, _truncated) =
+            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+        let xml = String::from_utf8_lossy(&xml_bytes).into_owned();
 
         let is_pdf = Self::is_pdf_url(&url);
         let content = parse_arxiv_response(&xml, &paper_id, is_pdf);
@@ -342,6 +351,12 @@ mod tests {
     #[test]
     fn test_rejects_non_arxiv() {
         let url = Url::parse("https://example.org/abs/2301.07041").unwrap();
+        assert_eq!(ArXivFetcher::parse_url(&url), None);
+    }
+
+    #[test]
+    fn test_rejects_injected_paper_id() {
+        let url = Url::parse("https://arxiv.org/abs/&search_query=all:electron").unwrap();
         assert_eq!(ArXivFetcher::parse_url(&url), None);
     }
 
