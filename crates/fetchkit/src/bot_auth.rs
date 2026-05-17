@@ -22,7 +22,6 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -161,8 +160,7 @@ fn jwk_thumbprint_ed25519(key: &VerifyingKey) -> String {
 
 /// Generate a cryptographically random nonce (32 bytes, base64url-encoded).
 fn generate_nonce() -> String {
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    let bytes: [u8; 32] = rand::random();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

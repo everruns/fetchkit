@@ -8,13 +8,23 @@ Define recurring maintenance tasks to keep the fetchkit repository healthy, up-t
 
 ### 1. Dependency Updates
 
-Update all workspace and crate-level dependencies to their latest compatible versions.
+Update all workspace and crate-level dependencies to their latest versions, including major
+(SemVer-incompatible) bumps. Maintenance must not stop at `cargo update`; it must also
+bump the manifest constraints in `Cargo.toml` for available major versions and adapt the
+code where the API has changed.
 
 1. **Check outdated deps** - Run `cargo outdated -R` (or equivalent) to list stale dependencies
 2. **Update minor/patch** - Apply non-breaking updates via `cargo update`
-3. **Evaluate major bumps** - Major version upgrades are allowed; review changelogs for breaking changes and adapt code accordingly
+3. **Evaluate and apply major bumps** - Run `cargo upgrade --incompatible --dry-run`
+   (from `cargo-edit`) to enumerate available major upgrades. Bump the manifest
+   constraints in `Cargo.toml` for each one, read the upstream changelog/migration
+   notes, and adapt the code (imports, renamed functions, removed APIs). A
+   maintenance pass that ships only `cargo update` is incomplete — call out any
+   major bump that is intentionally deferred, with the reason, in the PR body and
+   `CHANGELOG.md`.
 4. **Verify lockfile** - Ensure `Cargo.lock` reflects the updated versions
-5. **Build & test** - `cargo build --workspace && cargo test --workspace` must pass after updates
+5. **Build & test** - `cargo build --workspace && cargo test --workspace` must pass
+   after updates, with and without optional features (e.g. `--features bot-auth`)
 6. **Audit advisories** - Run `cargo audit` (if available) to check for known vulnerabilities
 
 ### 2. Documentation Quality (docs.rs / rustdoc)

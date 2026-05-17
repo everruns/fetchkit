@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - chore(deps): refresh `Cargo.lock` to latest compatible versions (tokio 1.52, reqwest 0.13.3, rustls 0.23.40, tower-http 0.6.10, rustls-platform-verifier 0.7, pyo3 0.28.3, and others)
+- chore(deps): bump `sha2` 0.10 → 0.11 and `rand` 0.8 → 0.10 for the optional `bot-auth` feature; switched the nonce generator to `rand::random()` since `rand::thread_rng()` was removed in rand 0.10
 - docs: document conditional-request, content-focus, ETag, metadata, word count, redirect chain, and paywall fields in spec and README
+- docs(specs): require deep maintenance to apply available major (SemVer-incompatible) dep bumps, not just `cargo update`
 
 ### Maintenance
 
