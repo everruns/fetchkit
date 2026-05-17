@@ -95,7 +95,12 @@ cargo build --workspace --exclude fetchkit-python --release
 - Verify the extracted version matches root `Cargo.toml`
 - Extract release notes for that version from `CHANGELOG.md`
 - Create a GitHub Release tagged `vX.Y.Z`
-- Rely on the published-release event to start the publish workflow
+- Start the publish workflow after creating the release. GitHub does not fire
+  the `release.published` event for releases created via the default
+  `GITHUB_TOKEN`, so release.yml dispatches publish.yml explicitly via
+  `gh workflow run publish.yml` (requires `actions: write` permission). The
+  publish workflow's `release.published` trigger still covers releases created
+  through the GitHub UI or by a PAT-authenticated workflow.
 
 #### Publish Workflow
 

@@ -130,10 +130,10 @@ pub fn html_to_markdown(html: &str) -> String {
                         output.push_str("\n\n");
                     }
                 }
-                "p" | "div" | "section" | "article" | "main" | "header" | "footer" => {
-                    if is_closing {
-                        output.push_str("\n\n");
-                    }
+                "p" | "div" | "section" | "article" | "main" | "header" | "footer"
+                    if is_closing =>
+                {
+                    output.push_str("\n\n");
                 }
                 "br" => {
                     output.push('\n');
@@ -161,23 +161,21 @@ pub fn html_to_markdown(html: &str) -> String {
                         list_stack.push((true, 0));
                     }
                 }
-                "li" => {
-                    if !is_closing {
-                        output.push('\n');
-                        let depth = list_stack.len().saturating_sub(1);
-                        for _ in 0..depth {
-                            output.push_str("  ");
-                        }
-                        if let Some((is_ordered, counter)) = list_stack.last_mut() {
-                            if *is_ordered {
-                                *counter += 1;
-                                output.push_str(&format!("{}. ", *counter));
-                            } else {
-                                output.push_str("- ");
-                            }
+                "li" if !is_closing => {
+                    output.push('\n');
+                    let depth = list_stack.len().saturating_sub(1);
+                    for _ in 0..depth {
+                        output.push_str("  ");
+                    }
+                    if let Some((is_ordered, counter)) = list_stack.last_mut() {
+                        if *is_ordered {
+                            *counter += 1;
+                            output.push_str(&format!("{}. ", *counter));
                         } else {
                             output.push_str("- ");
                         }
+                    } else {
+                        output.push_str("- ");
                     }
                 }
                 "strong" | "b" => {
@@ -195,10 +193,8 @@ pub fn html_to_markdown(html: &str) -> String {
                         in_pre = false;
                     }
                 }
-                "code" => {
-                    if !in_pre {
-                        output.push('`');
-                    }
+                "code" if !in_pre => {
+                    output.push('`');
                 }
                 "blockquote" => {
                     if !is_closing {
@@ -227,12 +223,10 @@ pub fn html_to_markdown(html: &str) -> String {
                         }
                     }
                 }
-                "img" => {
-                    if !is_closing {
-                        let alt = extract_attribute(&tag, "alt").unwrap_or_default();
-                        if let Some(src) = extract_attribute(&tag, "src") {
-                            output.push_str(&format!("![{}]({})", alt, src));
-                        }
+                "img" if !is_closing => {
+                    let alt = extract_attribute(&tag, "alt").unwrap_or_default();
+                    if let Some(src) = extract_attribute(&tag, "src") {
+                        output.push_str(&format!("![{}]({})", alt, src));
                     }
                 }
                 // Table handling
@@ -282,10 +276,8 @@ pub fn html_to_markdown(html: &str) -> String {
                     }
                 }
                 // Definition lists
-                "dl" => {
-                    if is_closing {
-                        output.push_str("\n\n");
-                    }
+                "dl" if is_closing => {
+                    output.push_str("\n\n");
                 }
                 "dt" => {
                     if !is_closing {
@@ -662,12 +654,10 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
             }
 
             match tag_name {
-                "html" => {
-                    if !is_closing {
-                        if let Some(lang) = extract_attribute(&tag, "lang") {
-                            if meta.language.is_none() && !lang.is_empty() {
-                                meta.language = Some(lang);
-                            }
+                "html" if !is_closing => {
+                    if let Some(lang) = extract_attribute(&tag, "lang") {
+                        if meta.language.is_none() && !lang.is_empty() {
+                            meta.language = Some(lang);
                         }
                     }
                 }
@@ -683,30 +673,24 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
                         }
                     }
                 }
-                "meta" => {
-                    if !is_closing {
-                        extract_meta_tag(&tag, &mut meta);
-                    }
+                "meta" if !is_closing => {
+                    extract_meta_tag(&tag, &mut meta);
                 }
-                "link" => {
-                    if !is_closing {
-                        if let Some(rel) = extract_attribute(&tag, "rel") {
-                            if rel == "canonical" {
-                                if let Some(href) = extract_attribute(&tag, "href") {
-                                    if meta.canonical_url.is_none() && !href.is_empty() {
-                                        meta.canonical_url = Some(href);
-                                    }
+                "link" if !is_closing => {
+                    if let Some(rel) = extract_attribute(&tag, "rel") {
+                        if rel == "canonical" {
+                            if let Some(href) = extract_attribute(&tag, "href") {
+                                if meta.canonical_url.is_none() && !href.is_empty() {
+                                    meta.canonical_url = Some(href);
                                 }
                             }
                         }
                     }
                 }
-                "time" => {
-                    if !is_closing {
-                        if let Some(datetime) = extract_attribute(&tag, "datetime") {
-                            if meta.published_date.is_none() && !datetime.is_empty() {
-                                meta.published_date = Some(datetime);
-                            }
+                "time" if !is_closing => {
+                    if let Some(datetime) = extract_attribute(&tag, "datetime") {
+                        if meta.published_date.is_none() && !datetime.is_empty() {
+                            meta.published_date = Some(datetime);
                         }
                     }
                 }
@@ -839,15 +823,11 @@ fn extract_meta_tag(tag: &str, meta: &mut PageMetadata) {
         // Check name attribute
         if let Some(name) = extract_attribute(tag, "name") {
             match name.to_lowercase().as_str() {
-                "description" => {
-                    if meta.description.is_none() {
-                        meta.description = Some(content.clone());
-                    }
+                "description" if meta.description.is_none() => {
+                    meta.description = Some(content.clone());
                 }
-                "author" => {
-                    if meta.author.is_none() {
-                        meta.author = Some(content.clone());
-                    }
+                "author" if meta.author.is_none() => {
+                    meta.author = Some(content.clone());
                 }
                 _ => {}
             }
@@ -863,15 +843,11 @@ fn extract_meta_tag(tag: &str, meta: &mut PageMetadata) {
                     // og:description overrides <meta description>
                     meta.description = Some(content.clone());
                 }
-                "article:published_time" => {
-                    if meta.published_date.is_none() {
-                        meta.published_date = Some(content.clone());
-                    }
+                "article:published_time" if meta.published_date.is_none() => {
+                    meta.published_date = Some(content.clone());
                 }
-                "article:modified_time" => {
-                    if meta.modified_date.is_none() {
-                        meta.modified_date = Some(content);
-                    }
+                "article:modified_time" if meta.modified_date.is_none() => {
+                    meta.modified_date = Some(content);
                 }
                 _ => {}
             }
