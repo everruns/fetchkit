@@ -414,9 +414,13 @@ pub fn html_to_text(html: &str) -> String {
 /// Extract attribute value from tag
 fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
     let pattern = format!("{}=", attr);
-    let tag_lower = tag.to_lowercase();
+    let start = tag.char_indices().find_map(|(idx, _)| {
+        tag.get(idx..idx + pattern.len())
+            .filter(|candidate| candidate.eq_ignore_ascii_case(&pattern))
+            .map(|_| idx)
+    });
 
-    if let Some(start) = tag_lower.find(&pattern) {
+    if let Some(start) = start {
         let rest = &tag[start + pattern.len()..];
         let rest = rest.trim_start();
 
@@ -1253,6 +1257,10 @@ mod tests {
         assert_eq!(
             extract_attribute("div class=test", "class"),
             Some("test".to_string())
+        );
+        assert_eq!(
+            extract_attribute("a title=\"İİ\" href=x", "href"),
+            Some("x".to_string())
         );
     }
 
