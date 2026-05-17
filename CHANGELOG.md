@@ -7,16 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.2.1] - 2026-05-17
 
-- chore(deps): refresh `Cargo.lock` to latest compatible versions (tokio 1.52, reqwest 0.13.3, rustls 0.23.40, tower-http 0.6.10, rustls-platform-verifier 0.7, pyo3 0.28.3, and others)
-- chore(deps): bump `sha2` 0.10 → 0.11 and `rand` 0.8 → 0.10 for the optional `bot-auth` feature; switched the nonce generator to `rand::random()` since `rand::thread_rng()` was removed in rand 0.10
-- docs: document conditional-request, content-focus, ETag, metadata, word count, redirect chain, and paywall fields in spec and README
-- docs(specs): require deep maintenance to apply available major (SemVer-incompatible) dep bumps, not just `cargo update`
+### Highlights
 
-### Maintenance
+- Hardened fetcher outbound policies and body-size limits across RSS, docs sites, llms.txt, file saver, and Python bindings
+- Capped concurrency for `batch_fetch` to prevent runaway parallelism
+- Pinned publish-workflow actions and bound publish to release tag for safer CI releases
+- Refreshed dependencies with major bumps for `sha2` 0.11 and `rand` 0.10 (bot-auth)
+- Enhanced fetchers: Wikipedia redirect resolution, YouTube transcript extraction, ArXiv PDF indication, HN timestamp display, RSS content-type detection
 
-- chore: re-verify threat model (`specs/threat-model.md` Last verified bumped to 2026-05-17)
+### What's Changed
+
+* fix(client): cap batch fetch concurrency ([#112](https://github.com/everruns/fetchkit/pull/112))
+* fix(ci): bind publish workflow to release tag ([#111](https://github.com/everruns/fetchkit/pull/111))
+* fix(fetchers): harden youtube transcript handling ([#110](https://github.com/everruns/fetchkit/pull/110))
+* fix(fetchers): bound HN timestamp formatting ([#109](https://github.com/everruns/fetchkit/pull/109))
+* fix(ci): pin publish workflow actions in secret-bearing jobs ([#108](https://github.com/everruns/fetchkit/pull/108))
+* fix(fetchers): enforce RSS body size and timeout limits ([#107](https://github.com/everruns/fetchkit/pull/107))
+* chore(deps): apply available major bumps (sha2 0.11, rand 0.10) and tighten maintenance spec ([#106](https://github.com/everruns/fetchkit/pull/106))
+* chore: periodic maintenance — deps refresh and spec/doc alignment ([#105](https://github.com/everruns/fetchkit/pull/105))
+* fix(fetchers): surface malformed body errors ([#104](https://github.com/everruns/fetchkit/pull/104))
+* fix(file-saver): block symlink escapes on save ([#103](https://github.com/everruns/fetchkit/pull/103))
+* fix(python): preserve hardened redirect policy ([#102](https://github.com/everruns/fetchkit/pull/102))
+* fix(fetchers): cap direct llms bodies ([#101](https://github.com/everruns/fetchkit/pull/101))
+* fix(fetchers): enforce docs site outbound policy ([#100](https://github.com/everruns/fetchkit/pull/100))
+* fix(fetchers): enforce rss feed outbound policy ([#99](https://github.com/everruns/fetchkit/pull/99))
+* docs(readme): list built-in fetchers ([#92](https://github.com/everruns/fetchkit/pull/92))
+* feat(fetchers): enhance RSSFeedFetcher with content-type detection and html_to_markdown ([#91](https://github.com/everruns/fetchkit/pull/91))
+* feat(fetchers): enhance HackerNewsFetcher with timestamp display ([#90](https://github.com/everruns/fetchkit/pull/90))
+* feat(fetchers): enhance ArXivFetcher with PDF binary indication ([#89](https://github.com/everruns/fetchkit/pull/89))
+* feat(fetchers): enhance YouTubeFetcher with transcript extraction ([#88](https://github.com/everruns/fetchkit/pull/88))
+* feat(fetchers): enhance WikipediaFetcher with redirect resolution ([#87](https://github.com/everruns/fetchkit/pull/87))
+* fix(ci): trigger publish workflow explicitly from release ([#86](https://github.com/everruns/fetchkit/pull/86))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.2.0...v0.2.1
 
 ## [0.2.0] - 2026-03-27
 
@@ -150,7 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/everruns/fetchkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/everruns/fetchkit/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/everruns/fetchkit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/everruns/fetchkit/compare/v0.1.1...v0.1.2
