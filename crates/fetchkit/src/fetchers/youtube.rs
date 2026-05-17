@@ -102,7 +102,7 @@ impl Fetcher for YouTubeFetcher {
         let mut client_builder = reqwest::Client::builder()
             .connect_timeout(API_TIMEOUT)
             .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(3));
+            .redirect(reqwest::redirect::Policy::none());
 
         if !options.respect_proxy_env {
             client_builder = client_builder.no_proxy();
@@ -120,6 +120,7 @@ impl Fetcher for YouTubeFetcher {
         // Fetch oEmbed metadata
         // The canonical URL only contains safe ASCII chars, so it can be passed directly
         let mut oembed_url = Url::parse("https://www.youtube.com/oembed").unwrap();
+        options.validate_url(&oembed_url)?;
         oembed_url
             .query_pairs_mut()
             .append_pair("url", &canonical_url)
@@ -144,8 +145,7 @@ impl Fetcher for YouTubeFetcher {
         let author_url = oembed.as_ref().and_then(|o| o.author_url.clone());
 
         // Attempt transcript extraction via timedtext API
-        let transcript =
-            fetch_transcript(&client, &ua_header, &video_id, options.max_body_size).await;
+        let transcript = fetch_transcript(&client, &ua_header, &video_id, options).await;
 
         let content = format_youtube_response(
             &title,
@@ -173,7 +173,7 @@ async fn fetch_transcript(
     client: &reqwest::Client,
     ua: &HeaderValue,
     video_id: &str,
-    max_body_size: Option<usize>,
+    options: &FetchOptions,
 ) -> Option<String> {
     // Try the legacy timedtext API (auto-generated English captions)
     let timedtext_url = format!(
@@ -181,8 +181,11 @@ async fn fetch_transcript(
         video_id
     );
 
+    let timedtext_url = Url::parse(&timedtext_url).ok()?;
+    options.validate_url(&timedtext_url).ok()?;
+
     let resp = client
-        .get(&timedtext_url)
+        .get(timedtext_url.as_str())
         .header(USER_AGENT, ua.clone())
         .send()
         .await
@@ -193,7 +196,7 @@ async fn fetch_transcript(
     }
 
     let xml = resp.text().await.ok()?;
-    if let Some(max_body_size) = max_body_size {
+    if let Some(max_body_size) = options.max_body_size {
         if xml.len() > max_body_size {
             return None;
         }
@@ -473,6 +476,19 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="utf-8"?><transcript></transcript>"#;
         let segments = parse_timedtext_xml(xml);
         assert!(segments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_blocked_secondary_host() {
+        let fetcher = YouTubeFetcher::new();
+        let request = FetchRequest::new("https://youtu.be/dQw4w9WgXcQ");
+        let options = FetchOptions {
+            blocked_hosts: vec![".youtube.com".to_string()],
+            ..Default::default()
+        };
+
+        let result = fetcher.fetch(&request, &options).await;
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
     }
 
     #[test]
