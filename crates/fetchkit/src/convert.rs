@@ -6,7 +6,8 @@ use crate::types::{PageLink, PageMetadata};
 pub fn is_markdown_content_type(content_type: &Option<String>) -> bool {
     content_type
         .as_deref()
-        .map(|ct| ct.to_lowercase().contains("text/markdown"))
+        .and_then(|ct| ct.split(';').next())
+        .map(|media_type| media_type.trim().eq_ignore_ascii_case("text/markdown"))
         .unwrap_or(false)
 }
 
@@ -14,7 +15,8 @@ pub fn is_markdown_content_type(content_type: &Option<String>) -> bool {
 pub fn is_plain_text_content_type(content_type: &Option<String>) -> bool {
     content_type
         .as_deref()
-        .map(|ct| ct.to_lowercase().contains("text/plain"))
+        .and_then(|ct| ct.split(';').next())
+        .map(|media_type| media_type.trim().eq_ignore_ascii_case("text/plain"))
         .unwrap_or(false)
 }
 
@@ -1225,6 +1227,9 @@ mod tests {
             "text/markdown; charset=utf-8".to_string()
         )));
         assert!(is_markdown_content_type(&Some("Text/Markdown".to_string())));
+        assert!(!is_markdown_content_type(&Some(
+            "text/html; profile=\"text/markdown\"".to_string()
+        )));
         assert!(!is_markdown_content_type(&Some("text/html".to_string())));
         assert!(!is_markdown_content_type(&Some("text/plain".to_string())));
         assert!(!is_markdown_content_type(&None));
@@ -1237,6 +1242,9 @@ mod tests {
             "text/plain; charset=utf-8".to_string()
         )));
         assert!(is_plain_text_content_type(&Some("Text/Plain".to_string())));
+        assert!(!is_plain_text_content_type(&Some(
+            "text/html; profile=\"text/plain\"".to_string()
+        )));
         assert!(!is_plain_text_content_type(&Some("text/html".to_string())));
         assert!(!is_plain_text_content_type(&Some(
             "text/markdown".to_string()
