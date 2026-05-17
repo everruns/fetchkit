@@ -5,6 +5,7 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
@@ -192,13 +193,23 @@ impl Fetcher for PackageRegistryFetcher {
 
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
         let content = match registry {
             Registry::PyPI { name, version } => {
-                fetch_pypi(&client, &ua_header, &name, version.as_deref()).await?
+                fetch_pypi(
+                    &client,
+                    &ua_header,
+                    &name,
+                    version.as_deref(),
+                    max_body_size,
+                )
+                .await?
             }
-            Registry::CratesIo { name } => fetch_crates_io(&client, &ua_header, &name).await?,
-            Registry::Npm { name } => fetch_npm(&client, &ua_header, &name).await?,
+            Registry::CratesIo { name } => {
+                fetch_crates_io(&client, &ua_header, &name, max_body_size).await?
+            }
+            Registry::Npm { name } => fetch_npm(&client, &ua_header, &name, max_body_size).await?,
         };
 
         Ok(FetchResponse {
@@ -217,6 +228,7 @@ async fn fetch_pypi(
     ua: &HeaderValue,
     name: &str,
     version: Option<&str>,
+    max_body_size: usize,
 ) -> Result<String, FetchError> {
     let api_url = match version {
         Some(v) => format!("https://pypi.org/pypi/{}/{}/json", name, v),
@@ -237,9 +249,8 @@ async fn fetch_pypi(
         )));
     }
 
-    let data: PyPIResponse = resp
-        .json()
-        .await
+    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    let data: PyPIResponse = serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse PyPI data: {}", e)))?;
 
     let info = &data.info;
@@ -292,6 +303,7 @@ async fn fetch_crates_io(
     client: &reqwest::Client,
     ua: &HeaderValue,
     name: &str,
+    max_body_size: usize,
 ) -> Result<String, FetchError> {
     let api_url = format!("https://crates.io/api/v1/crates/{}", name);
 
@@ -310,9 +322,8 @@ async fn fetch_crates_io(
         )));
     }
 
-    let data: CratesIoResponse = resp
-        .json()
-        .await
+    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    let data: CratesIoResponse = serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse crates.io data: {}", e)))?;
 
     let krate = &data.krate;
@@ -353,6 +364,7 @@ async fn fetch_npm(
     client: &reqwest::Client,
     ua: &HeaderValue,
     name: &str,
+    max_body_size: usize,
 ) -> Result<String, FetchError> {
     let api_url = format!("https://registry.npmjs.org/{}", name);
 
@@ -371,9 +383,8 @@ async fn fetch_npm(
         )));
     }
 
-    let data: NpmResponse = resp
-        .json()
-        .await
+    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    let data: NpmResponse = serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse npm data: {}", e)))?;
 
     let mut out = String::new();
