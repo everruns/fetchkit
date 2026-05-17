@@ -159,6 +159,8 @@ pub async fn fetch_with_options(
 
 /// Default concurrency limit for batch fetching.
 const DEFAULT_BATCH_CONCURRENCY: usize = 5;
+/// Maximum allowed concurrency for batch fetching to prevent resource exhaustion.
+const MAX_BATCH_CONCURRENCY: usize = 20;
 
 /// Fetch multiple URLs concurrently.
 ///
@@ -210,7 +212,9 @@ pub async fn batch_fetch_with_options(
     use futures::stream::{self, StreamExt};
     use std::sync::Arc;
 
-    let concurrency = concurrency.unwrap_or(DEFAULT_BATCH_CONCURRENCY).max(1);
+    let concurrency = concurrency
+        .unwrap_or(DEFAULT_BATCH_CONCURRENCY)
+        .clamp(1, MAX_BATCH_CONCURRENCY);
     let num_requests = requests.len();
     let options = Arc::new(options);
 
@@ -410,6 +414,20 @@ mod tests {
         ];
 
         let results = batch_fetch(requests, Some(1)).await;
+        assert_eq!(results.len(), 2);
+        assert!(results[0].is_err());
+        assert!(results[1].is_err());
+    }
+
+    #[tokio::test]
+    async fn test_batch_fetch_caps_caller_concurrency() {
+        // Caller-provided concurrency above the cap should still work safely.
+        let requests = vec![
+            FetchRequest::new(""), // Will fail
+            FetchRequest::new(""), // Will fail
+        ];
+
+        let results = batch_fetch(requests, Some(usize::MAX)).await;
         assert_eq!(results.len(), 2);
         assert!(results[0].is_err());
         assert!(results[1].is_err());
