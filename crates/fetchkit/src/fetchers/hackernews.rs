@@ -325,10 +325,7 @@ fn strip_html_tags(html: &str) -> String {
             '<' => {
                 in_tag = true;
                 // Check for <p> tags -> newlines
-                let rest: String = html[idx + c.len_utf8()..]
-                    .chars()
-                    .take(3)
-                    .collect();
+                let rest: String = html[idx + c.len_utf8()..].chars().take(3).collect();
                 if rest.starts_with("p>") || rest.starts_with("br") {
                     result.push('\n');
                 }
