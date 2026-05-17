@@ -67,6 +67,9 @@ jobs:
           prerelease: false
 
       - name: Trigger publish workflow
-        run: gh workflow run publish.yml
+        run: |
+          gh workflow run publish.yml \
+            --ref "${{ steps.version.outputs.tag }}" \
+            -f release_tag="${{ steps.version.outputs.tag }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

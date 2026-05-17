@@ -15,6 +15,7 @@ use std::time::Duration;
 use url::Url;
 
 const API_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_TRANSCRIPT_CHARS: usize = 15_000;
 
 /// YouTube video fetcher
 ///
@@ -143,7 +144,8 @@ impl Fetcher for YouTubeFetcher {
         let author_url = oembed.as_ref().and_then(|o| o.author_url.clone());
 
         // Attempt transcript extraction via timedtext API
-        let transcript = fetch_transcript(&client, &ua_header, &video_id).await;
+        let transcript =
+            fetch_transcript(&client, &ua_header, &video_id, options.max_body_size).await;
 
         let content = format_youtube_response(
             &title,
@@ -171,6 +173,7 @@ async fn fetch_transcript(
     client: &reqwest::Client,
     ua: &HeaderValue,
     video_id: &str,
+    max_body_size: Option<usize>,
 ) -> Option<String> {
     // Try the legacy timedtext API (auto-generated English captions)
     let timedtext_url = format!(
@@ -190,6 +193,11 @@ async fn fetch_transcript(
     }
 
     let xml = resp.text().await.ok()?;
+    if let Some(max_body_size) = max_body_size {
+        if xml.len() > max_body_size {
+            return None;
+        }
+    }
     if xml.is_empty() || !xml.contains("<text") {
         return None;
     }
@@ -280,8 +288,9 @@ fn format_youtube_response(
     if let Some(transcript) = transcript {
         out.push_str("\n## Transcript\n\n");
         // Truncate very long transcripts
-        if transcript.len() > 15000 {
-            out.push_str(&transcript[..15000]);
+        if transcript.len() > MAX_TRANSCRIPT_CHARS {
+            let truncated = safe_truncate_utf8(transcript, MAX_TRANSCRIPT_CHARS);
+            out.push_str(truncated);
             out.push_str("\n\n*[Transcript truncated]*\n");
         } else {
             out.push_str(transcript);
@@ -292,6 +301,24 @@ fn format_youtube_response(
     }
 
     out
+}
+
+fn safe_truncate_utf8(input: &str, max_bytes: usize) -> &str {
+    if input.len() <= max_bytes {
+        return input;
+    }
+
+    if input.is_char_boundary(max_bytes) {
+        return &input[..max_bytes];
+    }
+
+    let idx = input
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i < max_bytes)
+        .last()
+        .unwrap_or(0);
+    &input[..idx]
 }
 
 #[cfg(test)]
@@ -453,5 +480,13 @@ mod tests {
         assert_eq!(decode_xml_entities("a &amp; b"), "a & b");
         assert_eq!(decode_xml_entities("&lt;tag&gt;"), "<tag>");
         assert_eq!(decode_xml_entities("it&#39;s"), "it's");
+    }
+
+    #[test]
+    fn test_safe_truncate_utf8_multibyte_boundary() {
+        let input = format!("{}érest", "a".repeat(14_999));
+        let truncated = safe_truncate_utf8(&input, 15_000);
+        assert_eq!(truncated.len(), 14_999);
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 }
