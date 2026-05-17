@@ -220,7 +220,6 @@ impl Fetcher for DefaultFetcher {
 
         let headers = build_headers(options, accept, request);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
-        let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
 
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
@@ -401,7 +400,6 @@ impl Fetcher for DefaultFetcher {
 
         let headers = build_headers(options, "*/*", request);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
-        let headers = apply_bot_auth_if_enabled(headers, options, &parsed_url);
 
         let reqwest_method = match method {
             HttpMethod::Get => reqwest::Method::GET,
@@ -479,7 +477,8 @@ pub(crate) async fn send_request_following_redirects(
     let mut redirect_chain = Vec::new();
 
     for redirect_count in 0..=MAX_REDIRECTS {
-        let client = build_client_for_url(&current_url, headers.clone(), options, timeout)?;
+        let request_headers = apply_bot_auth_if_enabled(headers.clone(), options, &current_url);
+        let client = build_client_for_url(&current_url, request_headers, options, timeout)?;
         let response = client
             .request(method.clone(), current_url.clone())
             .send()

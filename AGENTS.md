@@ -174,7 +174,7 @@ doppler run -- bash -lc 'GH_TOKEN="$GITHUB_TOKEN" gh auth status'
 Quickcheck:
 
 ```bash
-doppler run -- env | rg 'GITHUB_TOKEN'
+doppler run -- bash -lc 'test -n "${GITHUB_TOKEN:-}" && echo GITHUB_TOKEN present'
 doppler run -- bash -lc 'GH_TOKEN="$GITHUB_TOKEN" gh auth status'
 ```
 
