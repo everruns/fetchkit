@@ -746,7 +746,10 @@ fn build_output_schema() -> Value {
             "method": {"type": "string", "enum": ["HEAD"]},
             "error": {"type": "string"},
             "saved_path": {"type": "string"},
-            "bytes_written": {"type": "integer", "minimum": 0}
+            "bytes_written": {"type": "integer", "minimum": 0},
+            "word_count": {"type": "integer", "minimum": 0},
+            "redirect_chain": {"type": "array", "items": {"type": "string"}},
+            "is_paywall": {"type": "boolean"}
         },
         "required": ["url", "status_code"],
         "additionalProperties": false
@@ -1164,6 +1167,9 @@ mod tests {
         assert_eq!(input_schema["properties"]["method"]["default"], "GET");
         assert!(output_schema["properties"]["url"].is_object());
         assert!(output_schema["properties"]["status_code"].is_object());
+        assert!(output_schema["properties"]["word_count"].is_object());
+        assert!(output_schema["properties"]["redirect_chain"].is_object());
+        assert!(output_schema["properties"]["is_paywall"].is_object());
     }
 
     #[test]
