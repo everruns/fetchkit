@@ -5,7 +5,10 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
-use crate::fetchers::default::{apply_bot_auth_if_enabled, send_request_following_redirects};
+use crate::fetchers::default::{
+    apply_bot_auth_if_enabled, read_body_with_timeout, send_request_following_redirects,
+    BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
@@ -129,10 +132,10 @@ impl Fetcher for RSSFeedFetcher {
             .unwrap_or("")
             .to_string();
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| FetchError::RequestError(e.to_string()))?;
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+        let (body, _truncated) =
+            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+        let body = String::from_utf8_lossy(&body).into_owned();
 
         // Detect feed type: by XML structure first, then content-type
         let is_feed_by_ct = Self::is_feed_content_type(&content_type);
