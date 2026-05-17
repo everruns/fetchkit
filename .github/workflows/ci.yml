@@ -101,7 +101,7 @@ jobs:
         run: |
           python -m venv .venv
           . .venv/bin/activate
-          pip install maturin
+          pip install "maturin==1.8.7"
       - name: Build Python bindings
         run: |
           . .venv/bin/activate
