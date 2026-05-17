@@ -176,9 +176,11 @@ impl Fetcher for GitHubCodeFetcher {
             "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
             parsed.owner, parsed.repo, parsed.path, parsed.git_ref
         );
+        let parsed_api_url = Url::parse(&api_url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        options.validate_url(&parsed_api_url)?;
 
         let response = client
-            .get(&api_url)
+            .get(parsed_api_url)
             .header(USER_AGENT, ua_header)
             .header(ACCEPT, accept_header)
             .send()
