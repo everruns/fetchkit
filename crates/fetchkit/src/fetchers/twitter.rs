@@ -9,6 +9,7 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
@@ -417,7 +418,7 @@ fn build_client(
     let mut builder = reqwest::Client::builder()
         .connect_timeout(API_TIMEOUT)
         .timeout(API_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(5));
+        .redirect(reqwest::redirect::Policy::none());
 
     if !options.respect_proxy_env {
         builder = builder.no_proxy();
@@ -539,10 +540,11 @@ impl TwitterFetcher {
             )));
         }
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| FetchError::FetcherError(format!("Failed to read response: {}", e)))?;
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+        let (body, _truncated) =
+            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+
+        let body = String::from_utf8_lossy(&body);
 
         if body.is_empty() {
             return Err(FetchError::FetcherError(
@@ -550,7 +552,7 @@ impl TwitterFetcher {
             ));
         }
 
-        serde_json::from_str(&body).map_err(|e| {
+        serde_json::from_str(body.as_ref()).map_err(|e| {
             FetchError::FetcherError(format!("Failed to parse syndication response: {}", e))
         })
     }
@@ -580,7 +582,11 @@ impl TwitterFetcher {
             )));
         }
 
-        response.json().await.map_err(|e| {
+        let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+        let (body, _truncated) =
+            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+
+        serde_json::from_slice(&body).map_err(|e| {
             FetchError::FetcherError(format!("Failed to parse oEmbed response: {}", e))
         })
     }
