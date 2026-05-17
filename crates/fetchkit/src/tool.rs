@@ -660,6 +660,7 @@ fn validate_args(tool: &Tool, args: &Value) -> Result<(), ToolError> {
             "as_markdown" => tool.enable_markdown,
             "as_text" => tool.enable_text,
             "save_to_file" => tool.enable_save_to_file,
+            "if_none_match" | "if_modified_since" => true,
             _ => false,
         };
 
@@ -722,6 +723,21 @@ fn build_input_schema(
         );
     }
 
+    properties.insert(
+        "if_none_match".to_string(),
+        json!({
+            "type": "string",
+            "description": "ETag value for conditional requests (If-None-Match header)"
+        }),
+    );
+    properties.insert(
+        "if_modified_since".to_string(),
+        json!({
+            "type": "string",
+            "description": "Last-Modified value for conditional requests (If-Modified-Since header)"
+        }),
+    );
+
     json!({
         "type": "object",
         "properties": properties,
@@ -739,6 +755,7 @@ fn build_output_schema() -> Value {
             "content_type": {"type": "string"},
             "size": {"type": "integer", "minimum": 0},
             "last_modified": {"type": "string"},
+            "etag": {"type": "string"},
             "filename": {"type": "string"},
             "format": {"type": "string", "enum": ["markdown", "text", "raw", "github_repo"]},
             "content": {"type": "string"},
@@ -1165,11 +1182,14 @@ mod tests {
         assert_eq!(input_schema["type"], "object");
         assert_eq!(input_schema["properties"]["url"]["format"], "uri");
         assert_eq!(input_schema["properties"]["method"]["default"], "GET");
+        assert!(input_schema["properties"]["if_none_match"].is_object());
+        assert!(input_schema["properties"]["if_modified_since"].is_object());
         assert!(output_schema["properties"]["url"].is_object());
         assert!(output_schema["properties"]["status_code"].is_object());
         assert!(output_schema["properties"]["word_count"].is_object());
         assert!(output_schema["properties"]["redirect_chain"].is_object());
         assert!(output_schema["properties"]["is_paywall"].is_object());
+        assert!(output_schema["properties"]["etag"].is_object());
     }
 
     #[test]
@@ -1208,6 +1228,16 @@ mod tests {
 
         assert!(matches!(&err, Err(ToolError::UserFacing(_))));
         assert!(err.unwrap_err().to_string().contains("Unknown parameter"));
+    }
+
+    #[test]
+    fn test_execution_accepts_conditional_fetch_arguments() {
+        let ok = Tool::default().execution(json!({
+            "url": "https://example.com",
+            "if_none_match": "\"abc\"",
+            "if_modified_since": "Wed, 21 Oct 2015 07:28:00 GMT"
+        }));
+        assert!(ok.is_ok());
     }
 
     #[test]
