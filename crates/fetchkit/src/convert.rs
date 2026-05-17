@@ -414,9 +414,7 @@ pub fn html_to_text(html: &str) -> String {
 /// Extract attribute value from tag
 fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
     let pattern = format!("{}=", attr);
-    let tag_lower = tag.to_lowercase();
-
-    if let Some(start) = tag_lower.find(&pattern) {
+    if let Some(start) = find_ascii_case_insensitive(tag, &pattern) {
         let rest = &tag[start + pattern.len()..];
         let rest = rest.trim_start();
 
@@ -433,6 +431,25 @@ fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
                 .find(|c: char| c.is_whitespace() || c == '>')
                 .unwrap_or(rest.len());
             return Some(rest[..end].to_string());
+        }
+    }
+    None
+}
+
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    for i in 0..=h.len() - n.len() {
+        if h[i..i + n.len()]
+            .iter()
+            .zip(n.iter())
+            .all(|(a, b)| a.to_ascii_lowercase() == *b)
+        {
+            return Some(i);
         }
     }
     None
@@ -1531,6 +1548,13 @@ mod tests {
         assert!(result.contains("Article header"));
         assert!(result.contains("Body"));
         assert!(!result.contains("Site header"));
+    }
+
+    #[test]
+    fn test_strip_boilerplate_unicode_before_role_attr_does_not_panic() {
+        let html = r#"<div İİ role="main"><p>Body</p></div>"#;
+        let result = strip_boilerplate(html);
+        assert!(result.contains("Body"));
     }
 
     #[test]
