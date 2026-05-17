@@ -203,6 +203,19 @@ tool = FetchKitTool(
 response = tool.fetch("https://example.com")
 ```
 
+## Request Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string | URL to fetch (required, `http://` or `https://`) |
+| `method` | enum? | `GET` (default) or `HEAD` |
+| `as_markdown` | bool? | Convert HTML to markdown |
+| `as_text` | bool? | Convert HTML to plain text |
+| `save_to_file` | string? | Save body to path (requires `FileSaver`) |
+| `content_focus` | string? | `"main"` strips boilerplate; `"full"`/unset returns everything |
+| `if_none_match` | string? | ETag for conditional `If-None-Match` |
+| `if_modified_since` | string? | Timestamp for conditional `If-Modified-Since` |
+
 ## Response Fields
 
 | Field | Type | Description |
@@ -212,12 +225,19 @@ response = tool.fetch("https://example.com")
 | `content_type` | string? | Content-Type header |
 | `size` | int? | Content size in bytes |
 | `last_modified` | string? | Last-Modified header |
+| `etag` | string? | ETag header (use for next conditional request) |
 | `filename` | string? | From Content-Disposition |
-| `format` | string? | "markdown", "text", "raw", or "github_repo" |
+| `format` | string? | `"markdown"`, `"text"`, `"raw"`, or a fetcher-specific format |
 | `content` | string? | Page content |
 | `truncated` | bool? | True if content was cut off |
-| `method` | string? | "HEAD" for HEAD requests |
+| `method` | string? | `"HEAD"` for HEAD requests |
 | `error` | string? | Error message if failed |
+| `saved_path` | string? | Filesystem path when `save_to_file` succeeded |
+| `bytes_written` | int? | Bytes saved to file |
+| `metadata` | object? | Structured `PageMetadata` (title, description, links, headings, …) |
+| `word_count` | int? | Word count of returned content |
+| `redirect_chain` | string[] | URLs visited during redirects (empty if none) |
+| `is_paywall` | bool? | Heuristic paywall signal (soft, not guaranteed) |
 
 ## Error Handling
 

@@ -10,7 +10,7 @@ mitigations implemented in the library.
 
 ## Verification Status
 
-Last verified: 2026-03-13
+Last verified: 2026-05-17
 
 Verified in this review:
 - `cargo test --workspace -- --nocapture`

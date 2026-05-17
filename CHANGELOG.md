@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - chore(deps): refresh `Cargo.lock` to latest compatible versions (tokio 1.52, reqwest 0.13.3, rustls 0.23.40, tower-http 0.6.10, rustls-platform-verifier 0.7, pyo3 0.28.3, and others)
+- docs: document conditional-request, content-focus, ETag, metadata, word count, redirect chain, and paywall fields in spec and README
+
+### Maintenance
+
+- chore: re-verify threat model (`specs/threat-model.md` Last verified bumped to 2026-05-17)
 
 ## [0.2.0] - 2026-03-27
 

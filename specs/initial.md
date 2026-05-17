@@ -69,6 +69,10 @@ Provide a builder to configure tool options, including:
   - `as_markdown: bool` (optional, feature-gated)
   - `as_text: bool` (optional, feature-gated)
   - `save_to_file: Option<String>` (optional, feature-gated via `enable_save_to_file`)
+  - `content_focus: Option<String>` ("main" strips boilerplate; "full" or unset returns
+    everything)
+  - `if_none_match: Option<String>` (sets `If-None-Match` for conditional requests)
+  - `if_modified_since: Option<String>` (sets `If-Modified-Since` for conditional requests)
 - `HttpMethod` enum: `Get`, `Head`
   - Case-insensitive parser accepts only GET/HEAD.
 - `FetchResponse`
@@ -77,6 +81,7 @@ Provide a builder to configure tool options, including:
   - `content_type: Option<String>`
   - `size: Option<u64>` (see Size rules)
   - `last_modified: Option<String>`
+  - `etag: Option<String>` (ETag header value; useful for conditional requests)
   - `filename: Option<String>`
   - `format: Option<String>` ("markdown" | "text" | "raw"; omitted for HEAD/binary)
   - `content: Option<String>` (omitted for HEAD/binary)
@@ -85,6 +90,20 @@ Provide a builder to configure tool options, including:
   - `error: Option<String>` (binary content only)
   - `saved_path: Option<String>` (set when save_to_file succeeds)
   - `bytes_written: Option<u64>` (set when save_to_file succeeds)
+  - `metadata: Option<PageMetadata>` (structured page metadata; populated for HTML)
+  - `word_count: Option<u64>` (word count of final content)
+  - `redirect_chain: Vec<String>` (URLs followed during redirects; empty if none)
+  - `is_paywall: Option<bool>` (heuristic paywall signal; not guaranteed)
+- `PageMetadata`
+  - `title: Option<String>` (from `<title>` or `og:title`)
+  - `description: Option<String>` (from `<meta name="description">` or `og:description`)
+  - `language: Option<String>` (from `<html lang="...">`)
+  - `canonical_url: Option<String>` (from `<link rel="canonical">`)
+  - `author: Option<String>` (from `<meta name="author">`)
+  - `published_date: Option<String>` (from `article:published_time` or `<time>`)
+  - `modified_date: Option<String>` (from `article:modified_time`)
+  - `links: Vec<PageLink>` (extracted anchors with text + href)
+  - `headings: Vec<String>` (outline like `["# Title", "## Section 1"]`)
 - `FetchError` enum
   - Missing url
   - Invalid url scheme
