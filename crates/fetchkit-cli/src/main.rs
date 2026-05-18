@@ -234,25 +234,29 @@ fn print_md_with_frontmatter(response: &fetchkit::FetchResponse) {
     writeln_safe(&format_md_with_frontmatter(response));
 }
 
+fn yaml_quote(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
 /// Format response as markdown with YAML frontmatter
 fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
     let mut output = String::new();
 
     // Build frontmatter
     output.push_str("---\n");
-    output.push_str(&format!("url: {}\n", response.url));
+    output.push_str(&format!("url: {}\n", yaml_quote(&response.url)));
     output.push_str(&format!("status_code: {}\n", response.status_code));
     if let Some(ref ct) = response.content_type {
-        output.push_str(&format!("source_content_type: {}\n", ct));
+        output.push_str(&format!("source_content_type: {}\n", yaml_quote(ct)));
     }
     if let Some(size) = response.size {
         output.push_str(&format!("source_size: {}\n", size));
     }
     if let Some(ref lm) = response.last_modified {
-        output.push_str(&format!("last_modified: {}\n", lm));
+        output.push_str(&format!("last_modified: {}\n", yaml_quote(lm)));
     }
     if let Some(ref filename) = response.filename {
-        output.push_str(&format!("filename: {}\n", filename));
+        output.push_str(&format!("filename: {}\n", yaml_quote(filename)));
     }
     if let Some(truncated) = response.truncated {
         if truncated {
@@ -302,9 +306,9 @@ mod tests {
         let output = format_md_with_frontmatter(&response);
 
         assert!(output.starts_with("---\n"));
-        assert!(output.contains("url: https://example.com\n"));
+        assert!(output.contains("url: \"https://example.com\"\n"));
         assert!(output.contains("status_code: 200\n"));
-        assert!(output.contains("source_content_type: text/html\n"));
+        assert!(output.contains("source_content_type: \"text/html\"\n"));
         assert!(output.contains("---\n# Hello World"));
     }
 
@@ -325,8 +329,8 @@ mod tests {
         let output = format_md_with_frontmatter(&response);
 
         assert!(output.contains("source_size: 1234\n"));
-        assert!(output.contains("last_modified: Wed, 01 Jan 2025 00:00:00 GMT\n"));
-        assert!(output.contains("filename: page.html\n"));
+        assert!(output.contains("last_modified: \"Wed, 01 Jan 2025 00:00:00 GMT\"\n"));
+        assert!(output.contains("filename: \"page.html\"\n"));
         assert!(output.contains("truncated: true\n"));
     }
 
@@ -361,5 +365,22 @@ mod tests {
 
         // truncated: false should not appear
         assert!(!output.contains("truncated"));
+    }
+
+    #[test]
+    fn test_format_md_quotes_untrusted_scalars() {
+        let response = FetchResponse {
+            url: "https://example.com/a\nforged: true".to_string(),
+            status_code: 200,
+            filename: Some("*alias".to_string()),
+            content: Some("ok".to_string()),
+            ..Default::default()
+        };
+
+        let output = format_md_with_frontmatter(&response);
+
+        assert!(output.contains("url: \"https://example.com/a\\nforged: true\"\n"));
+        assert!(output.contains("filename: \"*alias\"\n"));
+        assert!(!output.contains("\nforged: true\n"));
     }
 }

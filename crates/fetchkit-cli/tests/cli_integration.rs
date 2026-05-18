@@ -38,7 +38,7 @@ fn test_fetch_markdown_output() {
         "Expected YAML frontmatter, got: {}",
         &stdout[..80.min(stdout.len())]
     );
-    assert!(stdout.contains("url: https://example.com"));
+    assert!(stdout.contains("url: \"https://example.com"));
     assert!(stdout.contains("status_code: 200"));
     assert!(stdout.contains("source_content_type:"));
 

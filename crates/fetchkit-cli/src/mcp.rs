@@ -197,19 +197,19 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
 
     // Build frontmatter
     output.push_str("---\n");
-    output.push_str(&format!("url: {}\n", response.url));
+    output.push_str(&format!("url: {}\n", yaml_quote(&response.url)));
     output.push_str(&format!("status_code: {}\n", response.status_code));
     if let Some(ref ct) = response.content_type {
-        output.push_str(&format!("source_content_type: {}\n", ct));
+        output.push_str(&format!("source_content_type: {}\n", yaml_quote(ct)));
     }
     if let Some(size) = response.size {
         output.push_str(&format!("source_size: {}\n", size));
     }
     if let Some(ref lm) = response.last_modified {
-        output.push_str(&format!("last_modified: {}\n", lm));
+        output.push_str(&format!("last_modified: {}\n", yaml_quote(lm)));
     }
     if let Some(ref filename) = response.filename {
-        output.push_str(&format!("filename: {}\n", filename));
+        output.push_str(&format!("filename: {}\n", yaml_quote(filename)));
     }
     if let Some(truncated) = response.truncated {
         if truncated {
@@ -226,6 +226,10 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
     }
 
     output
+}
+
+fn yaml_quote(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 /// Run the MCP server over stdio
