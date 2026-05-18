@@ -5,7 +5,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
-use crate::types::{FetchRequest, FetchResponse};
+use crate::types::{FetchRequest, FetchResponse, HttpMethod};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
 use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
@@ -80,6 +80,28 @@ impl GitHubRepoFetcher {
         }
 
         Some((owner.to_string(), repo.to_string()))
+    }
+
+    /// Enforce URL prefix policy for secondary outbound requests.
+    fn validate_policy_url(url: &str, options: &FetchOptions) -> Result<(), FetchError> {
+        if !options.allow_prefixes.is_empty()
+            && !options
+                .allow_prefixes
+                .iter()
+                .any(|prefix| url.starts_with(prefix))
+        {
+            return Err(FetchError::BlockedUrl);
+        }
+
+        if options
+            .block_prefixes
+            .iter()
+            .any(|prefix| url.starts_with(prefix))
+        {
+            return Err(FetchError::BlockedUrl);
+        }
+
+        Ok(())
     }
 }
 
@@ -182,8 +204,13 @@ impl Fetcher for GitHubRepoFetcher {
 
         // Fetch repository metadata
         let repo_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-        let repo_response = client
-            .get(&repo_url)
+        Self::validate_policy_url(&repo_url, options)?;
+
+        let repo_request = match request.effective_method() {
+            HttpMethod::Get => client.get(&repo_url),
+            HttpMethod::Head => client.head(&repo_url),
+        };
+        let repo_response = repo_request
             .header(
                 USER_AGENT,
                 HeaderValue::from_str(user_agent)
@@ -216,6 +243,15 @@ impl Fetcher for GitHubRepoFetcher {
             });
         }
 
+        if matches!(request.effective_method(), HttpMethod::Head) {
+            return Ok(FetchResponse {
+                url: request.url.clone(),
+                status_code,
+                content_type: Some("application/vnd.github+json".to_string()),
+                ..Default::default()
+            });
+        }
+
         // Parse repository data
         let repo_data: GitHubRepo = repo_response
             .json()
@@ -224,6 +260,7 @@ impl Fetcher for GitHubRepoFetcher {
 
         // Fetch README (optional - don't fail if missing)
         let readme_url = format!("https://api.github.com/repos/{}/{}/readme", owner, repo);
+        Self::validate_policy_url(&readme_url, options)?;
         let readme_content = match client
             .get(&readme_url)
             .header(
@@ -458,6 +495,30 @@ mod tests {
 
         let url = Url::parse("https://example.com/foo/bar").unwrap();
         assert!(!fetcher.matches(&url));
+    }
+
+    #[test]
+    fn test_validate_policy_url() {
+        let options = FetchOptions {
+            allow_prefixes: vec!["https://github.com".to_string()],
+            ..Default::default()
+        };
+        assert!(GitHubRepoFetcher::validate_policy_url(
+            "https://api.github.com/repos/o/r",
+            &options
+        )
+        .is_err());
+
+        let options = FetchOptions {
+            allow_prefixes: vec!["https://api.github.com/repos/".to_string()],
+            block_prefixes: vec!["https://api.github.com/repos/o/r".to_string()],
+            ..Default::default()
+        };
+        assert!(GitHubRepoFetcher::validate_policy_url(
+            "https://api.github.com/repos/o/r",
+            &options
+        )
+        .is_err());
     }
 
     #[test]
