@@ -30,11 +30,15 @@ jobs:
           rustup default stable
 
       - name: Verify version matches tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_VERSION="${{ inputs.release_tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG_VERSION="$INPUT_RELEASE_TAG"
           else
-            TAG_VERSION="${{ github.event.release.tag_name }}"
+            TAG_VERSION="$RELEASE_TAG_NAME"
           fi
           if [ -z "$TAG_VERSION" ]; then
             echo "Error: release tag is required"
