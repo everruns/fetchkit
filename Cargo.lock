@@ -584,6 +584,7 @@ dependencies = [
  "bytes",
  "ed25519-dalek",
  "futures",
+ "libc",
  "rand 0.10.1",
  "reqwest",
  "schemars",

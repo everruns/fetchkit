@@ -28,6 +28,7 @@ futures = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
+libc = { workspace = true }
 
 # Optional: bot-auth feature
 ed25519-dalek = { workspace = true, optional = true }

@@ -258,7 +258,7 @@ When `save_to_file` is set on the request:
 - The `FileSaver` trait provides path validation (traversal prevention) and async save.
 - `LocalFileSaver` is the built-in implementation for CLI/local use:
   - Resolves paths relative to a configurable base directory.
-  - Rejects path traversal via lexical normalization (note: symlinks not resolved).
+  - Rejects path traversal via lexical normalization and save-time symlink checks.
   - Creates parent directories as needed.
 
 #### Size
