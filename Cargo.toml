@@ -52,6 +52,9 @@ async-trait = "0.1"
 # Service trait
 tower = { version = "0.5", features = ["util"] }
 
+# Platform filesystem flags
+libc = "0.2"
+
 # Crypto (bot-auth feature)
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 base64 = "0.22"

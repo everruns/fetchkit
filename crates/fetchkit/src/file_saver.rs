@@ -6,6 +6,14 @@
 //! - Tests: in-memory buffer
 
 use async_trait::async_trait;
+#[cfg(unix)]
+use std::ffi::{CString, OsStr};
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
@@ -124,6 +132,7 @@ impl LocalFileSaver {
         }
     }
 
+    #[cfg(not(unix))]
     async fn canonicalize_base_dir(&self, base: &Path) -> Result<PathBuf, FileSaveError> {
         tokio::fs::create_dir_all(base).await?;
 
@@ -142,6 +151,7 @@ impl LocalFileSaver {
         Ok(tokio::fs::canonicalize(base).await?)
     }
 
+    #[cfg(not(unix))]
     async fn prepare_parent_dir(&self, resolved: &Path) -> Result<PathBuf, FileSaveError> {
         let Some(base) = &self.base_dir else {
             return Ok(resolved
@@ -208,19 +218,38 @@ impl LocalFileSaver {
 
         Ok(current)
     }
-}
 
-#[async_trait]
-impl FileSaver for LocalFileSaver {
-    async fn save(&self, path: &str, bytes: &[u8]) -> Result<SaveResult, FileSaveError> {
-        let resolved = self.resolve_path(path)?;
-        if let Some(base_dir) = &self.base_dir {
-            if resolved == normalize_path(base_dir) {
-                return Err(FileSaveError::PathNotAllowed(
-                    "Path must name a file".into(),
-                ));
-            }
-        }
+    #[cfg(unix)]
+    async fn write_resolved_path(
+        &self,
+        resolved: PathBuf,
+        bytes: &[u8],
+    ) -> Result<PathBuf, FileSaveError> {
+        let bytes = bytes.to_vec();
+        let task = if let Some(base_dir) = &self.base_dir {
+            let normalized_base = normalize_path(base_dir);
+            let relative = resolved
+                .strip_prefix(&normalized_base)
+                .map_err(|_| FileSaveError::PathNotAllowed("Path escapes base directory".into()))?
+                .to_path_buf();
+            let base_dir = base_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                save_under_base_no_follow(&base_dir, &relative, &bytes)
+            })
+        } else {
+            tokio::task::spawn_blocking(move || save_absolute_no_follow(&resolved, &bytes))
+        };
+
+        task.await
+            .map_err(|err| FileSaveError::Other(format!("File save task failed: {err}")))?
+    }
+
+    #[cfg(not(unix))]
+    async fn write_resolved_path(
+        &self,
+        resolved: PathBuf,
+        bytes: &[u8],
+    ) -> Result<PathBuf, FileSaveError> {
         let file_name = resolved
             .file_name()
             .ok_or_else(|| FileSaveError::PathNotAllowed("Path must name a file".into()))?;
@@ -245,9 +274,27 @@ impl FileSaver for LocalFileSaver {
             Err(err) => return Err(err.into()),
         }
 
-        // THREAT[TM-INPUT-008]: Validate and create the final path during save,
-        // so symlink checks happen at write time rather than in a separate preflight step.
         tokio::fs::write(&final_path, bytes).await?;
+        Ok(final_path)
+    }
+}
+
+#[async_trait]
+impl FileSaver for LocalFileSaver {
+    async fn save(&self, path: &str, bytes: &[u8]) -> Result<SaveResult, FileSaveError> {
+        let resolved = self.resolve_path(path)?;
+        if let Some(base_dir) = &self.base_dir {
+            if resolved == normalize_path(base_dir) {
+                return Err(FileSaveError::PathNotAllowed(
+                    "Path must name a file".into(),
+                ));
+            }
+        }
+        resolved
+            .file_name()
+            .ok_or_else(|| FileSaveError::PathNotAllowed("Path must name a file".into()))?;
+
+        let final_path = self.write_resolved_path(resolved, bytes).await?;
 
         Ok(SaveResult {
             path: final_path.to_string_lossy().to_string(),
@@ -259,6 +306,192 @@ impl FileSaver for LocalFileSaver {
         self.resolve_path(path)?;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn save_under_base_no_follow(
+    base: &Path,
+    relative: &Path,
+    bytes: &[u8],
+) -> Result<PathBuf, FileSaveError> {
+    // Keep traversal and final creation anchored to directory descriptors so
+    // attacker-controlled symlink swaps cannot redirect a later path open.
+    std::fs::create_dir_all(base)?;
+
+    let meta = std::fs::symlink_metadata(base)?;
+    if meta.file_type().is_symlink() {
+        return Err(FileSaveError::PathNotAllowed(
+            "Base directory must not be a symlink".into(),
+        ));
+    }
+    if !meta.is_dir() {
+        return Err(FileSaveError::PathNotAllowed(
+            "Base directory must be a directory".into(),
+        ));
+    }
+
+    let canonical_base = std::fs::canonicalize(base)?;
+    let mut current_dir = open_dir_no_follow(&canonical_base)?;
+
+    for component in relative
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .components()
+    {
+        let Component::Normal(name) = component else {
+            return Err(FileSaveError::PathNotAllowed(format!(
+                "Unsupported path component in save path: {}",
+                relative.display()
+            )));
+        };
+
+        mkdirat_if_missing(&current_dir, name)?;
+        current_dir = open_child_dir_no_follow(&current_dir, name)?;
+    }
+
+    let file_name = relative
+        .file_name()
+        .ok_or_else(|| FileSaveError::PathNotAllowed("Path must name a file".into()))?;
+    let final_path = canonical_base.join(relative);
+    let mut file = open_child_file_no_follow(&current_dir, file_name, &final_path)?;
+    file.write_all(bytes)?;
+
+    Ok(final_path)
+}
+
+#[cfg(unix)]
+fn save_absolute_no_follow(path: &Path, bytes: &[u8]) -> Result<PathBuf, FileSaveError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = open_path_no_follow(path)?;
+    file.write_all(bytes)?;
+    Ok(path.to_path_buf())
+}
+
+#[cfg(unix)]
+fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, FileSaveError> {
+    let path = cstring_path(path)?;
+    let fd = unsafe {
+        libc::open(
+            path.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    owned_fd_from_result(fd, "Refusing to traverse symlink")
+}
+
+#[cfg(unix)]
+fn open_child_dir_no_follow(parent: &OwnedFd, name: &OsStr) -> Result<OwnedFd, FileSaveError> {
+    let name = cstring_component(name)?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    owned_fd_from_result(fd, "Refusing to traverse symlink")
+}
+
+#[cfg(unix)]
+fn open_child_file_no_follow(
+    parent: &OwnedFd,
+    name: &OsStr,
+    path_for_error: &Path,
+) -> Result<std::fs::File, FileSaveError> {
+    let name = cstring_component(name)?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0o666,
+        )
+    };
+    file_from_result(
+        fd,
+        format!(
+            "Refusing to write through symlink: {}",
+            path_for_error.display()
+        ),
+    )
+}
+
+#[cfg(unix)]
+fn open_path_no_follow(path: &Path) -> Result<std::fs::File, FileSaveError> {
+    let c_path = cstring_path(path)?;
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            0o666,
+        )
+    };
+    file_from_result(
+        fd,
+        format!("Refusing to write through symlink: {}", path.display()),
+    )
+}
+
+#[cfg(unix)]
+fn mkdirat_if_missing(parent: &OwnedFd, name: &OsStr) -> Result<(), FileSaveError> {
+    let name = cstring_component(name)?;
+    let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o755) };
+    if result == 0 {
+        return Ok(());
+    }
+
+    let err = std::io::Error::last_os_error();
+    if err.kind() == std::io::ErrorKind::AlreadyExists {
+        Ok(())
+    } else {
+        Err(err.into())
+    }
+}
+
+#[cfg(unix)]
+fn owned_fd_from_result(fd: libc::c_int, symlink_message: &str) -> Result<OwnedFd, FileSaveError> {
+    if fd >= 0 {
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    } else {
+        Err(open_error(symlink_message.to_string()))
+    }
+}
+
+#[cfg(unix)]
+fn file_from_result(
+    fd: libc::c_int,
+    symlink_message: String,
+) -> Result<std::fs::File, FileSaveError> {
+    if fd >= 0 {
+        Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+    } else {
+        Err(open_error(symlink_message))
+    }
+}
+
+#[cfg(unix)]
+fn open_error(symlink_message: String) -> FileSaveError {
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ELOOP) {
+        FileSaveError::PathNotAllowed(symlink_message)
+    } else {
+        FileSaveError::Io(err)
+    }
+}
+
+#[cfg(unix)]
+fn cstring_path(path: &Path) -> Result<CString, FileSaveError> {
+    CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| FileSaveError::PathNotAllowed("Path contains NUL byte".into()))
+}
+
+#[cfg(unix)]
+fn cstring_component(component: &OsStr) -> Result<CString, FileSaveError> {
+    CString::new(component.as_bytes())
+        .map_err(|_| FileSaveError::PathNotAllowed("Path contains NUL byte".into()))
 }
 
 /// Lexically normalize a path by resolving `.` and `..` components.

@@ -251,11 +251,11 @@ matching). `http://internal.example.com` correctly does NOT match
 
 **TM-INPUT-008 — Symlink-based path traversal (MITIGATED):**
 `LocalFileSaver` still performs lexical normalization to block `..` traversal, but
-save-time enforcement now walks each parent directory component under `base_dir`,
-rejects symlinks, canonicalizes each directory after creation/use, and verifies
-the canonical path stays under the canonical base directory. `execute_with_saver()`
-no longer performs a separate `validate_path()` preflight, so path checks now
-happen at write time instead of in a validate-then-write split.
+save-time enforcement now walks each parent directory component under `base_dir`
+using directory handles, rejects symlinks with no-follow opens, and opens the
+final file relative to the verified parent with no-follow semantics.
+`execute_with_saver()` no longer performs a separate `validate_path()` preflight,
+so path checks now happen at write time instead of in a validate-then-write split.
 
 **TM-INPUT-009 — No base_dir allows arbitrary writes (ACCEPTED):**
 `LocalFileSaver::new(None)` only requires absolute paths, with no directory restriction.

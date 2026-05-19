@@ -28,9 +28,19 @@ fn symlink_dir(src: &std::path::Path, dst: &std::path::Path) {
     std::os::unix::fs::symlink(src, dst).unwrap();
 }
 
+#[cfg(unix)]
+fn symlink_file(src: &std::path::Path, dst: &std::path::Path) {
+    std::os::unix::fs::symlink(src, dst).unwrap();
+}
+
 #[cfg(windows)]
 fn symlink_dir(src: &std::path::Path, dst: &std::path::Path) {
     std::os::windows::fs::symlink_dir(src, dst).unwrap();
+}
+
+#[cfg(windows)]
+fn symlink_file(src: &std::path::Path, dst: &std::path::Path) {
+    std::os::windows::fs::symlink_file(src, dst).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +150,21 @@ async fn test_path_traversal_symlink_escape_rejected() {
     let result = saver.save("pivot/escape.txt", b"pwned").await;
     assert!(result.is_err(), "symlink escape should be rejected");
     assert!(!outside.path().join("escape.txt").exists());
+}
+
+#[tokio::test]
+async fn test_path_traversal_final_symlink_escape_rejected() {
+    use fetchkit::file_saver::FileSaver;
+
+    let base = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    let saver = saver_in(base.path());
+
+    symlink_file(outside.path(), &base.path().join("out"));
+
+    let result = saver.save("out", b"pwned").await;
+    assert!(result.is_err(), "final symlink escape should be rejected");
+    assert_eq!(std::fs::read(outside.path()).unwrap(), b"");
 }
 
 #[tokio::test]
