@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pluggable HTTP transport abstraction (`HttpTransport`, `TransportRequest`, `TransportResponse`, `TransportError`, `ReqwestTransport`). A host application can route fetchkit's outbound HTTP through its own egress boundary via `FetchOptions::transport`, while fetchkit retains URL validation, DNS policy (resolve-then-check, pinned addrs), manual redirect following, bot-auth signing, and body-size/timeout caps. Default behavior is unchanged (`ReqwestTransport`).
+
 ## [0.3.0] - 2026-05-18
 
 ### Highlights

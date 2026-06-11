@@ -5,17 +5,22 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_full_body, transport_request};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 
 /// First-byte timeout for API requests
 const API_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// GitHub API host and port (DNS-pinned per request).
+const GITHUB_API_HOST: &str = "api.github.com";
+const GITHUB_API_PORT: u16 = 443;
 
 /// Max comments to fetch (first page)
 const MAX_COMMENTS: usize = 100;
@@ -178,50 +183,44 @@ impl Fetcher for GitHubIssueFetcher {
             FetchError::FetcherError("Not a valid GitHub issue/PR URL".to_string())
         })?;
 
-        // Build HTTP client (same pattern as GitHubRepoFetcher)
+        // Same pattern as GitHubRepoFetcher: single-hop API requests, DNS pinned per call.
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none());
-
-        if !options.respect_proxy_env {
-            // THREAT[TM-NET-004]: Ignore ambient proxy env by default
-            client_builder = client_builder.no_proxy();
-        }
-
-        if options.dns_policy.block_private {
-            let validated_addr = options
-                .dns_policy
-                .resolve_and_validate("api.github.com", 443)
-                .map_err(|_| FetchError::BlockedUrl)?;
-            // THREAT[TM-SSRF-010]: Pin DNS to avoid cross-host hops
-            client_builder = client_builder.resolve("api.github.com", validated_addr);
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
         let accept_header = HeaderValue::from_static("application/vnd.github+json");
+
+        let api_headers = || {
+            let mut headers = HeaderMap::new();
+            headers.insert(USER_AGENT, ua_header.clone());
+            headers.insert(ACCEPT, accept_header.clone());
+            headers
+        };
+        let github_api_get = |url: String| {
+            let headers = api_headers();
+            async move {
+                let parsed = Url::parse(&url).map_err(|_| FetchError::InvalidUrlScheme)?;
+                transport_request(
+                    parsed,
+                    reqwest::Method::GET,
+                    headers,
+                    options,
+                    API_TIMEOUT,
+                    GITHUB_API_HOST,
+                    GITHUB_API_PORT,
+                )
+                .await
+            }
+        };
 
         // 1. Fetch issue/PR metadata (issues API works for both)
         let issue_url = format!(
             "https://api.github.com/repos/{}/{}/issues/{}",
             owner, repo, number
         );
-        let issue_response = client
-            .get(&issue_url)
-            .header(USER_AGENT, ua_header.clone())
-            .header(ACCEPT, accept_header.clone())
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let issue_response = github_api_get(issue_url).await?;
 
-        let status_code = issue_response.status().as_u16();
-        if !issue_response.status().is_success() {
+        let status_code = issue_response.status;
+        if !(200..300).contains(&status_code) {
             let error_msg = if status_code == 404 {
                 format!("{}/{}#{} not found", owner, repo, number)
             } else if status_code == 403 {
@@ -237,9 +236,8 @@ impl Fetcher for GitHubIssueFetcher {
             });
         }
 
-        let issue: GitHubIssueData = issue_response
-            .json()
-            .await
+        let issue_body = read_full_body(issue_response, options).await?;
+        let issue: GitHubIssueData = serde_json::from_slice(&issue_body)
             .map_err(|e| FetchError::FetcherError(format!("Failed to parse issue data: {}", e)))?;
 
         let is_pr = issue.pull_request.is_some();
@@ -250,14 +248,13 @@ impl Fetcher for GitHubIssueFetcher {
                 "https://api.github.com/repos/{}/{}/pulls/{}",
                 owner, repo, number
             );
-            match client
-                .get(&pr_url)
-                .header(USER_AGENT, ua_header.clone())
-                .header(ACCEPT, accept_header.clone())
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => resp.json().await.ok(),
+            match github_api_get(pr_url).await {
+                Ok(resp) if (200..300).contains(&resp.status) => {
+                    match read_full_body(resp, options).await {
+                        Ok(body) => serde_json::from_slice(&body).ok(),
+                        Err(_) => None,
+                    }
+                }
                 _ => None,
             }
         } else {
@@ -270,15 +267,12 @@ impl Fetcher for GitHubIssueFetcher {
                 "https://api.github.com/repos/{}/{}/issues/{}/comments?per_page={}",
                 owner, repo, number, MAX_COMMENTS
             );
-            match client
-                .get(&comments_url)
-                .header(USER_AGENT, ua_header.clone())
-                .header(ACCEPT, accept_header.clone())
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    resp.json::<Vec<GitHubComment>>().await.ok()
+            match github_api_get(comments_url).await {
+                Ok(resp) if (200..300).contains(&resp.status) => {
+                    match read_full_body(resp, options).await {
+                        Ok(body) => serde_json::from_slice::<Vec<GitHubComment>>(&body).ok(),
+                        Err(_) => None,
+                    }
                 }
                 _ => None,
             }

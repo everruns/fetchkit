@@ -15,6 +15,7 @@ use crate::convert::{
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
 use crate::file_saver::FileSaver;
+use crate::transport::{BodyStream, TransportMethod, TransportRequest, TransportResponse};
 use crate::types::{FetchRequest, FetchResponse, HttpMethod};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -24,6 +25,43 @@ use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_DISPOSITION, LOCAT
 use std::time::Duration;
 use tracing::{debug, error, warn};
 use url::Url;
+
+/// Look up a header value (case-insensitive) from a transport response's header list.
+pub(crate) fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+/// Convert a reqwest `HeaderMap` into the transport's `(name, value)` header list.
+/// Headers whose value is not valid UTF-8 are dropped (fetchkit only sets UTF-8 headers).
+fn headers_to_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.as_str().to_string(), v.to_string()))
+        })
+        .collect()
+}
+
+/// Resolve the policy-pinned socket addresses for a URL (TM-SSRF-001/005).
+pub(crate) fn pinned_addrs_for_url(
+    url: &Url,
+    options: &FetchOptions,
+) -> Result<Vec<std::net::SocketAddr>, FetchError> {
+    let Some(host) = url.host_str() else {
+        return Ok(Vec::new());
+    };
+    let port = url.port_or_known_default().unwrap_or(80);
+    options
+        .dns_policy
+        .pinned_addrs(host, port)
+        .map_err(|_| FetchError::BlockedUrl)
+}
 
 /// Binary content type prefixes
 const BINARY_PREFIXES: &[&str] = &[
@@ -163,24 +201,12 @@ struct ResponseMeta {
     filename: Option<String>,
 }
 
-fn extract_response_meta(headers: &HeaderMap, url: &str) -> ResponseMeta {
+fn extract_response_meta(headers: &[(String, String)], url: &str) -> ResponseMeta {
     ResponseMeta {
-        content_type: headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string()),
-        last_modified: headers
-            .get("last-modified")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string()),
-        etag: headers
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string()),
-        content_length: headers
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok()),
+        content_type: header_value(headers, "content-type").map(|s| s.to_string()),
+        last_modified: header_value(headers, "last-modified").map(|s| s.to_string()),
+        etag: header_value(headers, "etag").map(|s| s.to_string()),
+        content_length: header_value(headers, "content-length").and_then(|s| s.parse().ok()),
         filename: extract_filename(headers, url),
     }
 }
@@ -236,9 +262,9 @@ impl Fetcher for DefaultFetcher {
         )
         .await?;
 
-        let status_code = response.status().as_u16();
-        let final_url = response.url().to_string();
-        let meta = extract_response_meta(response.headers(), &final_url);
+        let status_code = response.status;
+        let final_url = response.url.to_string();
+        let meta = extract_response_meta(&response.headers, &final_url);
 
         // Handle 304 Not Modified (conditional request response)
         if status_code == 304 {
@@ -416,9 +442,9 @@ impl Fetcher for DefaultFetcher {
         )
         .await?;
 
-        let status_code = response.status().as_u16();
-        let final_url = response.url().to_string();
-        let meta = extract_response_meta(response.headers(), &final_url);
+        let status_code = response.status;
+        let final_url = response.url.to_string();
+        let meta = extract_response_meta(&response.headers, &final_url);
 
         // HEAD request — return metadata only
         if method == HttpMethod::Head {
@@ -466,24 +492,42 @@ impl Fetcher for DefaultFetcher {
 }
 
 /// Returns `(response, redirect_chain)` where redirect_chain lists intermediate URLs.
+///
+/// Performs manual, per-hop-validated redirect following (TM-SSRF-010). Each hop is
+/// resolved via DNS policy (producing pinned addrs) and executed through the
+/// configured [`HttpTransport`]; only the socket send is delegated to the transport.
 pub(crate) async fn send_request_following_redirects(
     initial_url: Url,
     method: reqwest::Method,
     headers: HeaderMap,
     options: &FetchOptions,
     timeout: Duration,
-) -> Result<(reqwest::Response, Vec<String>), FetchError> {
+) -> Result<(TransportResponse, Vec<String>), FetchError> {
+    let transport = options.transport();
+    let transport_method = if method == reqwest::Method::HEAD {
+        TransportMethod::Head
+    } else {
+        TransportMethod::Get
+    };
     let mut current_url = initial_url;
     let mut redirect_chain = Vec::new();
 
     for redirect_count in 0..=MAX_REDIRECTS {
+        // THREAT[TM-AUTH]: re-sign bot-auth headers per hop so each authority is covered.
         let request_headers = apply_bot_auth_if_enabled(headers.clone(), options, &current_url);
-        let client = build_client_for_url(&current_url, request_headers, options, timeout)?;
-        let response = client
-            .request(method.clone(), current_url.clone())
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        // THREAT[TM-SSRF-001]/[TM-SSRF-005]: resolve-then-check produces the pinned addrs
+        // the transport must connect to.
+        let pinned_addrs = pinned_addrs_for_url(&current_url, options)?;
+
+        let req = TransportRequest {
+            method: transport_method,
+            url: current_url.clone(),
+            headers: headers_to_pairs(&request_headers),
+            timeout: Some(timeout),
+            pinned_addrs,
+            respect_proxy_env: options.respect_proxy_env,
+        };
+        let response = transport.execute(req).await?;
 
         let Some(next_url) = redirect_target(&current_url, &response, options)? else {
             return Ok((response, redirect_chain));
@@ -507,60 +551,76 @@ pub(crate) async fn send_request_following_redirects(
     unreachable!("redirect loop must return before exhausting iterations");
 }
 
-fn build_client_for_url(
-    url: &Url,
+/// Execute a single (non-redirect-following) request through the configured transport.
+///
+/// Shared by specialized fetchers that issue simple API GETs to hardcoded hosts.
+/// DNS policy resolution against `pin_host`/`pin_port` produces the pinned addrs the
+/// transport must connect to (TM-SSRF-001/005). Bot-auth headers are applied for the
+/// request URL's authority. The transport never follows redirects.
+///
+/// `pin_host`/`pin_port` are the hardcoded API host/port (so DNS pinning matches the
+/// host the URL will actually connect to). They normally equal the URL's host/port.
+pub(crate) async fn transport_request(
+    url: Url,
+    method: reqwest::Method,
     headers: HeaderMap,
     options: &FetchOptions,
     timeout: Duration,
-) -> Result<reqwest::Client, FetchError> {
-    // THREAT[TM-NET-003]: New client per request prevents connection-pool state leakage
-    let mut client_builder = reqwest::Client::builder()
-        .default_headers(headers)
-        .connect_timeout(timeout)
-        .timeout(timeout)
-        .redirect(reqwest::redirect::Policy::none());
+    pin_host: &str,
+    pin_port: u16,
+) -> Result<TransportResponse, FetchError> {
+    let transport = options.transport();
+    let transport_method = if method == reqwest::Method::HEAD {
+        TransportMethod::Head
+    } else {
+        TransportMethod::Get
+    };
+    // THREAT[TM-AUTH]: sign for the target authority before handing to the transport.
+    let request_headers = apply_bot_auth_if_enabled(headers, options, &url);
+    // THREAT[TM-SSRF-001]/[TM-SSRF-005]: resolve-then-check the API host; pin the result.
+    let pinned_addrs = options
+        .dns_policy
+        .pinned_addrs(pin_host, pin_port)
+        .map_err(|_| FetchError::BlockedUrl)?;
 
-    if !options.respect_proxy_env {
-        // THREAT[TM-NET-004]: Ignore ambient proxy env by default in shared runtimes.
-        client_builder = client_builder.no_proxy();
-    }
+    let req = TransportRequest {
+        method: transport_method,
+        url,
+        headers: headers_to_pairs(&request_headers),
+        timeout: Some(timeout),
+        pinned_addrs,
+        respect_proxy_env: options.respect_proxy_env,
+    };
+    Ok(transport.execute(req).await?)
+}
 
-    if options.dns_policy.block_private {
-        if let Some(host) = url.host_str() {
-            let port = url.port_or_known_default().unwrap_or(80);
-            let validated_addr = options
-                .dns_policy
-                .resolve_and_validate(host, port)
-                .map_err(|_| FetchError::BlockedUrl)?;
-            // THREAT[TM-SSRF-001]: Resolve-then-check — validate resolved IP before connecting.
-            // THREAT[TM-SSRF-005]: Pin DNS resolution to prevent DNS rebinding attacks.
-            client_builder = client_builder.resolve(host, validated_addr);
-        }
-    }
-
-    client_builder.build().map_err(FetchError::ClientBuildError)
+/// Read an entire transport response body as bytes, applying the body timeout and
+/// `max_body_size` cap. Returns the bytes (truncation flag discarded — callers that
+/// need it should use [`read_body_with_timeout`] directly).
+pub(crate) async fn read_full_body(
+    response: TransportResponse,
+    options: &FetchOptions,
+) -> Result<Bytes, FetchError> {
+    let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
+    let (body, _truncated) = read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+    Ok(body)
 }
 
 fn redirect_target(
     base_url: &Url,
-    response: &reqwest::Response,
+    response: &TransportResponse,
     options: &FetchOptions,
 ) -> Result<Option<Url>, FetchError> {
     // 304 Not Modified is in the 3xx range but is not a redirect
-    if !response.status().is_redirection() || response.status().as_u16() == 304 {
+    let status = response.status;
+    let is_redirection = (300..400).contains(&status);
+    if !is_redirection || status == 304 {
         return Ok(None);
     }
 
-    let location = response
-        .headers()
-        .get(LOCATION)
-        .ok_or_else(|| {
-            FetchError::RequestError("redirect response missing Location header".to_string())
-        })?
-        .to_str()
-        .map_err(|_| {
-            FetchError::RequestError("redirect Location header is not valid UTF-8".to_string())
-        })?;
+    let location = header_value(&response.headers, LOCATION.as_str()).ok_or_else(|| {
+        FetchError::RequestError("redirect response missing Location header".to_string())
+    })?;
 
     let next_url = base_url.join(location).map_err(|_| {
         FetchError::RequestError("redirect Location is not a valid URL".to_string())
@@ -585,13 +645,11 @@ fn is_binary_content_type(content_type: &str) -> bool {
 }
 
 /// Extract filename from Content-Disposition header or URL
-fn extract_filename(headers: &HeaderMap, url: &str) -> Option<String> {
+fn extract_filename(headers: &[(String, String)], url: &str) -> Option<String> {
     // Try Content-Disposition header first
-    if let Some(disposition) = headers.get(CONTENT_DISPOSITION) {
-        if let Ok(value) = disposition.to_str() {
-            if let Some(filename) = parse_content_disposition_filename(value) {
-                return Some(filename);
-            }
+    if let Some(value) = header_value(headers, CONTENT_DISPOSITION.as_str()) {
+        if let Some(filename) = parse_content_disposition_filename(value) {
+            return Some(filename);
         }
     }
 
@@ -642,12 +700,23 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
 // THREAT[TM-DOS-001]: Configurable max body size prevents unbounded memory usage
 // THREAT[TM-DOS-003]: Decompressed size is checked, catching gzip/brotli bombs
 pub(crate) async fn read_body_with_timeout(
-    response: reqwest::Response,
+    response: TransportResponse,
+    timeout: Duration,
+    max_size: usize,
+) -> Result<(Bytes, bool), FetchError> {
+    read_body_stream_with_timeout(response.body, timeout, max_size).await
+}
+
+/// Read a boxed transport body stream with timeout and size limit.
+///
+/// Splitting this out from [`read_body_with_timeout`] lets the transport's streaming
+/// body drive the same caps without depending on `reqwest::Response`.
+pub(crate) async fn read_body_stream_with_timeout(
+    mut stream: BodyStream,
     timeout: Duration,
     max_size: usize,
 ) -> Result<(Bytes, bool), FetchError> {
     let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
     let deadline = tokio::time::Instant::now() + timeout;
 
     loop {
@@ -673,7 +742,7 @@ pub(crate) async fn read_body_with_timeout(
                     Some(Err(e)) => {
                         error!("Error reading body chunk: {}", e);
                         if body.is_empty() {
-                            return Err(FetchError::from_reqwest(e));
+                            return Err(e.into());
                         }
                         return Ok((Bytes::from(body), true));
                     }
@@ -769,7 +838,7 @@ mod tests {
 
     #[test]
     fn test_extract_filename_from_url() {
-        let headers = HeaderMap::new();
+        let headers: Vec<(String, String)> = Vec::new();
         assert_eq!(
             extract_filename(&headers, "https://example.com/path/to/file.pdf"),
             Some("file.pdf".to_string())
@@ -828,46 +897,32 @@ mod tests {
         assert_eq!(response.content.as_deref(), Some("redirected"));
     }
 
-    #[tokio::test]
-    async fn test_redirect_target_handles_relative_location() {
-        let origin = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/start"))
-            .respond_with(ResponseTemplate::new(302).insert_header("location", "/final"))
-            .mount(&origin)
-            .await;
+    /// Build a synthetic redirect [`TransportResponse`] for redirect_target tests.
+    fn redirect_response(status: u16, location: &str) -> TransportResponse {
+        TransportResponse {
+            status,
+            url: Url::parse("https://origin.example/start").unwrap(),
+            headers: vec![("location".to_string(), location.to_string())],
+            body: Box::pin(futures::stream::empty()),
+        }
+    }
 
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap();
-        let base_url = Url::parse(&format!("{}/start", origin.uri())).unwrap();
-        let response = client.get(base_url.clone()).send().await.unwrap();
+    #[test]
+    fn test_redirect_target_handles_relative_location() {
+        let base_url = Url::parse("https://origin.example/start").unwrap();
+        let response = redirect_response(302, "/final");
 
         let redirect = redirect_target(&base_url, &response, &FetchOptions::default()).unwrap();
         assert_eq!(
             redirect.unwrap(),
-            Url::parse(&format!("{}/final", origin.uri())).unwrap()
+            Url::parse("https://origin.example/final").unwrap()
         );
     }
 
-    #[tokio::test]
-    async fn test_redirect_target_rejects_non_http_location() {
-        let origin = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/start"))
-            .respond_with(
-                ResponseTemplate::new(302).insert_header("location", "file:///etc/passwd"),
-            )
-            .mount(&origin)
-            .await;
-
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap();
-        let base_url = Url::parse(&format!("{}/start", origin.uri())).unwrap();
-        let response = client.get(base_url.clone()).send().await.unwrap();
+    #[test]
+    fn test_redirect_target_rejects_non_http_location() {
+        let base_url = Url::parse("https://origin.example/start").unwrap();
+        let response = redirect_response(302, "file:///etc/passwd");
 
         let redirect = redirect_target(&base_url, &response, &FetchOptions::default());
         assert!(matches!(redirect, Err(FetchError::InvalidUrlScheme)));

@@ -5,17 +5,22 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_full_body, transport_request};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 
 const API_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_TRANSCRIPT_CHARS: usize = 15_000;
+
+/// YouTube host and port (DNS-pinned per request).
+const YOUTUBE_HOST: &str = "www.youtube.com";
+const YOUTUBE_PORT: u16 = 443;
 
 /// YouTube video fetcher
 ///
@@ -99,19 +104,6 @@ impl Fetcher for YouTubeFetcher {
             .ok_or_else(|| FetchError::FetcherError("Not a valid YouTube URL".to_string()))?;
 
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none());
-
-        if !options.respect_proxy_env {
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
 
@@ -126,13 +118,27 @@ impl Fetcher for YouTubeFetcher {
             .append_pair("url", &canonical_url)
             .append_pair("format", "json");
 
-        let oembed = match client
-            .get(oembed_url.as_str())
-            .header(USER_AGENT, ua_header.clone())
-            .send()
-            .await
+        let mut oembed_headers = HeaderMap::new();
+        oembed_headers.insert(USER_AGENT, ua_header.clone());
+
+        // THREAT[TM-SSRF-010]: single-hop request, redirects not followed.
+        let oembed = match transport_request(
+            oembed_url,
+            reqwest::Method::GET,
+            oembed_headers,
+            options,
+            API_TIMEOUT,
+            YOUTUBE_HOST,
+            YOUTUBE_PORT,
+        )
+        .await
         {
-            Ok(resp) if resp.status().is_success() => resp.json::<OEmbedResponse>().await.ok(),
+            Ok(resp) if (200..300).contains(&resp.status) => {
+                match read_full_body(resp, options).await {
+                    Ok(body) => serde_json::from_slice::<OEmbedResponse>(&body).ok(),
+                    Err(_) => None,
+                }
+            }
             _ => None,
         };
 
@@ -145,7 +151,7 @@ impl Fetcher for YouTubeFetcher {
         let author_url = oembed.as_ref().and_then(|o| o.author_url.clone());
 
         // Attempt transcript extraction via timedtext API
-        let transcript = fetch_transcript(&client, &ua_header, &video_id, options).await;
+        let transcript = fetch_transcript(&ua_header, &video_id, options).await;
 
         let content = format_youtube_response(
             &title,
@@ -170,7 +176,6 @@ impl Fetcher for YouTubeFetcher {
 /// Attempt to fetch transcript/captions via YouTube's timedtext XML API.
 /// Returns None if transcript is unavailable.
 async fn fetch_transcript(
-    client: &reqwest::Client,
     ua: &HeaderValue,
     video_id: &str,
     options: &FetchOptions,
@@ -184,18 +189,28 @@ async fn fetch_transcript(
     let timedtext_url = Url::parse(&timedtext_url).ok()?;
     options.validate_url(&timedtext_url).ok()?;
 
-    let resp = client
-        .get(timedtext_url.as_str())
-        .header(USER_AGENT, ua.clone())
-        .send()
-        .await
-        .ok()?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, ua.clone());
 
-    if !resp.status().is_success() {
+    // THREAT[TM-SSRF-010]: single-hop request, redirects not followed.
+    let resp = transport_request(
+        timedtext_url,
+        reqwest::Method::GET,
+        headers,
+        options,
+        API_TIMEOUT,
+        YOUTUBE_HOST,
+        YOUTUBE_PORT,
+    )
+    .await
+    .ok()?;
+
+    if !(200..300).contains(&resp.status) {
         return None;
     }
 
-    let xml = resp.text().await.ok()?;
+    let body = read_full_body(resp, options).await.ok()?;
+    let xml = String::from_utf8_lossy(&body).into_owned();
     if let Some(max_body_size) = options.max_body_size {
         if xml.len() > max_body_size {
             return None;

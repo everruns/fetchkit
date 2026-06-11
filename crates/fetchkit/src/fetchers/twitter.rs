@@ -9,12 +9,14 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
-use crate::fetchers::default::{read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE};
+use crate::fetchers::default::{
+    read_body_with_timeout, transport_request, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
@@ -409,41 +411,17 @@ fn strip_html_tags(html: &str) -> String {
     result
 }
 
-fn build_client(
-    options: &FetchOptions,
-    host: &str,
-    port: u16,
-) -> Result<reqwest::Client, FetchError> {
+/// Build the common request headers (User-Agent + JSON Accept) for Twitter API calls.
+fn twitter_headers(options: &FetchOptions) -> HeaderMap {
     let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(API_TIMEOUT)
-        .timeout(API_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none());
-
-    if !options.respect_proxy_env {
-        builder = builder.no_proxy();
-    }
-
-    if options.dns_policy.block_private {
-        let validated_addr = options
-            .dns_policy
-            .resolve_and_validate(host, port)
-            .map_err(|_| FetchError::BlockedUrl)?;
-        builder = builder.resolve(host, validated_addr);
-    }
-
-    builder
-        .default_headers({
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                USER_AGENT,
-                HeaderValue::from_str(user_agent)
-                    .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
-            );
-            headers
-        })
-        .build()
-        .map_err(FetchError::ClientBuildError)
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_str(user_agent)
+            .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
+    );
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    headers
 }
 
 #[async_trait]
@@ -521,19 +499,23 @@ impl TwitterFetcher {
         tweet_id: &str,
         options: &FetchOptions,
     ) -> Result<SyndicationTweet, FetchError> {
-        let client = build_client(options, "cdn.syndication.twimg.com", 443)?;
-
         let syndication_url = format!("{}?id={}&token=0", SYNDICATION_BASE, tweet_id);
+        let parsed = Url::parse(&syndication_url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        let response = client
-            .get(&syndication_url)
-            .header(ACCEPT, HeaderValue::from_static("application/json"))
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        // THREAT[TM-SSRF-010]: single-hop request, redirects not followed.
+        let response = transport_request(
+            parsed,
+            reqwest::Method::GET,
+            twitter_headers(options),
+            options,
+            API_TIMEOUT,
+            "cdn.syndication.twimg.com",
+            443,
+        )
+        .await?;
 
-        let status = response.status().as_u16();
-        if !response.status().is_success() {
+        let status = response.status;
+        if !(200..300).contains(&status) {
             return Err(FetchError::FetcherError(format!(
                 "Syndication API returned HTTP {}",
                 status
@@ -563,19 +545,23 @@ impl TwitterFetcher {
         tweet_url: &str,
         options: &FetchOptions,
     ) -> Result<OEmbedResponse, FetchError> {
-        let client = build_client(options, "publish.x.com", 443)?;
-
         let oembed_url = format!("{}?url={}", OEMBED_BASE, tweet_url);
+        let parsed = Url::parse(&oembed_url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        let response = client
-            .get(&oembed_url)
-            .header(ACCEPT, HeaderValue::from_static("application/json"))
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        // THREAT[TM-SSRF-010]: single-hop request, redirects not followed.
+        let response = transport_request(
+            parsed,
+            reqwest::Method::GET,
+            twitter_headers(options),
+            options,
+            API_TIMEOUT,
+            "publish.x.com",
+            443,
+        )
+        .await?;
 
-        let status = response.status().as_u16();
-        if !response.status().is_success() {
+        let status = response.status;
+        if !(200..300).contains(&status) {
             return Err(FetchError::FetcherError(format!(
                 "oEmbed API returned HTTP {}",
                 status

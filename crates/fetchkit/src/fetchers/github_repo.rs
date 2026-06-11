@@ -4,14 +4,19 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_full_body, transport_request};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse, HttpMethod};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
+
+/// GitHub API host and port (DNS-pinned per request).
+const GITHUB_API_HOST: &str = "api.github.com";
+const GITHUB_API_PORT: u16 = 443;
 
 /// First-byte timeout for API requests
 const API_TIMEOUT: Duration = Duration::from_secs(10);
@@ -176,58 +181,48 @@ impl Fetcher for GitHubRepoFetcher {
             FetchError::FetcherError("Not a valid GitHub repository URL".to_string())
         })?;
 
-        // Build HTTP client
-        // THREAT[TM-SSRF-001]: Validate DNS resolution for GitHub API host
+        // THREAT[TM-SSRF-001]: Validate DNS resolution for GitHub API host (pinned per request).
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none());
+        let ua_header = HeaderValue::from_str(user_agent)
+            .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
+        let accept_header = HeaderValue::from_static("application/vnd.github+json");
 
-        if !options.respect_proxy_env {
-            // THREAT[TM-NET-004]: Ignore ambient proxy env by default in shared runtimes.
-            client_builder = client_builder.no_proxy();
-        }
-
-        if options.dns_policy.block_private {
-            let validated_addr = options
-                .dns_policy
-                .resolve_and_validate("api.github.com", 443)
-                .map_err(|_| FetchError::BlockedUrl)?;
-            // THREAT[TM-SSRF-010]: Disable redirects and pin GitHub API DNS to avoid cross-host hops.
-            client_builder = client_builder.resolve("api.github.com", validated_addr);
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
+        // Headers shared by every GitHub API subrequest.
+        let api_headers = || {
+            let mut headers = HeaderMap::new();
+            headers.insert(USER_AGENT, ua_header.clone());
+            headers.insert(ACCEPT, accept_header.clone());
+            headers
+        };
 
         // Fetch repository metadata
+        // THREAT[TM-INPUT-002]/[TM-INPUT-007]: enforce allow/block prefix policy on the
+        // GitHub API subrequest URL (PR #131), not just the user-facing github.com URL.
         let repo_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
         Self::validate_policy_url(&repo_url, options)?;
+        let parsed_repo_url = Url::parse(&repo_url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        let repo_request = match request.effective_method() {
-            HttpMethod::Get => client.get(&repo_url),
-            HttpMethod::Head => client.head(&repo_url),
+        let method = match request.effective_method() {
+            HttpMethod::Get => reqwest::Method::GET,
+            HttpMethod::Head => reqwest::Method::HEAD,
         };
-        let repo_response = repo_request
-            .header(
-                USER_AGENT,
-                HeaderValue::from_str(user_agent)
-                    .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
-            )
-            .header(
-                ACCEPT,
-                HeaderValue::from_static("application/vnd.github+json"),
-            )
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        // THREAT[TM-SSRF-010]: single-hop transport request; redirects are not followed
+        // for the GitHub API to avoid cross-host hops.
+        let repo_response = transport_request(
+            parsed_repo_url,
+            method,
+            api_headers(),
+            options,
+            API_TIMEOUT,
+            GITHUB_API_HOST,
+            GITHUB_API_PORT,
+        )
+        .await?;
 
-        let status_code = repo_response.status().as_u16();
+        let status_code = repo_response.status;
 
         // Handle non-success status
-        if !repo_response.status().is_success() {
+        if !(200..300).contains(&status_code) {
             let error_msg = if status_code == 404 {
                 format!("Repository {}/{} not found", owner, repo)
             } else if status_code == 403 {
@@ -253,38 +248,41 @@ impl Fetcher for GitHubRepoFetcher {
         }
 
         // Parse repository data
-        let repo_data: GitHubRepo = repo_response
-            .json()
-            .await
+        let repo_body = read_full_body(repo_response, options).await?;
+        let repo_data: GitHubRepo = serde_json::from_slice(&repo_body)
             .map_err(|e| FetchError::FetcherError(format!("Failed to parse repo data: {}", e)))?;
 
         // Fetch README (optional - don't fail if missing)
         let readme_url = format!("https://api.github.com/repos/{}/{}/readme", owner, repo);
         Self::validate_policy_url(&readme_url, options)?;
-        let readme_content = match client
-            .get(&readme_url)
-            .header(
-                USER_AGENT,
-                HeaderValue::from_str(user_agent)
-                    .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT)),
-            )
-            .header(
-                ACCEPT,
-                HeaderValue::from_static("application/vnd.github+json"),
-            )
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<GitHubReadme>().await {
-                    Ok(readme) if readme.encoding == "base64" => {
-                        // Decode base64 content
-                        decode_base64_content(&readme.content)
+        let readme_content = match Url::parse(&readme_url) {
+            Ok(parsed_readme_url) => {
+                match transport_request(
+                    parsed_readme_url,
+                    reqwest::Method::GET,
+                    api_headers(),
+                    options,
+                    API_TIMEOUT,
+                    GITHUB_API_HOST,
+                    GITHUB_API_PORT,
+                )
+                .await
+                {
+                    Ok(resp) if (200..300).contains(&resp.status) => {
+                        match read_full_body(resp, options).await {
+                            Ok(body) => match serde_json::from_slice::<GitHubReadme>(&body) {
+                                Ok(readme) if readme.encoding == "base64" => {
+                                    decode_base64_content(&readme.content)
+                                }
+                                _ => None,
+                            },
+                            Err(_) => None,
+                        }
                     }
                     _ => None,
                 }
             }
-            _ => None,
+            Err(_) => None,
         };
 
         // Format response as markdown
