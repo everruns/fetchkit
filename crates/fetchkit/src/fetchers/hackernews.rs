@@ -5,11 +5,12 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_full_body, send_request_following_redirects};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
@@ -92,35 +93,22 @@ impl Fetcher for HackerNewsFetcher {
             .ok_or_else(|| FetchError::FetcherError("Not a valid HN URL".to_string()))?;
 
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(3));
-
-        if !options.respect_proxy_env {
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
 
         // Fetch the item
-        let item = fetch_item(&client, &ua_header, item_id).await?;
+        let item = fetch_item(options, &ua_header, item_id).await?;
 
         // Fetch top-level comments
         let comments = if let Some(kids) = &item.kids {
             let mut comments = Vec::new();
             for &kid_id in kids.iter().take(MAX_COMMENTS) {
-                if let Ok(comment) = fetch_item(&client, &ua_header, kid_id).await {
+                if let Ok(comment) = fetch_item(options, &ua_header, kid_id).await {
                     // Fetch one level of replies
                     let replies = if let Some(reply_ids) = &comment.kids {
                         let mut replies = Vec::new();
                         for &reply_id in reply_ids.iter().take(5) {
-                            if let Ok(reply) = fetch_item(&client, &ua_header, reply_id).await {
+                            if let Ok(reply) = fetch_item(options, &ua_header, reply_id).await {
                                 replies.push(reply);
                             }
                         }
@@ -150,28 +138,35 @@ impl Fetcher for HackerNewsFetcher {
 }
 
 async fn fetch_item(
-    client: &reqwest::Client,
+    options: &FetchOptions,
     ua: &HeaderValue,
     id: u64,
 ) -> Result<HNItem, FetchError> {
     let url = format!("https://hacker-news.firebaseio.com/v0/item/{}.json", id);
+    let parsed = Url::parse(&url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-    let resp = client
-        .get(&url)
-        .header(USER_AGENT, ua.clone())
-        .send()
-        .await
-        .map_err(FetchError::from_reqwest)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, ua.clone());
 
-    if !resp.status().is_success() {
+    // THREAT[TM-SSRF-010]: manual redirect following re-validates each hop.
+    let (resp, _redirect_chain) = send_request_following_redirects(
+        parsed,
+        reqwest::Method::GET,
+        headers,
+        options,
+        API_TIMEOUT,
+    )
+    .await?;
+
+    if !(200..300).contains(&resp.status) {
         return Err(FetchError::FetcherError(format!(
             "HN API error: HTTP {}",
-            resp.status()
+            resp.status
         )));
     }
 
-    resp.json()
-        .await
+    let body = read_full_body(resp, options).await?;
+    serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse HN item: {}", e)))
 }
 

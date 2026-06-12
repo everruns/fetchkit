@@ -151,6 +151,27 @@ Central dispatcher that:
 - `"rss_feed"` - RSS/Atom feed entries
 - `"documentation"` - Documentation site content
 
+### HTTP Transport
+
+All fetchers perform their outbound HTTP exclusively through a pluggable
+`HttpTransport` (see `transport.rs`). The transport is a single-hop socket adapter:
+it never follows redirects and never performs DNS policy resolution. fetchkit owns
+URL validation, DNS policy (resolve-then-check, producing `TransportRequest.pinned_addrs`),
+manual per-hop redirect following, bot-auth signing, and body-size/timeout caps;
+only the socket-level send is delegated.
+
+`FetchOptions.transport` selects the implementation (`None` => default
+`ReqwestTransport`). A host application can supply its own transport to route
+fetchkit through a dedicated egress boundary without weakening any security policy.
+When `pinned_addrs` is non-empty a transport MUST connect only to those addresses
+(TM-SSRF-001, TM-SSRF-005).
+
+Hosts that consume fetchkit through the `Tool` surface inject the transport with
+`ToolBuilder::transport(Arc<dyn HttpTransport>)`; every Tool execution path
+(`execute`, `execute_with_status`, `execute_with_saver`, JSON `execution`/service)
+honors it, so the host keeps Tool's description/schema/llmtxt and FetchOptions
+assembly while owning egress.
+
 ### Configuration
 
 Fetchers receive `FetchOptions` for:

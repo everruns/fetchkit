@@ -10,10 +10,12 @@ use crate::dns::DnsPolicy;
 use crate::error::{FetchError, ToolError};
 use crate::fetchers::FetcherRegistry;
 use crate::file_saver::FileSaver;
+use crate::transport::HttpTransport;
 use crate::types::{FetchRequest, FetchResponse};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 use tower::Service;
@@ -115,7 +117,7 @@ pub struct ToolOutput {
 ///
 /// assert_eq!(tool.name(), "web_fetch");
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ToolBuilder {
     locale: String,
     /// Enable as_markdown option
@@ -145,6 +147,40 @@ pub struct ToolBuilder {
     /// Web Bot Authentication config.
     #[cfg(feature = "bot-auth")]
     bot_auth: Option<BotAuthConfig>,
+    /// Pluggable HTTP transport. None => default ReqwestTransport.
+    transport: Option<Arc<dyn HttpTransport>>,
+}
+
+// Manual Debug: `transport` is a trait object that does not implement Debug
+// (same pattern as FetchOptions).
+impl std::fmt::Debug for ToolBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("ToolBuilder");
+        d.field("locale", &self.locale)
+            .field("enable_markdown", &self.enable_markdown)
+            .field("enable_text", &self.enable_text)
+            .field("user_agent", &self.user_agent)
+            .field("allow_prefixes", &self.allow_prefixes)
+            .field("block_prefixes", &self.block_prefixes)
+            .field("dns_policy", &self.dns_policy)
+            .field("max_body_size", &self.max_body_size)
+            .field("enable_save_to_file", &self.enable_save_to_file)
+            .field("respect_proxy_env", &self.respect_proxy_env)
+            .field("allowed_ports", &self.allowed_ports)
+            .field("blocked_hosts", &self.blocked_hosts)
+            .field("same_host_redirects_only", &self.same_host_redirects_only);
+        #[cfg(feature = "bot-auth")]
+        d.field("bot_auth", &self.bot_auth);
+        d.field(
+            "transport",
+            &self
+                .transport
+                .as_ref()
+                .map(|_| "<custom>")
+                .unwrap_or("None"),
+        );
+        d.finish()
+    }
 }
 
 impl ToolBuilder {
@@ -295,6 +331,19 @@ impl ToolBuilder {
         self
     }
 
+    /// Set a custom HTTP transport for all tool execution paths.
+    ///
+    /// A host application can supply its own [`HttpTransport`] to route fetchkit's
+    /// outbound HTTP through a dedicated egress boundary while keeping the Tool
+    /// surface (description, schemas, llmtxt, `execute`, `execute_with_saver`).
+    /// fetchkit still performs URL validation, DNS policy resolution, redirect
+    /// following, bot-auth signing, and body/timeout caps; only the socket-level
+    /// send is delegated. Default: the built-in `ReqwestTransport`.
+    pub fn transport(mut self, transport: Arc<dyn HttpTransport>) -> Self {
+        self.transport = Some(transport);
+        self
+    }
+
     /// Apply a production-oriented hardening profile.
     ///
     /// This preset keeps private IP blocking enabled, ignores ambient proxy
@@ -336,6 +385,7 @@ impl ToolBuilder {
             same_host_redirects_only: self.same_host_redirects_only,
             #[cfg(feature = "bot-auth")]
             bot_auth: self.bot_auth.clone(),
+            transport: self.transport.clone(),
         }
     }
 
@@ -381,7 +431,7 @@ impl ToolBuilder {
 ///
 /// Created via [`ToolBuilder`]. Provides methods for executing fetch requests,
 /// retrieving schemas, and accessing tool metadata.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tool {
     locale: String,
     display_name: String,
@@ -401,6 +451,42 @@ pub struct Tool {
     same_host_redirects_only: bool,
     #[cfg(feature = "bot-auth")]
     bot_auth: Option<BotAuthConfig>,
+    transport: Option<Arc<dyn HttpTransport>>,
+}
+
+// Manual Debug: `transport` is a trait object that does not implement Debug
+// (same pattern as FetchOptions).
+impl std::fmt::Debug for Tool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("Tool");
+        d.field("locale", &self.locale)
+            .field("display_name", &self.display_name)
+            .field("description", &self.description)
+            .field("version", &self.version)
+            .field("enable_markdown", &self.enable_markdown)
+            .field("enable_text", &self.enable_text)
+            .field("user_agent", &self.user_agent)
+            .field("allow_prefixes", &self.allow_prefixes)
+            .field("block_prefixes", &self.block_prefixes)
+            .field("dns_policy", &self.dns_policy)
+            .field("max_body_size", &self.max_body_size)
+            .field("enable_save_to_file", &self.enable_save_to_file)
+            .field("respect_proxy_env", &self.respect_proxy_env)
+            .field("allowed_ports", &self.allowed_ports)
+            .field("blocked_hosts", &self.blocked_hosts)
+            .field("same_host_redirects_only", &self.same_host_redirects_only);
+        #[cfg(feature = "bot-auth")]
+        d.field("bot_auth", &self.bot_auth);
+        d.field(
+            "transport",
+            &self
+                .transport
+                .as_ref()
+                .map(|_| "<custom>")
+                .unwrap_or("None"),
+        );
+        d.finish()
+    }
 }
 
 impl Default for Tool {
@@ -563,6 +649,9 @@ impl Tool {
             same_host_redirects_only: self.same_host_redirects_only,
             #[cfg(feature = "bot-auth")]
             bot_auth: self.bot_auth.clone(),
+            // None => default ReqwestTransport; hosts inject a custom transport via
+            // ToolBuilder::transport and every Tool execution path honors it.
+            transport: self.transport.clone(),
         }
     }
 }

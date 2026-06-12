@@ -8,11 +8,13 @@ use crate::bot_auth::BotAuthConfig;
 use crate::dns::DnsPolicy;
 use crate::error::FetchError;
 use crate::fetchers::FetcherRegistry;
+use crate::transport::{HttpTransport, ReqwestTransport};
 use crate::types::{FetchRequest, FetchResponse};
+use std::sync::Arc;
 use url::Url;
 
 /// Fetch options that can be configured via tool builder
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct FetchOptions {
     /// Custom User-Agent
     pub user_agent: Option<String>,
@@ -43,9 +45,55 @@ pub struct FetchOptions {
     /// When set, outgoing requests are signed with Ed25519.
     #[cfg(feature = "bot-auth")]
     pub bot_auth: Option<BotAuthConfig>,
+    /// Pluggable HTTP transport. When `None`, the default [`ReqwestTransport`] is used.
+    ///
+    /// A host application can supply its own transport to route fetchkit's outbound
+    /// HTTP through a dedicated egress boundary. fetchkit still performs all URL
+    /// validation, DNS policy resolution, redirect following, and content handling;
+    /// only the socket-level send is delegated.
+    pub transport: Option<Arc<dyn HttpTransport>>,
+}
+
+// Manual Debug: `transport` is a trait object that does not implement Debug.
+impl std::fmt::Debug for FetchOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("FetchOptions");
+        d.field("user_agent", &self.user_agent)
+            .field("allow_prefixes", &self.allow_prefixes)
+            .field("block_prefixes", &self.block_prefixes)
+            .field("enable_markdown", &self.enable_markdown)
+            .field("enable_text", &self.enable_text)
+            .field("dns_policy", &self.dns_policy)
+            .field("max_body_size", &self.max_body_size)
+            .field("enable_save_to_file", &self.enable_save_to_file)
+            .field("respect_proxy_env", &self.respect_proxy_env)
+            .field("allowed_ports", &self.allowed_ports)
+            .field("blocked_hosts", &self.blocked_hosts)
+            .field("same_host_redirects_only", &self.same_host_redirects_only);
+        #[cfg(feature = "bot-auth")]
+        d.field("bot_auth", &self.bot_auth);
+        d.field(
+            "transport",
+            &self
+                .transport
+                .as_ref()
+                .map(|_| "<custom>")
+                .unwrap_or("None"),
+        );
+        d.finish()
+    }
 }
 
 impl FetchOptions {
+    /// Resolve the active transport, falling back to [`ReqwestTransport`] when none
+    /// was supplied.
+    pub(crate) fn transport(&self) -> Arc<dyn HttpTransport> {
+        match &self.transport {
+            Some(t) => Arc::clone(t),
+            None => Arc::new(ReqwestTransport::new()),
+        }
+    }
+
     pub(crate) fn validate_url(&self, url: &Url) -> Result<(), FetchError> {
         self.validate_host(url)?;
         self.validate_port(url)?;

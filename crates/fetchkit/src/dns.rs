@@ -81,6 +81,25 @@ impl DnsPolicy {
         }
     }
 
+    /// Produce the pinned socket addresses for a host that a transport must
+    /// connect to.
+    ///
+    /// When the policy blocks private IPs this runs resolve-then-check and returns
+    /// the validated address (TM-SSRF-001, TM-SSRF-005). When the policy is
+    /// permissive (`allow_all`) it returns an empty vec, signalling that the
+    /// transport may resolve the host itself.
+    ///
+    /// # Arguments
+    /// * `host` - Hostname to resolve
+    /// * `port` - Port to use in the returned SocketAddr
+    pub fn pinned_addrs(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, DnsPolicyError> {
+        if !self.block_private {
+            return Ok(Vec::new());
+        }
+        let addr = self.resolve_and_validate(host, port)?;
+        Ok(vec![addr])
+    }
+
     /// Resolve a hostname and validate all resolved IPs against the policy
     ///
     /// Returns the first valid (non-blocked) socket address, or an error if

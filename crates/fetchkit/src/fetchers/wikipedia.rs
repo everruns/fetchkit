@@ -6,13 +6,14 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{
-    read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE, TRUNCATION_MESSAGE,
+    read_body_with_timeout, send_request_following_redirects, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+    TRUNCATION_MESSAGE,
 };
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
@@ -112,19 +113,6 @@ impl Fetcher for WikipediaFetcher {
             .ok_or_else(|| FetchError::FetcherError("Not a valid Wikipedia URL".to_string()))?;
 
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(3));
-
-        if !options.respect_proxy_env {
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
 
@@ -133,17 +121,24 @@ impl Fetcher for WikipediaFetcher {
             "https://{}.wikipedia.org/api/rest_v1/page/summary/{}",
             lang, title
         );
+        let parsed_summary = Url::parse(&summary_url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        let summary_resp = client
-            .get(&summary_url)
-            .header(USER_AGENT, ua_header.clone())
-            .header(ACCEPT, HeaderValue::from_static("application/json"))
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let mut summary_headers = HeaderMap::new();
+        summary_headers.insert(USER_AGENT, ua_header.clone());
+        summary_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
 
-        let status_code = summary_resp.status().as_u16();
-        if !summary_resp.status().is_success() {
+        // THREAT[TM-SSRF-010]: manual redirect following re-validates each hop.
+        let (summary_resp, _) = send_request_following_redirects(
+            parsed_summary,
+            reqwest::Method::GET,
+            summary_headers,
+            options,
+            API_TIMEOUT,
+        )
+        .await?;
+
+        let status_code = summary_resp.status;
+        if !(200..300).contains(&status_code) {
             let error_msg = if status_code == 404 {
                 format!("Article '{}' not found on {}.wikipedia.org", title, lang)
             } else {
@@ -170,23 +165,33 @@ impl Fetcher for WikipediaFetcher {
             lang, title
         );
 
-        let full_content = match client
-            .get(&html_url)
-            .header(USER_AGENT, ua_header)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                let (html_body, truncated) =
-                    read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
-                let html = String::from_utf8_lossy(&html_body);
-                let mut markdown = crate::convert::html_to_markdown(&html);
-                if truncated {
-                    markdown.push_str(TRUNCATION_MESSAGE);
+        let full_content = match Url::parse(&html_url) {
+            Ok(parsed_html) => {
+                let mut html_headers = HeaderMap::new();
+                html_headers.insert(USER_AGENT, ua_header);
+                match send_request_following_redirects(
+                    parsed_html,
+                    reqwest::Method::GET,
+                    html_headers,
+                    options,
+                    API_TIMEOUT,
+                )
+                .await
+                {
+                    Ok((resp, _)) if (200..300).contains(&resp.status) => {
+                        let (html_body, truncated) =
+                            read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+                        let html = String::from_utf8_lossy(&html_body);
+                        let mut markdown = crate::convert::html_to_markdown(&html);
+                        if truncated {
+                            markdown.push_str(TRUNCATION_MESSAGE);
+                        }
+                        Some(markdown)
+                    }
+                    _ => None,
                 }
-                Some(markdown)
             }
-            _ => None,
+            Err(_) => None,
         };
 
         let content = format_wikipedia_response(&summary, full_content.as_deref(), &lang);

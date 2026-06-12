@@ -5,12 +5,14 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
-use crate::fetchers::default::{read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE};
+use crate::fetchers::default::{
+    read_body_with_timeout, send_request_following_redirects, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
@@ -178,19 +180,6 @@ impl Fetcher for PackageRegistryFetcher {
         })?;
 
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(3));
-
-        if !options.respect_proxy_env {
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
@@ -198,7 +187,7 @@ impl Fetcher for PackageRegistryFetcher {
         let content = match registry {
             Registry::PyPI { name, version } => {
                 fetch_pypi(
-                    &client,
+                    options,
                     &ua_header,
                     &name,
                     version.as_deref(),
@@ -207,9 +196,9 @@ impl Fetcher for PackageRegistryFetcher {
                 .await?
             }
             Registry::CratesIo { name } => {
-                fetch_crates_io(&client, &ua_header, &name, max_body_size).await?
+                fetch_crates_io(options, &ua_header, &name, max_body_size).await?
             }
-            Registry::Npm { name } => fetch_npm(&client, &ua_header, &name, max_body_size).await?,
+            Registry::Npm { name } => fetch_npm(options, &ua_header, &name, max_body_size).await?,
         };
 
         Ok(FetchResponse {
@@ -223,8 +212,45 @@ impl Fetcher for PackageRegistryFetcher {
     }
 }
 
+/// Issue a single registry API GET through the configured transport, with manual
+/// per-hop redirect validation (TM-SSRF-010). Returns the capped body bytes.
+async fn registry_get(
+    options: &FetchOptions,
+    ua: &HeaderValue,
+    accept: Option<HeaderValue>,
+    api_url: &str,
+    max_body_size: usize,
+    api_name: &str,
+) -> Result<bytes::Bytes, FetchError> {
+    let parsed = Url::parse(api_url).map_err(|_| FetchError::InvalidUrlScheme)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, ua.clone());
+    if let Some(accept) = accept {
+        headers.insert(ACCEPT, accept);
+    }
+
+    let (resp, _redirect_chain) = send_request_following_redirects(
+        parsed,
+        reqwest::Method::GET,
+        headers,
+        options,
+        API_TIMEOUT,
+    )
+    .await?;
+
+    if !(200..300).contains(&resp.status) {
+        return Err(FetchError::FetcherError(format!(
+            "{} API error: HTTP {}",
+            api_name, resp.status
+        )));
+    }
+
+    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    Ok(body)
+}
+
 async fn fetch_pypi(
-    client: &reqwest::Client,
+    options: &FetchOptions,
     ua: &HeaderValue,
     name: &str,
     version: Option<&str>,
@@ -235,21 +261,7 @@ async fn fetch_pypi(
         None => format!("https://pypi.org/pypi/{}/json", name),
     };
 
-    let resp = client
-        .get(&api_url)
-        .header(USER_AGENT, ua.clone())
-        .send()
-        .await
-        .map_err(FetchError::from_reqwest)?;
-
-    if !resp.status().is_success() {
-        return Err(FetchError::FetcherError(format!(
-            "PyPI API error: HTTP {}",
-            resp.status()
-        )));
-    }
-
-    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    let body = registry_get(options, ua, None, &api_url, max_body_size, "PyPI").await?;
     let data: PyPIResponse = serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse PyPI data: {}", e)))?;
 
@@ -300,29 +312,22 @@ async fn fetch_pypi(
 }
 
 async fn fetch_crates_io(
-    client: &reqwest::Client,
+    options: &FetchOptions,
     ua: &HeaderValue,
     name: &str,
     max_body_size: usize,
 ) -> Result<String, FetchError> {
     let api_url = format!("https://crates.io/api/v1/crates/{}", name);
 
-    let resp = client
-        .get(&api_url)
-        .header(USER_AGENT, ua.clone())
-        .header(ACCEPT, HeaderValue::from_static("application/json"))
-        .send()
-        .await
-        .map_err(FetchError::from_reqwest)?;
-
-    if !resp.status().is_success() {
-        return Err(FetchError::FetcherError(format!(
-            "crates.io API error: HTTP {}",
-            resp.status()
-        )));
-    }
-
-    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    let body = registry_get(
+        options,
+        ua,
+        Some(HeaderValue::from_static("application/json")),
+        &api_url,
+        max_body_size,
+        "crates.io",
+    )
+    .await?;
     let data: CratesIoResponse = serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse crates.io data: {}", e)))?;
 
@@ -361,29 +366,22 @@ async fn fetch_crates_io(
 }
 
 async fn fetch_npm(
-    client: &reqwest::Client,
+    options: &FetchOptions,
     ua: &HeaderValue,
     name: &str,
     max_body_size: usize,
 ) -> Result<String, FetchError> {
     let api_url = format!("https://registry.npmjs.org/{}", name);
 
-    let resp = client
-        .get(&api_url)
-        .header(USER_AGENT, ua.clone())
-        .header(ACCEPT, HeaderValue::from_static("application/json"))
-        .send()
-        .await
-        .map_err(FetchError::from_reqwest)?;
-
-    if !resp.status().is_success() {
-        return Err(FetchError::FetcherError(format!(
-            "npm API error: HTTP {}",
-            resp.status()
-        )));
-    }
-
-    let (body, _) = read_body_with_timeout(resp, BODY_TIMEOUT, max_body_size).await?;
+    let body = registry_get(
+        options,
+        ua,
+        Some(HeaderValue::from_static("application/json")),
+        &api_url,
+        max_body_size,
+        "npm",
+    )
+    .await?;
     let data: NpmResponse = serde_json::from_slice(&body)
         .map_err(|e| FetchError::FetcherError(format!("Failed to parse npm data: {}", e)))?;
 

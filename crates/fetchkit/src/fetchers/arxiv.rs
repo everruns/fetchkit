@@ -5,12 +5,14 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
-use crate::fetchers::default::{read_body_with_timeout, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE};
+use crate::fetchers::default::{
+    read_body_with_timeout, send_request_following_redirects, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use std::time::Duration;
 use url::Url;
 
@@ -99,37 +101,31 @@ impl Fetcher for ArXivFetcher {
             .ok_or_else(|| FetchError::FetcherError("Not a valid arXiv URL".to_string()))?;
 
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::limited(3));
-
-        if !options.respect_proxy_env {
-            client_builder = client_builder.no_proxy();
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
 
         // Fetch via arXiv API (returns Atom XML)
         let api_url = format!("https://export.arxiv.org/api/query?id_list={}", paper_id);
+        let parsed_api = Url::parse(&api_url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        let response = client
-            .get(&api_url)
-            .header(USER_AGENT, ua_header)
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, ua_header);
 
-        if !response.status().is_success() {
+        // THREAT[TM-SSRF-010]: manual redirect following re-validates each hop.
+        let (response, _redirect_chain) = send_request_following_redirects(
+            parsed_api,
+            reqwest::Method::GET,
+            headers,
+            options,
+            API_TIMEOUT,
+        )
+        .await?;
+
+        if !(200..300).contains(&response.status) {
             return Ok(FetchResponse {
                 url: request.url.clone(),
-                status_code: response.status().as_u16(),
-                error: Some(format!("arXiv API error: HTTP {}", response.status())),
+                status_code: response.status,
+                error: Some(format!("arXiv API error: HTTP {}", response.status)),
                 ..Default::default()
             });
         }

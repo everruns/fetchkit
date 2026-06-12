@@ -5,16 +5,21 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_full_body, transport_request};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, ACCEPT, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 
 const API_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// GitHub API host and port (DNS-pinned per request).
+const GITHUB_API_HOST: &str = "api.github.com";
+const GITHUB_API_PORT: u16 = 443;
 
 /// Max file size we'll return inline (1 MB, matching GitHub contents API limit)
 const MAX_INLINE_SIZE: u64 = 1_048_576;
@@ -142,31 +147,7 @@ impl Fetcher for GitHubCodeFetcher {
         let parsed = Self::parse_url(&url)
             .ok_or_else(|| FetchError::FetcherError("Not a valid GitHub blob URL".to_string()))?;
 
-        // Build HTTP client
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none());
-
-        if !options.respect_proxy_env {
-            // THREAT[TM-NET-004]: Ignore ambient proxy env by default
-            client_builder = client_builder.no_proxy();
-        }
-
-        if options.dns_policy.block_private {
-            let validated_addr = options
-                .dns_policy
-                .resolve_and_validate("api.github.com", 443)
-                .map_err(|_| FetchError::BlockedUrl)?;
-            // THREAT[TM-SSRF-010]: Pin DNS
-            client_builder = client_builder.resolve("api.github.com", validated_addr);
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
         let accept_header = HeaderValue::from_static("application/vnd.github+json");
@@ -177,18 +158,27 @@ impl Fetcher for GitHubCodeFetcher {
             parsed.owner, parsed.repo, parsed.path, parsed.git_ref
         );
         let parsed_api_url = Url::parse(&api_url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        // THREAT[TM-INPUT]: enforce host/port policy on the GitHub API subrequest (PR #131).
         options.validate_url(&parsed_api_url)?;
 
-        let response = client
-            .get(parsed_api_url)
-            .header(USER_AGENT, ua_header)
-            .header(ACCEPT, accept_header)
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, ua_header);
+        headers.insert(ACCEPT, accept_header);
 
-        let status_code = response.status().as_u16();
-        if !response.status().is_success() {
+        // THREAT[TM-SSRF-010]: single-hop request, redirects not followed.
+        let response = transport_request(
+            parsed_api_url,
+            reqwest::Method::GET,
+            headers,
+            options,
+            API_TIMEOUT,
+            GITHUB_API_HOST,
+            GITHUB_API_PORT,
+        )
+        .await?;
+
+        let status_code = response.status;
+        if !(200..300).contains(&status_code) {
             let error_msg = if status_code == 404 {
                 format!(
                     "{}/{}:{} {} not found",
@@ -207,9 +197,8 @@ impl Fetcher for GitHubCodeFetcher {
             });
         }
 
-        let contents: GitHubContents = response
-            .json()
-            .await
+        let body = read_full_body(response, options).await?;
+        let contents: GitHubContents = serde_json::from_slice(&body)
             .map_err(|e| FetchError::FetcherError(format!("Failed to parse contents: {}", e)))?;
 
         // Handle directories (content_type == "dir")

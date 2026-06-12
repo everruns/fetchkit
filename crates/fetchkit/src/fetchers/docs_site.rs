@@ -11,8 +11,8 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{
-    apply_bot_auth_if_enabled, read_body_with_timeout, send_request_following_redirects,
-    BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE, TRUNCATION_MESSAGE,
+    apply_bot_auth_if_enabled, header_value, read_body_with_timeout, read_full_body,
+    send_request_following_redirects, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE, TRUNCATION_MESSAGE,
 };
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
@@ -160,18 +160,12 @@ impl Fetcher for DocsSiteFetcher {
         )
         .await?;
 
-        let status_code = response.status().as_u16();
-        let final_url = response.url().to_string();
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+        let status_code = response.status;
+        let final_url = response.url.to_string();
+        let content_type = header_value(&response.headers, "content-type").map(|s| s.to_string());
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| FetchError::RequestError(e.to_string()))?;
+        let body_bytes = read_full_body(response, options).await?;
+        let body = String::from_utf8_lossy(&body_bytes).into_owned();
 
         // If HTML, convert to markdown for cleaner docs consumption
         let (content, format) = if content_type
@@ -220,15 +214,11 @@ async fn fetch_llms_txt_direct(
     )
     .await?;
 
-    let status_code = response.status().as_u16();
-    let final_url = response.url().to_string();
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    let status_code = response.status;
+    let final_url = response.url.to_string();
+    let content_type = header_value(&response.headers, "content-type").map(|s| s.to_string());
 
-    if !response.status().is_success() {
+    if !(200..300).contains(&status_code) {
         return Ok(FetchResponse {
             url: final_url,
             status_code,
@@ -283,24 +273,23 @@ async fn try_fetch_llms_txt(
     .await
     .ok()?;
 
-    if !response.status().is_success() {
+    if !(200..300).contains(&response.status) {
         return None;
     }
 
     // Reject HTML error pages masquerading as 200 OK
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let content_type = header_value(&response.headers, "content-type").unwrap_or("");
 
     if content_type.contains("text/html") {
         return None;
     }
 
-    let body = response.bytes().await.ok()?;
+    // Cap at one byte over the limit so the size check below still rejects oversize bodies.
+    let (body, truncated) = read_body_with_timeout(response, BODY_TIMEOUT, MAX_LLMS_TXT_SIZE + 1)
+        .await
+        .ok()?;
 
-    if body.len() > MAX_LLMS_TXT_SIZE {
+    if truncated || body.len() > MAX_LLMS_TXT_SIZE {
         return None;
     }
 

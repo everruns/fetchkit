@@ -82,6 +82,7 @@ mod error;
 pub mod fetchers;
 pub mod file_saver;
 mod tool;
+pub mod transport;
 mod types;
 
 pub use client::{batch_fetch, batch_fetch_with_options, fetch, fetch_with_options, FetchOptions};
@@ -99,6 +100,10 @@ pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
     Tool, ToolBuilder, ToolExecution, ToolImage, ToolOutput, ToolOutputMetadata, ToolService,
     ToolStatus,
+};
+pub use transport::{
+    BodyStream, HttpTransport, ReqwestTransport, TransportError, TransportMethod, TransportRequest,
+    TransportResponse,
 };
 pub use types::{FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata};
 

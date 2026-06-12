@@ -5,11 +5,12 @@
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
+use crate::fetchers::default::{read_full_body, transport_request};
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
-use reqwest::header::{HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
@@ -126,32 +127,29 @@ impl Fetcher for StackOverflowFetcher {
         })?;
 
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-        let mut client_builder = reqwest::Client::builder()
-            .connect_timeout(API_TIMEOUT)
-            .timeout(API_TIMEOUT)
-            // THREAT[TM-SSRF-010]: no redirect following for API calls
-            .redirect(reqwest::redirect::Policy::none());
-
-        if !options.respect_proxy_env {
-            // THREAT[TM-NET-004]: Ignore ambient proxy env by default
-            client_builder = client_builder.no_proxy();
-        }
-
-        if options.dns_policy.block_private {
-            let validated_addr = options
-                .dns_policy
-                .resolve_and_validate(STACKEXCHANGE_API_HOST, STACKEXCHANGE_API_PORT)
-                .map_err(|_| FetchError::BlockedUrl)?;
-            // THREAT[TM-SSRF-005]: pin validated DNS answer for API host
-            client_builder = client_builder.resolve(STACKEXCHANGE_API_HOST, validated_addr);
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(FetchError::ClientBuildError)?;
-
         let ua_header = HeaderValue::from_str(user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_USER_AGENT));
+
+        // THREAT[TM-SSRF-010]: single-hop transport request, redirects not followed.
+        // THREAT[TM-SSRF-005]: DNS pinned to the Stack Exchange API host per request.
+        let api_get = |url: String| {
+            let ua = ua_header.clone();
+            async move {
+                let parsed = Url::parse(&url).map_err(|_| FetchError::InvalidUrlScheme)?;
+                let mut headers = HeaderMap::new();
+                headers.insert(USER_AGENT, ua);
+                transport_request(
+                    parsed,
+                    reqwest::Method::GET,
+                    headers,
+                    options,
+                    API_TIMEOUT,
+                    STACKEXCHANGE_API_HOST,
+                    STACKEXCHANGE_API_PORT,
+                )
+                .await
+            }
+        };
 
         // Fetch question with markdown body
         let question_url = format!(
@@ -159,15 +157,10 @@ impl Fetcher for StackOverflowFetcher {
             question_id, site
         );
 
-        let q_response = client
-            .get(&question_url)
-            .header(USER_AGENT, ua_header.clone())
-            .send()
-            .await
-            .map_err(FetchError::from_reqwest)?;
+        let q_response = api_get(question_url).await?;
 
-        let status_code = q_response.status().as_u16();
-        if !q_response.status().is_success() {
+        let status_code = q_response.status;
+        if !(200..300).contains(&status_code) {
             let error_msg = if status_code == 404 {
                 format!("Question {} not found on {}", question_id, site)
             } else {
@@ -181,7 +174,8 @@ impl Fetcher for StackOverflowFetcher {
             });
         }
 
-        let q_data: ApiResponse<Question> = q_response.json().await.map_err(|e| {
+        let q_body = read_full_body(q_response, options).await?;
+        let q_data: ApiResponse<Question> = serde_json::from_slice(&q_body).map_err(|e| {
             FetchError::FetcherError(format!("Failed to parse question data: {}", e))
         })?;
 
@@ -196,17 +190,15 @@ impl Fetcher for StackOverflowFetcher {
                 question_id, site, MAX_ANSWERS
             );
 
-            match client
-                .get(&answers_url)
-                .header(USER_AGENT, ua_header)
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => resp
-                    .json::<ApiResponse<Answer>>()
-                    .await
-                    .ok()
-                    .map(|r| r.items),
+            match api_get(answers_url).await {
+                Ok(resp) if (200..300).contains(&resp.status) => {
+                    match read_full_body(resp, options).await {
+                        Ok(body) => serde_json::from_slice::<ApiResponse<Answer>>(&body)
+                            .ok()
+                            .map(|r| r.items),
+                        Err(_) => None,
+                    }
+                }
                 _ => None,
             }
         } else {

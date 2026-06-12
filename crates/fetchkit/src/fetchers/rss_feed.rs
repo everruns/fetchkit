@@ -6,8 +6,8 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{
-    apply_bot_auth_if_enabled, read_body_with_timeout, send_request_following_redirects,
-    BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+    apply_bot_auth_if_enabled, header_value, read_body_with_timeout,
+    send_request_following_redirects, BODY_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
 };
 use crate::fetchers::Fetcher;
 use crate::types::{FetchRequest, FetchResponse};
@@ -112,9 +112,9 @@ impl Fetcher for RSSFeedFetcher {
         )
         .await?;
 
-        let status_code = response.status().as_u16();
-        let final_url = response.url().to_string();
-        if !response.status().is_success() {
+        let status_code = response.status;
+        let final_url = response.url.to_string();
+        if !(200..300).contains(&status_code) {
             return Ok(FetchResponse {
                 url: final_url,
                 status_code,
@@ -125,10 +125,7 @@ impl Fetcher for RSSFeedFetcher {
         }
 
         // Check content-type for feed detection (covers non-URL-pattern feeds)
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
+        let content_type = header_value(&response.headers, reqwest::header::CONTENT_TYPE.as_str())
             .unwrap_or("")
             .to_string();
 
