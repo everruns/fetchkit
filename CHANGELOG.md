@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.4.0] - 2026-06-12
 
-- Pluggable HTTP transport abstraction (`HttpTransport`, `TransportRequest`, `TransportResponse`, `TransportError`, `ReqwestTransport`). A host application can route fetchkit's outbound HTTP through its own egress boundary via `FetchOptions::transport`, while fetchkit retains URL validation, DNS policy (resolve-then-check, pinned addrs), manual redirect following, bot-auth signing, and body-size/timeout caps. Default behavior is unchanged (`ReqwestTransport`).
+### Highlights
+
+- Pluggable HTTP transport: host applications can route all of fetchkit's outbound HTTP through their own egress boundary via `FetchOptions::transport` or `ToolBuilder::transport`, while fetchkit retains URL validation, DNS policy (resolve-then-check with pinned addresses), manual redirect following, bot-auth signing, and body-size/timeout caps. Default behavior is unchanged (`ReqwestTransport`).
+- Policy hardening alongside the transport refactor: YouTube and HackerNews API hosts are now DNS-pinned, Wikipedia/package-registry/arXiv/HackerNews redirects are validated per hop instead of delegated to reqwest, and specialized-fetcher JSON reads are capped at `max_body_size`.
+- Local file saver symlink handling hardened.
+
+### Breaking Changes
+
+- `FetchOptions` gained a public `transport` field. Code constructing `FetchOptions` with an exhaustive struct literal must add the field or switch to `..Default::default()`. No behavior change when `transport` is `None`.
+- `FetchOptions`, `Tool`, and `ToolBuilder` now have manual `Debug` impls (the transport renders as `"<custom>"` or `"None"`); derived-`Debug` output formats changed accordingly.
+
+### What's Changed
+
+* feat(transport): pluggable HttpTransport abstraction ([#135](https://github.com/everruns/fetchkit/pull/135))
+* fix(fetchkit): harden local file saver symlink handling ([f857737](https://github.com/everruns/fetchkit/commit/f857737))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.3.0...v0.4.0
 
 ## [0.3.0] - 2026-05-18
 
@@ -198,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/everruns/fetchkit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/everruns/fetchkit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/everruns/fetchkit/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/everruns/fetchkit/compare/v0.1.2...v0.1.3
