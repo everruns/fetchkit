@@ -144,6 +144,8 @@ pub struct ToolBuilder {
     blocked_hosts: Vec<String>,
     /// Restrict redirects to the original host only.
     same_host_redirects_only: bool,
+    /// Enable rakers-rendered HTML fetching. Requests still opt in with render=rakers.
+    enable_render_rakers: bool,
     /// Web Bot Authentication config.
     #[cfg(feature = "bot-auth")]
     bot_auth: Option<BotAuthConfig>,
@@ -168,7 +170,8 @@ impl std::fmt::Debug for ToolBuilder {
             .field("respect_proxy_env", &self.respect_proxy_env)
             .field("allowed_ports", &self.allowed_ports)
             .field("blocked_hosts", &self.blocked_hosts)
-            .field("same_host_redirects_only", &self.same_host_redirects_only);
+            .field("same_host_redirects_only", &self.same_host_redirects_only)
+            .field("enable_render_rakers", &self.enable_render_rakers);
         #[cfg(feature = "bot-auth")]
         d.field("bot_auth", &self.bot_auth);
         d.field(
@@ -244,6 +247,16 @@ impl ToolBuilder {
     /// Disabled by default — opt-in only.
     pub fn enable_save_to_file(mut self, enable: bool) -> Self {
         self.enable_save_to_file = enable;
+        self
+    }
+
+    /// Enable the rakers rendered-fetch backend.
+    ///
+    /// This method is only available when built with the `render-rakers` feature.
+    /// Requests must still set `render: "rakers"` to use it.
+    #[cfg(feature = "render-rakers")]
+    pub fn enable_render_rakers(mut self, enable: bool) -> Self {
+        self.enable_render_rakers = enable;
         self
     }
 
@@ -383,6 +396,7 @@ impl ToolBuilder {
             allowed_ports: self.allowed_ports.clone(),
             blocked_hosts: self.blocked_hosts.clone(),
             same_host_redirects_only: self.same_host_redirects_only,
+            enable_render_rakers: self.enable_render_rakers,
             #[cfg(feature = "bot-auth")]
             bot_auth: self.bot_auth.clone(),
             transport: self.transport.clone(),
@@ -418,6 +432,7 @@ impl ToolBuilder {
             self.enable_markdown,
             self.enable_text,
             self.enable_save_to_file,
+            self.enable_render_rakers,
         )
     }
 
@@ -449,6 +464,7 @@ pub struct Tool {
     allowed_ports: Vec<u16>,
     blocked_hosts: Vec<String>,
     same_host_redirects_only: bool,
+    enable_render_rakers: bool,
     #[cfg(feature = "bot-auth")]
     bot_auth: Option<BotAuthConfig>,
     transport: Option<Arc<dyn HttpTransport>>,
@@ -474,7 +490,8 @@ impl std::fmt::Debug for Tool {
             .field("respect_proxy_env", &self.respect_proxy_env)
             .field("allowed_ports", &self.allowed_ports)
             .field("blocked_hosts", &self.blocked_hosts)
-            .field("same_host_redirects_only", &self.same_host_redirects_only);
+            .field("same_host_redirects_only", &self.same_host_redirects_only)
+            .field("enable_render_rakers", &self.enable_render_rakers);
         #[cfg(feature = "bot-auth")]
         d.field("bot_auth", &self.bot_auth);
         d.field(
@@ -551,6 +568,7 @@ impl Tool {
             self.enable_markdown,
             self.enable_text,
             self.enable_save_to_file,
+            self.enable_render_rakers,
         )
     }
 
@@ -652,6 +670,7 @@ impl Tool {
             allowed_ports: self.allowed_ports.clone(),
             blocked_hosts: self.blocked_hosts.clone(),
             same_host_redirects_only: self.same_host_redirects_only,
+            enable_render_rakers: self.enable_render_rakers,
             #[cfg(feature = "bot-auth")]
             bot_auth: self.bot_auth.clone(),
             // None => default ReqwestTransport; hosts inject a custom transport via
@@ -755,6 +774,7 @@ fn validate_args(tool: &Tool, args: &Value) -> Result<(), ToolError> {
             "as_text" => tool.enable_text,
             "save_to_file" => tool.enable_save_to_file,
             "content_focus" | "if_none_match" | "if_modified_since" | "crawl" | "max_pages" => true,
+            "render" => tool.enable_render_rakers,
             _ => false,
         };
 
@@ -792,6 +812,7 @@ fn build_input_schema(
     enable_markdown: bool,
     enable_text: bool,
     enable_save_to_file: bool,
+    enable_render_rakers: bool,
 ) -> Value {
     let mut properties = Map::new();
     properties.insert(
@@ -826,6 +847,17 @@ fn build_input_schema(
             json!({
                 "type": "string",
                 "description": "Adapter-defined destination path"
+            }),
+        );
+    }
+
+    if enable_render_rakers {
+        properties.insert(
+            "render".to_string(),
+            json!({
+                "type": "string",
+                "enum": ["rakers"],
+                "description": "Optional rendered fetch backend. rakers is lightweight partial JS/DOM rendering, not a full browser."
             }),
         );
     }
@@ -902,7 +934,8 @@ fn build_output_schema() -> Value {
             "quality": {"type": "object"},
             "crawl": {"type": "object"},
             "redirect_chain": {"type": "array", "items": {"type": "string"}},
-            "is_paywall": {"type": "boolean"}
+            "is_paywall": {"type": "boolean"},
+            "rendered_by": {"type": "string", "enum": ["rakers"]}
         },
         "required": ["url", "status_code"],
         "additionalProperties": false
@@ -1056,6 +1089,16 @@ fn build_help(tool: &Tool) -> String {
         parameter_description(tool.locale(), "max_pages"),
     ));
 
+    if tool.enable_render_rakers {
+        rows.push(table_row(
+            "render",
+            "string",
+            "no",
+            "—",
+            parameter_description(tool.locale(), "render"),
+        ));
+    }
+
     let adapters = if tool.enable_save_to_file {
         if is_ukrainian(tool.locale()) {
             "- `FileSaver` (необов’язковий): потрібен, коли задано `save_to_file`.\n"
@@ -1145,6 +1188,7 @@ fn parameter_description(locale: &str, field: &str) -> &'static str {
         (true, "content_focus") => "`full`, `main`, `readable`, або `agent`",
         (true, "crawl") => "Обмежене same-origin виявлення сторінок для агентів",
         (true, "max_pages") => "Максимум сторінок для crawl, включно з початковою",
+        (true, "render") => "Необов’язковий backend рендерингу: `rakers`",
         (false, "url") => "HTTP/HTTPS URL, or a bare domain URL normalized to `https://`",
         (false, "method") => "`GET` or `HEAD`",
         (false, "as_markdown") => "Convert HTML to markdown",
@@ -1153,6 +1197,7 @@ fn parameter_description(locale: &str, field: &str) -> &'static str {
         (false, "content_focus") => "`full`, `main`, `readable`, or `agent`",
         (false, "crawl") => "Bounded same-origin page discovery for agents",
         (false, "max_pages") => "Maximum crawl pages, including the seed",
+        (false, "render") => "Optional rendered-fetch backend: `rakers`",
         _ => "",
     }
 }
@@ -1174,6 +1219,7 @@ fn map_fetch_error(locale: &str, err: FetchError) -> ToolError {
         FetchError::FetcherError(_) => user_error(locale, user_text(locale, "fetcher_error")),
         FetchError::SaveError(_) => user_error(locale, user_text(locale, "save_error")),
         FetchError::SaverNotAvailable => user_error(locale, user_text(locale, "saver_missing")),
+        FetchError::RenderNotAvailable => user_error(locale, user_text(locale, "render_missing")),
     }
 }
 
@@ -1209,6 +1255,7 @@ fn user_text(locale: &str, key: &str) -> &'static str {
         (true, "fetcher_error") => "Не вдалося обробити відповідь цього URL.",
         (true, "save_error") => "Не вдалося зберегти файл. Перевірте шлях призначення.",
         (true, "saver_missing") => "save_to_file потребує адаптер FileSaver.",
+        (true, "render_missing") => "render потребує увімкнений backend рендерингу.",
         (false, "missing_url") => "url is required.",
         (false, "invalid_scheme") => "URL must be http://, https://, or a bare domain URL.",
         (false, "invalid_method") => "Method must be GET or HEAD.",
@@ -1221,6 +1268,7 @@ fn user_text(locale: &str, key: &str) -> &'static str {
         (false, "fetcher_error") => "Could not process the response for this URL.",
         (false, "save_error") => "Could not save the file. Check the destination path.",
         (false, "saver_missing") => "save_to_file requires the FileSaver adapter.",
+        (false, "render_missing") => "render requires an enabled rendered-fetch backend.",
         _ => "Tool execution failed.",
     }
 }

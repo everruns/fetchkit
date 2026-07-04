@@ -165,6 +165,124 @@ async fn test_html_to_markdown() {
 }
 
 #[tokio::test]
+async fn test_render_rakers_request_requires_enabled_backend() {
+    let result = fetch_with_options(
+        FetchRequest::new("https://example.com")
+            .as_markdown()
+            .render_rakers(),
+        FetchOptions {
+            enable_markdown: true,
+            enable_text: true,
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(matches!(result, Err(FetchError::RenderNotAvailable)));
+}
+
+#[test]
+fn test_tool_schema_hides_render_by_default() {
+    let schema = Tool::builder().build_input_schema();
+    assert!(schema["properties"].get("render").is_none());
+}
+
+#[cfg(feature = "render-rakers")]
+#[test]
+fn test_tool_schema_exposes_render_when_rakers_enabled() {
+    let schema = Tool::builder()
+        .enable_render_rakers(true)
+        .build_input_schema();
+    assert_eq!(schema["properties"]["render"]["enum"][0], "rakers");
+}
+
+#[cfg(feature = "render-rakers")]
+#[tokio::test]
+async fn test_render_rakers_executes_inline_js_before_markdown_conversion() {
+    let server = MockServer::start().await;
+    let html = r#"<!doctype html>
+<html>
+  <body>
+    <div id="app">Loading</div>
+    <script>
+      document.body.innerHTML = '<main><h1>Rendered Inline</h1><p>Ready</p></main>';
+    </script>
+  </body>
+</html>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/spa"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(html, "text/html"))
+        .mount(&server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .enable_render_rakers(true)
+        .build();
+    let response = tool
+        .execute(
+            FetchRequest::new(format!("{}/spa", server.uri()))
+                .as_markdown()
+                .render_rakers(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.rendered_by.as_deref(), Some("rakers"));
+    let content = response.content.unwrap();
+    assert!(content.contains("# Rendered Inline"));
+    assert!(content.contains("Ready"));
+    assert!(!content.contains("Loading"));
+}
+
+#[cfg(feature = "render-rakers")]
+#[tokio::test]
+async fn test_render_rakers_does_not_fetch_page_subresources() {
+    let server = MockServer::start().await;
+    let html = r#"<!doctype html>
+<html>
+  <body>
+    <main><h1>Fallback</h1></main>
+    <script>
+      fetch('/api').then(function () {
+        document.body.innerHTML = '<h1>Fetched</h1>';
+      });
+    </script>
+  </body>
+</html>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/spa"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(html, "text/html"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("leak"))
+        .mount(&server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .enable_render_rakers(true)
+        .build();
+    let response = tool
+        .execute(
+            FetchRequest::new(format!("{}/spa", server.uri()))
+                .as_markdown()
+                .render_rakers(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.rendered_by.as_deref(), Some("rakers"));
+    assert!(response.content.unwrap().contains("# Fetched"));
+    let requests = server.received_requests().await.unwrap();
+    assert!(!requests.iter().any(|req| req.url.path() == "/api"));
+}
+
+#[tokio::test]
 async fn test_html_to_text() {
     let mock_server = MockServer::start().await;
 

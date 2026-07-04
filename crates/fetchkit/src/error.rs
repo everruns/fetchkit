@@ -57,6 +57,10 @@ pub enum FetchError {
     /// No FileSaver provided but save_to_file was requested
     #[error("File saving not available")]
     SaverNotAvailable,
+
+    /// Rendered fetch requested but not enabled or not compiled in
+    #[error("Rendered fetch backend not available")]
+    RenderNotAvailable,
 }
 
 impl FetchError {

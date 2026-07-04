@@ -172,6 +172,39 @@ Hosts that consume fetchkit through the `Tool` surface inject the transport with
 honors it, so the host keeps Tool's description/schema/llmtxt and FetchOptions
 assembly while owning egress.
 
+### Browser-Rendered Fetching
+
+Browser-rendered fetching is optional and MUST NOT be enabled by default.
+It is a fetcher/render-backend concern, not an `HttpTransport` concern:
+rendering needs page lifecycle, JavaScript execution, subresource policy,
+DOM snapshotting, and wait strategy, while `HttpTransport` remains a
+single-hop socket adapter.
+
+The first lightweight rendered mode MUST be exposed explicitly behind a
+Cargo feature named `render-rakers`. It may use the rakers-style approach:
+parse HTML, execute JavaScript in a lightweight runtime with a partial DOM,
+serialize the post-execution DOM, then pass that HTML through the existing
+markdown/text conversion path.
+
+`render-rakers` requirements:
+- Disabled unless the `render-rakers` Cargo feature is enabled.
+- Not part of default features.
+- Documented as partial browser rendering, not a full browser engine.
+- Best-effort for SPAs and client-rendered docs; no guarantee for pages that
+  require real layout, WebGL, service workers, browser fingerprinting, or a
+  complete DOM/CSS engine.
+- Must honor fetchkit URL validation, allow/block lists, DNS policy, proxy
+  policy, timeout policy, and body-size limits for the initial page.
+- Must not let the rakers runtime bypass fetchkit egress policy. Until
+  subresource fetches can be routed through fetchkit policy, rakers-initiated
+  external script, fetch, and XHR requests must be denied.
+- Must expose an explicit request/config switch; enabling the Cargo feature
+  only makes the backend available and does not change default fetch behavior.
+
+Future real-browser rendering MUST be a separate backend and feature flag, for
+example `render-servo`. Servo support must not reuse the `render-rakers` feature
+because it has different dependency, fidelity, security, and platform tradeoffs.
+
 ### Configuration
 
 Fetchers receive `FetchOptions` for:

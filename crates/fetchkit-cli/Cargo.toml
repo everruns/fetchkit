@@ -19,6 +19,7 @@ doc = false
 [features]
 default = []
 bot-auth = ["fetchkit/bot-auth"]
+render-rakers = ["fetchkit/render-rakers"]
 
 [dependencies]
 fetchkit = { path = "../fetchkit", version = "0.4.1" }

@@ -100,6 +100,10 @@ enum Commands {
         /// Maximum crawl pages, including the seed
         #[arg(long, default_value_t = 5)]
         max_pages: usize,
+
+        /// Render HTML with the rakers backend before conversion
+        #[arg(long)]
+        render_rakers: bool,
     },
 }
 
@@ -126,6 +130,7 @@ async fn main() {
                 allow_env_proxy,
                 bot_auth_key,
                 bot_auth_agent,
+                false,
             ))
             .await;
         }
@@ -140,6 +145,7 @@ async fn main() {
             content_focus,
             crawl,
             max_pages,
+            render_rakers,
         }) => {
             let options = FetchCommandOptions {
                 output,
@@ -151,6 +157,7 @@ async fn main() {
                 content_focus,
                 crawl,
                 max_pages,
+                render_rakers,
             };
             run_fetch(&url, options).await;
         }
@@ -169,6 +176,7 @@ fn build_tool(
     allow_env_proxy: bool,
     bot_auth_key: Option<String>,
     bot_auth_agent: Option<String>,
+    render_rakers: bool,
 ) -> Tool {
     let mut builder = Tool::builder().enable_markdown(true);
 
@@ -206,6 +214,17 @@ fn build_tool(
 
     let _ = bot_auth_agent; // suppress unused warning without feature
 
+    #[cfg(feature = "render-rakers")]
+    if render_rakers {
+        builder = builder.enable_render_rakers(true);
+    }
+
+    #[cfg(not(feature = "render-rakers"))]
+    if render_rakers {
+        eprintln!("Error: --render-rakers requires the render-rakers feature (rebuild with --features render-rakers)");
+        std::process::exit(1);
+    }
+
     builder.build()
 }
 
@@ -219,6 +238,7 @@ struct FetchCommandOptions {
     content_focus: Option<String>,
     crawl: bool,
     max_pages: usize,
+    render_rakers: bool,
 }
 
 async fn run_fetch(url: &str, options: FetchCommandOptions) {
@@ -230,12 +250,16 @@ async fn run_fetch(url: &str, options: FetchCommandOptions) {
     if options.crawl {
         request = request.crawl(true).max_pages(options.max_pages);
     }
+    if options.render_rakers {
+        request = request.render_rakers();
+    }
     let tool = build_tool(
         options.user_agent,
         options.hardened,
         options.allow_env_proxy,
         options.bot_auth_key,
         options.bot_auth_agent,
+        options.render_rakers,
     );
 
     // Execute request

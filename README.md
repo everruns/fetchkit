@@ -76,6 +76,9 @@ fetchkit fetch https://example.com --hardened
 # Discover a small same-origin page map for an agent
 fetchkit fetch https://example.com --content-focus agent --crawl --max-pages 5
 
+# Optional JS/DOM rendering for simple SPAs/docs (requires render-rakers feature)
+fetchkit fetch https://example.com/app --render-rakers
+
 # Show full documentation
 fetchkit --llmtxt
 ```
@@ -130,6 +133,19 @@ Add to `Cargo.toml`:
 [dependencies]
 fetchkit = "0.2"
 ```
+
+Optional rendered fetching:
+
+```toml
+[dependencies]
+fetchkit = { version = "0.2", features = ["render-rakers"] }
+```
+
+`render-rakers` is not enabled by default. It is lightweight partial rendering:
+inline JavaScript can update the DOM before markdown/text conversion, but it is
+not a full browser engine. FetchKit blocks rakers-initiated subresource network
+access in this mode; the initial page still uses FetchKit's normal URL, DNS,
+proxy, timeout, and size policies.
 
 ### Basic Fetch
 
@@ -224,6 +240,7 @@ response = tool.fetch("https://example.com")
 | `max_pages` | int? | Maximum crawl pages, including the seed; default 5, max 20 |
 | `if_none_match` | string? | ETag for conditional `If-None-Match` |
 | `if_modified_since` | string? | Timestamp for conditional `If-Modified-Since` |
+| `render` | string? | `"rakers"` to opt into rendered fetch when enabled |
 
 ## Response Fields
 
@@ -249,6 +266,7 @@ response = tool.fetch("https://example.com")
 | `word_count` | int? | Word count of returned content |
 | `redirect_chain` | string[] | URLs visited during redirects (empty if none) |
 | `is_paywall` | bool? | Heuristic paywall signal (soft, not guaranteed) |
+| `rendered_by` | string? | Rendering backend used before conversion, e.g. `"rakers"` |
 
 ## Error Handling
 
