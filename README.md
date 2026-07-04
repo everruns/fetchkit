@@ -6,7 +6,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 
 - **HTTP fetching** - GET and HEAD methods with streaming support
 - **Pluggable fetchers** - URL-aware dispatch to specialized handlers for repos, docs, feeds, videos, papers, and more
-- **HTML-to-Markdown** - Built-in conversion optimized for LLMs
+- **HTML-to-Markdown** - Built-in conversion optimized for LLMs, with fetched relative links/images resolved to absolute URLs
 - **Agent content focus** - Optional low-noise extraction mode for AI agents
 - **HTML-to-Text** - Plain text extraction with clean formatting
 - **Binary detection** - Returns metadata only for images, PDFs, etc.

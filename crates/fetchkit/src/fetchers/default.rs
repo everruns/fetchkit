@@ -10,8 +10,8 @@
 use crate::client::FetchOptions;
 use crate::convert::{
     extract_headings, extract_metadata, extract_readable_content, filter_excessive_newlines,
-    html_to_markdown, html_to_text, is_html, is_markdown_content_type, is_plain_text_content_type,
-    strip_boilerplate,
+    html_to_markdown_with_base_url, html_to_text, is_html, is_markdown_content_type,
+    is_plain_text_content_type, strip_boilerplate,
 };
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
@@ -379,7 +379,7 @@ impl Fetcher for DefaultFetcher {
                 if wants_markdown {
                     (
                         "markdown".to_string(),
-                        html_to_markdown(&html),
+                        html_to_markdown_with_base_url(&html, &final_url),
                         Some(method),
                     )
                 } else if wants_text {
@@ -1061,6 +1061,51 @@ mod tests {
                 .as_ref()
                 .and_then(|meta| meta.extraction_method.as_deref()),
             Some("agent_readable")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_markdown_resolves_relative_links_against_final_url() {
+        let server = MockServer::start().await;
+        let html = r#"
+            <html>
+                <body>
+                    <main>
+                        <p>Read <a href="/docs/api">API docs</a>.</p>
+                        <img src="../assets/logo.png" alt="Logo">
+                    </main>
+                </body>
+            </html>
+        "#;
+        Mock::given(method("GET"))
+            .and(path("/guide/start"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(html)
+                    .insert_header("content-type", "text/html"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/guide/start", server.uri()))
+            .as_markdown()
+            .content_focus("main");
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+        let content = response.content.as_deref().unwrap();
+
+        assert!(
+            content.contains(&format!("[API docs]({}/docs/api)", server.uri())),
+            "{content}"
+        );
+        assert!(
+            content.contains(&format!("![Logo]({}/assets/logo.png)", server.uri())),
+            "{content}"
         );
     }
 
