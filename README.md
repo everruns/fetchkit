@@ -7,6 +7,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **HTTP fetching** - GET and HEAD methods with streaming support
 - **Pluggable fetchers** - URL-aware dispatch to specialized handlers for repos, docs, feeds, videos, papers, and more
 - **HTML-to-Markdown** - Built-in conversion optimized for LLMs
+- **Agent content focus** - Optional low-noise extraction mode for AI agents
 - **HTML-to-Text** - Plain text extraction with clean formatting
 - **Binary detection** - Returns metadata only for images, PDFs, etc.
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
@@ -212,7 +213,7 @@ response = tool.fetch("https://example.com")
 | `as_markdown` | bool? | Convert HTML to markdown |
 | `as_text` | bool? | Convert HTML to plain text |
 | `save_to_file` | string? | Save body to path (requires `FileSaver`) |
-| `content_focus` | string? | `"main"` strips boilerplate; `"full"`/unset returns everything |
+| `content_focus` | string? | `"full"`/unset returns everything; `"main"` strips semantic boilerplate; `"readable"` selects article-like content; `"agent"` selects the best low-noise strategy for AI agents |
 | `if_none_match` | string? | ETag for conditional `If-None-Match` |
 | `if_modified_since` | string? | Timestamp for conditional `If-Modified-Since` |
 
@@ -234,7 +235,7 @@ response = tool.fetch("https://example.com")
 | `error` | string? | Error message if failed |
 | `saved_path` | string? | Filesystem path when `save_to_file` succeeded |
 | `bytes_written` | int? | Bytes saved to file |
-| `metadata` | object? | Structured `PageMetadata` (title, description, links, headings, …) |
+| `metadata` | object? | Structured `PageMetadata` (title, description, links, headings, extraction method, …) |
 | `word_count` | int? | Word count of returned content |
 | `redirect_chain` | string[] | URLs visited during redirects (empty if none) |
 | `is_paywall` | bool? | Heuristic paywall signal (soft, not guaranteed) |

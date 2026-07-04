@@ -70,8 +70,11 @@ Provide a builder to configure tool options, including:
   - `as_markdown: bool` (optional, feature-gated)
   - `as_text: bool` (optional, feature-gated)
   - `save_to_file: Option<String>` (optional, feature-gated via `enable_save_to_file`)
-  - `content_focus: Option<String>` ("main" strips boilerplate; "full" or unset returns
-    everything)
+  - `content_focus: Option<String>` controls extraction before HTML conversion:
+    - `"full"` or unset returns everything
+    - `"main"` strips semantic boilerplate
+    - `"readable"` selects the densest article-like content block, falling back to `"main"`
+    - `"agent"` selects the best low-noise strategy for AI agents, currently readable-first then `"main"`
   - `if_none_match: Option<String>` (sets `If-None-Match` for conditional requests)
   - `if_modified_since: Option<String>` (sets `If-Modified-Since` for conditional requests)
 - `HttpMethod` enum: `Get`, `Head`
@@ -105,6 +108,9 @@ Provide a builder to configure tool options, including:
   - `modified_date: Option<String>` (from `article:modified_time`)
   - `links: Vec<PageLink>` (extracted anchors with text + href)
   - `headings: Vec<String>` (outline like `["# Title", "## Section 1"]`)
+  - `extraction_method: Option<String>` (`"full"`, `"main"`, `"readable"`,
+    `"readable_fallback_main"`, `"agent_readable"`, `"agent_main"`, `"native_markdown"`,
+    `"native_text"`, or `"raw"`)
 - `FetchError` enum
   - Missing url
   - Invalid url scheme
