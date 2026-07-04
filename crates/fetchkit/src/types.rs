@@ -95,8 +95,11 @@ pub struct FetchRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_to_file: Option<String>,
 
-    /// Content extraction focus: "main" strips nav/footer/aside boilerplate,
-    /// "full" (default) returns everything.
+    /// Content extraction focus:
+    /// - "full" (default) returns everything
+    /// - "main" strips semantic boilerplate
+    /// - "readable" selects the densest article-like content block
+    /// - "agent" selects the best low-noise content strategy for AI agents
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_focus: Option<String>,
 
@@ -157,7 +160,7 @@ impl FetchRequest {
         self
     }
 
-    /// Set content focus mode ("main" or "full")
+    /// Set content focus mode ("full", "main", "readable", or "agent")
     pub fn content_focus(mut self, focus: impl Into<String>) -> Self {
         self.content_focus = Some(focus.into());
         self
@@ -195,6 +198,22 @@ impl FetchRequest {
         self.content_focus
             .as_deref()
             .map(|f| f.eq_ignore_ascii_case("main"))
+            .unwrap_or(false)
+    }
+
+    /// Check if readable content focus is requested.
+    pub fn wants_readable_content(&self) -> bool {
+        self.content_focus
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case("readable"))
+            .unwrap_or(false)
+    }
+
+    /// Check if agent content focus is requested.
+    pub fn wants_agent_content(&self) -> bool {
+        self.content_focus
+            .as_deref()
+            .map(|f| f.eq_ignore_ascii_case("agent"))
             .unwrap_or(false)
     }
 }
@@ -297,6 +316,10 @@ pub struct PageMetadata {
     /// Headings outline (e.g. `["# Title", "## Section 1", "## Section 2"]`)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub headings: Vec<String>,
+
+    /// Content extraction method used for the returned content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extraction_method: Option<String>,
 }
 
 impl PageMetadata {
@@ -311,6 +334,7 @@ impl PageMetadata {
             && self.modified_date.is_none()
             && self.links.is_empty()
             && self.headings.is_empty()
+            && self.extraction_method.is_none()
     }
 }
 

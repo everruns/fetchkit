@@ -9,8 +9,9 @@
 
 use crate::client::FetchOptions;
 use crate::convert::{
-    extract_headings, extract_metadata, filter_excessive_newlines, html_to_markdown, html_to_text,
-    is_html, is_markdown_content_type, is_plain_text_content_type, strip_boilerplate,
+    extract_headings, extract_metadata, extract_readable_content, filter_excessive_newlines,
+    html_to_markdown, html_to_text, is_html, is_markdown_content_type, is_plain_text_content_type,
+    strip_boilerplate,
 };
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
@@ -332,9 +333,11 @@ impl Fetcher for DefaultFetcher {
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
         let is_html_content = is_html(&meta.content_type, &content);
         let wants_main = request.wants_main_content();
+        let wants_readable = request.wants_readable_content();
+        let wants_agent = request.wants_agent_content();
 
         // Extract structured metadata from HTML content (before boilerplate stripping)
-        let page_metadata = if is_html_content {
+        let mut page_metadata = if is_html_content {
             let mut pm = extract_metadata(&content);
             pm.headings = extract_headings(&content);
             if pm.is_empty() {
@@ -346,31 +349,46 @@ impl Fetcher for DefaultFetcher {
             None
         };
 
-        let (format, final_content) =
+        let (format, final_content, extraction_method) =
             if is_markdown_content_type(&meta.content_type) && wants_markdown {
                 // Server already returned markdown — skip conversion
                 debug!("Content-type is markdown; skipping HTML conversion");
-                ("markdown".to_string(), content)
+                ("markdown".to_string(), content, Some("native_markdown"))
             } else if is_plain_text_content_type(&meta.content_type) && wants_text {
                 // Server already returned plain text — skip conversion
                 debug!("Content-type is plain text; skipping HTML conversion");
-                ("text".to_string(), content)
+                ("text".to_string(), content, Some("native_text"))
             } else if is_html_content {
-                // Strip boilerplate before conversion if content_focus is "main"
-                let html = if wants_main {
-                    strip_boilerplate(&content)
+                let (html, method) = if wants_agent {
+                    if let Some(readable) = extract_readable_content(&content) {
+                        (readable, "agent_readable")
+                    } else {
+                        (strip_boilerplate(&content), "agent_main")
+                    }
+                } else if wants_readable {
+                    if let Some(readable) = extract_readable_content(&content) {
+                        (readable, "readable")
+                    } else {
+                        (strip_boilerplate(&content), "readable_fallback_main")
+                    }
+                } else if wants_main {
+                    (strip_boilerplate(&content), "main")
                 } else {
-                    content
+                    (content, "full")
                 };
                 if wants_markdown {
-                    ("markdown".to_string(), html_to_markdown(&html))
+                    (
+                        "markdown".to_string(),
+                        html_to_markdown(&html),
+                        Some(method),
+                    )
                 } else if wants_text {
-                    ("text".to_string(), html_to_text(&html))
+                    ("text".to_string(), html_to_text(&html), Some(method))
                 } else {
-                    ("raw".to_string(), html)
+                    ("raw".to_string(), html, Some(method))
                 }
             } else {
-                ("raw".to_string(), content)
+                ("raw".to_string(), content, Some("raw"))
             };
 
         // Apply newline filtering
@@ -383,6 +401,9 @@ impl Fetcher for DefaultFetcher {
 
         // Compute quality signals
         let word_count = count_words(&final_content);
+        if let (Some(metadata), Some(method)) = (&mut page_metadata, extraction_method) {
+            metadata.extraction_method = Some(method.to_string());
+        }
 
         Ok(FetchResponse {
             url: final_url,
@@ -990,6 +1011,57 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Just plain text"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_content_focus_prefers_readable_body() {
+        let server = MockServer::start().await;
+        let html = r#"
+            <html>
+                <body>
+                    <nav><a href="/home">Home</a><a href="/pricing">Pricing</a></nav>
+                    <article>
+                        <h1>Agent Ready Article</h1>
+                        <p>This is the useful content an autonomous AI agent should receive.</p>
+                        <p>The second paragraph gives the readability scorer a clear signal.</p>
+                    </article>
+                    <aside>Related stories and subscription widgets</aside>
+                </body>
+            </html>
+        "#;
+        Mock::given(method("GET"))
+            .and(path("/article"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(html)
+                    .insert_header("content-type", "text/html"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/article", server.uri()))
+            .as_markdown()
+            .content_focus("agent");
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+        let content = response.content.as_deref().unwrap();
+
+        assert!(content.contains("# Agent Ready Article"), "{content}");
+        assert!(content.contains("useful content"), "{content}");
+        assert!(!content.contains("Pricing"), "{content}");
+        assert!(!content.contains("subscription widgets"), "{content}");
+        assert_eq!(
+            response
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.extraction_method.as_deref()),
+            Some("agent_readable")
+        );
     }
 
     #[tokio::test]

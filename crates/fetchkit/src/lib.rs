@@ -87,7 +87,8 @@ mod types;
 
 pub use client::{batch_fetch, batch_fetch_with_options, fetch, fetch_with_options, FetchOptions};
 pub use convert::{
-    extract_headings, extract_metadata, html_to_markdown, html_to_text, strip_boilerplate,
+    extract_headings, extract_metadata, extract_readable_content, html_to_markdown, html_to_text,
+    strip_boilerplate,
 };
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};

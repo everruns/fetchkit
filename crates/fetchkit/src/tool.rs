@@ -1005,6 +1005,14 @@ fn build_help(tool: &Tool) -> String {
         ));
     }
 
+    rows.push(table_row(
+        "content_focus",
+        "string",
+        "no",
+        "\"full\"",
+        parameter_description(tool.locale(), "content_focus"),
+    ));
+
     let adapters = if tool.enable_save_to_file {
         if is_ukrainian(tool.locale()) {
             "- `FileSaver` (необов’язковий): потрібен, коли задано `save_to_file`.\n"
@@ -1091,11 +1099,13 @@ fn parameter_description(locale: &str, field: &str) -> &'static str {
         (true, "as_markdown") => "Перетворити HTML у markdown",
         (true, "as_text") => "Перетворити HTML у plain text",
         (true, "save_to_file") => "Шлях призначення, визначений адаптером",
+        (true, "content_focus") => "`full`, `main`, `readable`, або `agent`",
         (false, "url") => "HTTP/HTTPS URL, or a bare domain URL normalized to `https://`",
         (false, "method") => "`GET` or `HEAD`",
         (false, "as_markdown") => "Convert HTML to markdown",
         (false, "as_text") => "Convert HTML to plain text",
         (false, "save_to_file") => "Adapter-defined destination path",
+        (false, "content_focus") => "`full`, `main`, `readable`, or `agent`",
         _ => "",
     }
 }

@@ -891,6 +891,261 @@ pub fn strip_boilerplate(html: &str) -> String {
     strip_boilerplate_elements(html)
 }
 
+/// Extract the densest article-like content block for AI-agent consumption.
+///
+/// This is a deterministic, dependency-light readability pass. It favors semantic
+/// containers (`article`, `main`) and class/id names commonly used for content,
+/// penalizes link-heavy or boilerplate-looking blocks, and returns `None` when
+/// confidence is too low so callers can fall back to the existing main/full modes.
+pub fn extract_readable_content(html: &str) -> Option<String> {
+    let candidates = collect_readable_candidates(html);
+    let best = candidates
+        .into_iter()
+        .filter(|candidate| candidate.word_count >= 20)
+        .max_by_key(|candidate| candidate.score)?;
+
+    if best.score < 100 {
+        return None;
+    }
+
+    Some(strip_boilerplate_elements(&best.html))
+}
+
+#[derive(Debug)]
+struct ReadableCandidate {
+    html: String,
+    score: i64,
+    word_count: usize,
+}
+
+fn collect_readable_candidates(html: &str) -> Vec<ReadableCandidate> {
+    let mut candidates = Vec::new();
+    for tag_name in ["article", "main", "section", "div"] {
+        collect_tag_candidates(html, tag_name, &mut candidates);
+    }
+    candidates
+}
+
+fn collect_tag_candidates(html: &str, tag_name: &str, candidates: &mut Vec<ReadableCandidate>) {
+    let lower = html.to_ascii_lowercase();
+    let open_prefix = format!("<{tag_name}");
+    let mut search_start = 0usize;
+
+    while let Some(relative_start) = lower[search_start..].find(&open_prefix) {
+        let tag_start = search_start + relative_start;
+        let after_name = tag_start + open_prefix.len();
+        let Some(next) = lower[after_name..].chars().next() else {
+            break;
+        };
+        if !(next.is_ascii_whitespace() || next == '>' || next == '/') {
+            search_start = after_name;
+            continue;
+        }
+
+        let Some(open_end_relative) = lower[tag_start..].find('>') else {
+            break;
+        };
+        let open_end = tag_start + open_end_relative;
+        let open_tag = &html[tag_start + 1..open_end];
+
+        if tag_name == "div" && !looks_like_content_container(open_tag) {
+            search_start = open_end + 1;
+            continue;
+        }
+
+        let Some(close_start) = find_matching_close(&lower, tag_name, tag_start, open_end + 1)
+        else {
+            break;
+        };
+        let inner = html[open_end + 1..close_start].to_string();
+        if let Some(candidate) = score_readable_candidate(open_tag, inner) {
+            candidates.push(candidate);
+        }
+
+        search_start = open_end + 1;
+    }
+}
+
+fn find_matching_close(
+    lower_html: &str,
+    tag_name: &str,
+    tag_start: usize,
+    content_start: usize,
+) -> Option<usize> {
+    let open_prefix = format!("<{tag_name}");
+    let close_prefix = format!("</{tag_name}");
+    let mut depth = 1i32;
+    let mut cursor = content_start;
+
+    while cursor < lower_html.len() {
+        let next_open = lower_html[cursor..].find(&open_prefix).map(|i| cursor + i);
+        let next_close = lower_html[cursor..].find(&close_prefix).map(|i| cursor + i);
+
+        match (next_open, next_close) {
+            (Some(open), Some(close)) if open < close => {
+                let after_name = open + open_prefix.len();
+                let is_same_tag = lower_html[after_name..]
+                    .chars()
+                    .next()
+                    .map(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
+                    .unwrap_or(false);
+                if is_same_tag {
+                    if let Some(end) = lower_html[open..].find('>') {
+                        let tag = &lower_html[open..open + end + 1];
+                        if !tag.ends_with("/>") {
+                            depth += 1;
+                        }
+                        cursor = open + end + 1;
+                    } else {
+                        return None;
+                    }
+                } else {
+                    cursor = after_name;
+                }
+            }
+            (_, Some(close)) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(close);
+                }
+                let end = lower_html[close..].find('>')?;
+                cursor = close + end + 1;
+            }
+            _ => return None,
+        }
+    }
+
+    debug_assert!(tag_start < lower_html.len());
+    None
+}
+
+fn looks_like_content_container(open_tag: &str) -> bool {
+    let lower = open_tag.to_lowercase();
+    let positive = [
+        "article", "content", "entry", "main", "markdown", "post", "prose", "readme", "story",
+        "text",
+    ];
+    let negative = [
+        "ad",
+        "banner",
+        "breadcrumb",
+        "comment",
+        "footer",
+        "header",
+        "menu",
+        "nav",
+        "related",
+        "share",
+        "sidebar",
+    ];
+
+    positive.iter().any(|needle| lower.contains(needle))
+        && !negative.iter().any(|needle| lower.contains(needle))
+}
+
+fn score_readable_candidate(open_tag: &str, html: String) -> Option<ReadableCandidate> {
+    let text = html_to_text(&html);
+    let word_count = text.split_whitespace().count();
+    if word_count == 0 {
+        return None;
+    }
+
+    let link_word_count = link_text_word_count(&html);
+    let paragraph_count = html.matches("<p").count() + html.matches("<P").count();
+    let heading_count = html.matches("<h1").count()
+        + html.matches("<h2").count()
+        + html.matches("<h3").count()
+        + html.matches("<H1").count()
+        + html.matches("<H2").count()
+        + html.matches("<H3").count();
+    let lower_tag = open_tag.to_lowercase();
+    let semantic_bonus = if lower_tag.starts_with("article") {
+        120
+    } else if lower_tag.starts_with("main") || lower_tag.contains("role=\"main\"") {
+        90
+    } else if looks_like_content_container(open_tag) {
+        70
+    } else {
+        20
+    };
+    let boilerplate_penalty = if looks_like_boilerplate(&lower_tag) {
+        200
+    } else {
+        0
+    };
+
+    let score = (word_count as i64 * 8)
+        + (paragraph_count as i64 * 20)
+        + (heading_count as i64 * 12)
+        + semantic_bonus
+        - (link_word_count as i64 * 6)
+        - boilerplate_penalty;
+
+    Some(ReadableCandidate {
+        html,
+        score,
+        word_count,
+    })
+}
+
+fn looks_like_boilerplate(lower_tag: &str) -> bool {
+    [
+        "ad",
+        "banner",
+        "breadcrumb",
+        "comment",
+        "footer",
+        "header",
+        "menu",
+        "nav",
+        "related",
+        "share",
+        "sidebar",
+    ]
+    .iter()
+    .any(|needle| lower_tag.contains(needle))
+}
+
+fn link_text_word_count(html: &str) -> usize {
+    let mut words = 0usize;
+    let mut chars = html.chars().peekable();
+    let mut in_link = false;
+    let mut link_text = String::new();
+
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '>' {
+                    chars.next();
+                    break;
+                }
+                tag.push(chars.next().unwrap());
+            }
+
+            let tag_lower = tag.to_lowercase();
+            let tag_name = if let Some(stripped) = tag_lower.strip_prefix('/') {
+                stripped.split_whitespace().next().unwrap_or("")
+            } else {
+                tag_lower.split_whitespace().next().unwrap_or("")
+            };
+            if tag_name == "a" {
+                if tag_lower.starts_with('/') {
+                    words += link_text.split_whitespace().count();
+                    link_text.clear();
+                    in_link = false;
+                } else {
+                    in_link = true;
+                }
+            }
+        } else if in_link {
+            link_text.push(decode_entity(c, &mut chars));
+        }
+    }
+
+    words
+}
+
 /// Extract content from `<main>` or `<article>` tag if present.
 fn extract_main_content(html: &str) -> Option<String> {
     // Try <main> first, then <article>
@@ -1547,6 +1802,48 @@ mod tests {
         assert!(result.contains("Article header"));
         assert!(result.contains("Body"));
         assert!(!result.contains("Site header"));
+    }
+
+    #[test]
+    fn test_extract_readable_content_prefers_article_over_nav() {
+        let html = r#"
+            <nav><a href="/a">Home</a><a href="/b">Products</a><a href="/c">Pricing</a></nav>
+            <article>
+                <h1>Useful Agent Content</h1>
+                <p>This paragraph contains the important answer an AI agent should read and use.</p>
+                <p>The content block has enough natural language to score above short navigation.</p>
+            </article>
+            <aside>Related links and promotional clutter</aside>
+        "#;
+
+        let result = extract_readable_content(html).unwrap();
+        assert!(result.contains("Useful Agent Content"));
+        assert!(result.contains("important answer"));
+        assert!(!result.contains("Products"));
+        assert!(!result.contains("promotional clutter"));
+    }
+
+    #[test]
+    fn test_extract_readable_content_uses_content_class() {
+        let html = r#"
+            <div class="sidebar">Menu widgets and account links</div>
+            <div class="post-content">
+                <h2>Documentation Section</h2>
+                <p>Agents need this implementation detail when they answer questions.</p>
+                <p>This second paragraph gives the extractor enough signal to select the block.</p>
+            </div>
+        "#;
+
+        let result = extract_readable_content(html).unwrap();
+        assert!(result.contains("Documentation Section"));
+        assert!(result.contains("implementation detail"));
+        assert!(!result.contains("Menu widgets"));
+    }
+
+    #[test]
+    fn test_extract_readable_content_returns_none_for_low_signal_html() {
+        let html = r#"<div class="content"><a href="/one">One</a><a href="/two">Two</a></div>"#;
+        assert!(extract_readable_content(html).is_none());
     }
 
     #[test]
