@@ -1,6 +1,7 @@
 //! HTML conversion utilities
 
 use crate::types::{PageLink, PageMetadata};
+use url::Url;
 
 /// Check if content-type indicates markdown (e.g. `text/markdown`).
 pub fn is_markdown_content_type(content_type: &Option<String>) -> bool {
@@ -55,6 +56,18 @@ pub fn is_html(content_type: &Option<String>, body: &str) -> bool {
 /// assert!(md.contains("**Bold**"));
 /// ```
 pub fn html_to_markdown(html: &str) -> String {
+    html_to_markdown_inner(html, None)
+}
+
+/// Convert HTML to markdown while resolving relative links/images against a base URL.
+///
+/// This is useful for fetched pages: agents receive markdown with links that remain
+/// valid outside the source page's original browsing context.
+pub fn html_to_markdown_with_base_url(html: &str, base_url: &str) -> String {
+    html_to_markdown_inner(html, Url::parse(base_url).ok().as_ref())
+}
+
+fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
     let mut output = String::new();
     let mut in_skip_element = 0;
     let mut skip_elements: Vec<String> = Vec::new();
@@ -188,7 +201,10 @@ pub fn html_to_markdown(html: &str) -> String {
                 }
                 "pre" => {
                     if !is_closing {
-                        output.push_str("\n```\n");
+                        let language = extract_code_language(&tag);
+                        output.push_str("\n```");
+                        output.push_str(language.as_deref().unwrap_or_default());
+                        output.push('\n');
                         in_pre = true;
                     } else {
                         output.push_str("\n```\n");
@@ -211,7 +227,7 @@ pub fn html_to_markdown(html: &str) -> String {
                     if !is_closing {
                         if let Some(href) = extract_attribute(&tag, "href") {
                             if !href.is_empty() {
-                                link_href = Some(href);
+                                link_href = Some(resolve_url(base_url, &href));
                                 link_start = output.len();
                             }
                         }
@@ -228,7 +244,7 @@ pub fn html_to_markdown(html: &str) -> String {
                 "img" if !is_closing => {
                     let alt = extract_attribute(&tag, "alt").unwrap_or_default();
                     if let Some(src) = extract_attribute(&tag, "src") {
-                        output.push_str(&format!("![{}]({})", alt, src));
+                        output.push_str(&format!("![{}]({})", alt, resolve_url(base_url, &src)));
                     }
                 }
                 // Table handling
@@ -314,6 +330,40 @@ pub fn html_to_markdown(html: &str) -> String {
     }
 
     clean_whitespace(&output)
+}
+
+fn resolve_url(base_url: Option<&Url>, candidate: &str) -> String {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("mailto:")
+        || trimmed.starts_with("tel:")
+        || trimmed.starts_with("data:")
+    {
+        return trimmed.to_string();
+    }
+
+    base_url
+        .and_then(|base| base.join(trimmed).ok())
+        .map(|url| url.to_string())
+        .unwrap_or_else(|| trimmed.to_string())
+}
+
+fn extract_code_language(tag: &str) -> Option<String> {
+    let class = extract_attribute(tag, "class")?;
+    class
+        .split_whitespace()
+        .find_map(|part| {
+            part.strip_prefix("language-")
+                .or_else(|| part.strip_prefix("lang-"))
+        })
+        .filter(|language| {
+            !language.is_empty()
+                && language
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '+')
+        })
+        .map(ToString::to_string)
 }
 
 /// Render collected table rows as a markdown table.
@@ -1858,6 +1908,18 @@ mod tests {
     }
 
     #[test]
+    fn test_html_to_markdown_with_base_url_resolves_relative_links() {
+        let html = r##"<p>Read <a href="/docs/page">docs</a> and <a href="#local">local</a>.</p>"##;
+        let md = html_to_markdown_with_base_url(html, "https://example.com/base/index.html");
+        assert!(
+            md.contains("[docs](https://example.com/docs/page)"),
+            "Got: {}",
+            md
+        );
+        assert!(md.contains("[local](#local)"), "Got: {}", md);
+    }
+
+    #[test]
     fn test_html_to_markdown_link_no_text() {
         let html = r#"<a href="https://example.com"></a>"#;
         let md = html_to_markdown(html);
@@ -1869,6 +1931,25 @@ mod tests {
         let html = r#"<img src="photo.jpg" alt="A photo">"#;
         let md = html_to_markdown(html);
         assert!(md.contains("![A photo](photo.jpg)"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_with_base_url_resolves_images() {
+        let html = r#"<img src="../assets/photo.jpg" alt="A photo">"#;
+        let md = html_to_markdown_with_base_url(html, "https://example.com/docs/page/");
+        assert!(
+            md.contains("![A photo](https://example.com/docs/assets/photo.jpg)"),
+            "Got: {}",
+            md
+        );
+    }
+
+    #[test]
+    fn test_html_to_markdown_preserves_pre_language() {
+        let html = r#"<pre class="language-rust">fn main() {}</pre>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("```rust"), "Got: {}", md);
+        assert!(md.contains("fn main() {}"), "Got: {}", md);
     }
 
     #[test]

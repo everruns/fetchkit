@@ -239,6 +239,15 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 - Always return `status_code` when HTTP response received.
 - 4xx/5xx are success responses (not tool errors).
 
+#### HTML-to-Markdown
+
+- Fetched HTML converted to markdown resolves relative anchor `href` and image `src`
+  values against the final response URL after redirects.
+- Fragment-only links (`#section`) and non-HTTP navigation schemes such as `mailto:`,
+  `tel:`, and `data:` are left unchanged.
+- Code block language hints from `<pre class="language-...">` or `<pre class="lang-...">`
+  are preserved in fenced markdown when present.
+
 #### Binary Content
 
 - Detect binary by Content-Type prefix:
