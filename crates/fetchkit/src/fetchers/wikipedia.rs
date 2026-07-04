@@ -107,6 +107,7 @@ impl Fetcher for WikipediaFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let (lang, title) = Self::parse_url(&url)

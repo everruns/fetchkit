@@ -19,7 +19,7 @@ pub enum FetchError {
     MissingUrl,
 
     /// URL has invalid scheme
-    #[error("Invalid URL: must start with http:// or https://")]
+    #[error("Invalid URL: must be http://, https://, or a bare domain URL")]
     InvalidUrlScheme,
 
     /// Invalid HTTP method
@@ -110,7 +110,7 @@ mod tests {
         );
         assert_eq!(
             FetchError::InvalidUrlScheme.to_string(),
-            "Invalid URL: must start with http:// or https://"
+            "Invalid URL: must be http://, https://, or a bare domain URL"
         );
         assert_eq!(
             FetchError::InvalidMethod.to_string(),

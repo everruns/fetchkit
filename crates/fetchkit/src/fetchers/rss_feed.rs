@@ -89,6 +89,7 @@ impl Fetcher for RSSFeedFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
         let mut headers = HeaderMap::new();
         let ua_header = HeaderValue::from_str(user_agent)

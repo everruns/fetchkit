@@ -110,6 +110,7 @@ impl Fetcher for DocsSiteFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let user_agent = options.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT);
         let ua_header = HeaderValue::from_str(user_agent)

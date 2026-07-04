@@ -142,6 +142,7 @@ impl Fetcher for GitHubCodeFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let parsed = Self::parse_url(&url)

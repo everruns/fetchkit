@@ -272,6 +272,11 @@ pub async fn fetch_with_options(req: FetchRequest, options: FetchOptions)
     -> Result<FetchResponse, FetchError>;
 ```
 
+Built-in fetchers normalize `FetchRequest::url` before parsing, so direct calls to
+`Fetcher::fetch` accept the same URL forms as the registry and tool surfaces:
+explicit `http://`, explicit `https://`, or bare domain URLs normalized to
+`https://`.
+
 ## Testing
 
 ### Unit Tests

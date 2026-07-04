@@ -7,8 +7,11 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use fetchkit::{
-    DnsPolicy, FetchError, FetchOptions, FetchRequest, Fetcher, HttpMethod, HttpTransport,
-    TransportError, TransportMethod, TransportRequest, TransportResponse,
+    ArXivFetcher, DefaultFetcher, DnsPolicy, DocsSiteFetcher, FetchError, FetchOptions,
+    FetchRequest, Fetcher, GitHubCodeFetcher, GitHubIssueFetcher, GitHubRepoFetcher,
+    HackerNewsFetcher, HttpMethod, HttpTransport, PackageRegistryFetcher, RSSFeedFetcher,
+    StackOverflowFetcher, TransportError, TransportMethod, TransportRequest, TransportResponse,
+    TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -120,6 +123,86 @@ async fn default_fetcher_get_uses_injected_transport() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].1, TransportMethod::Get);
     assert!(calls[0].0.contains("example.test/page"));
+}
+
+#[tokio::test]
+async fn direct_default_fetcher_defaults_bare_host_urls_to_https() {
+    let mock = Arc::new(MockTransport::new().route(
+        "example.test/direct",
+        200,
+        "text/plain",
+        b"direct default fetcher",
+    ));
+    let options = options_with(mock.clone());
+
+    let fetcher = DefaultFetcher::new();
+    let request = FetchRequest::new("example.test/direct");
+    let response = fetcher.fetch(&request, &options).await.unwrap();
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.url, "https://example.test/direct");
+
+    let calls = mock.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "https://example.test/direct");
+}
+
+#[tokio::test]
+async fn direct_specialized_fetchers_normalize_bare_host_urls_before_parsing() {
+    let cases: Vec<(Box<dyn Fetcher>, &str)> = vec![
+        (
+            Box::new(GitHubCodeFetcher::new()),
+            "github.com/owner/repo/blob/main/README.md",
+        ),
+        (
+            Box::new(GitHubIssueFetcher::new()),
+            "github.com/owner/repo/issues/42",
+        ),
+        (Box::new(GitHubRepoFetcher::new()), "github.com/owner/repo"),
+        (
+            Box::new(TwitterFetcher::new()),
+            "x.com/user/status/123456789",
+        ),
+        (
+            Box::new(StackOverflowFetcher::new()),
+            "stackoverflow.com/questions/12345/title",
+        ),
+        (
+            Box::new(PackageRegistryFetcher::new()),
+            "pypi.org/project/requests",
+        ),
+        (
+            Box::new(WikipediaFetcher::new()),
+            "en.wikipedia.org/wiki/Rust",
+        ),
+        (
+            Box::new(YouTubeFetcher::new()),
+            "youtube.com/watch?v=abc123",
+        ),
+        (Box::new(ArXivFetcher::new()), "arxiv.org/abs/2301.07041"),
+        (
+            Box::new(HackerNewsFetcher::new()),
+            "news.ycombinator.com/item?id=123",
+        ),
+        (Box::new(RSSFeedFetcher::new()), "example.com/feed"),
+        (
+            Box::new(DocsSiteFetcher::new()),
+            "docs.rs/tokio/latest/tokio",
+        ),
+    ];
+
+    for (fetcher, bare_url) in cases {
+        let mock = Arc::new(MockTransport::new());
+        let options = options_with(mock);
+        let request = FetchRequest::new(bare_url);
+        let result = fetcher.fetch(&request, &options).await;
+
+        assert!(
+            !matches!(result, Err(FetchError::InvalidUrlScheme)),
+            "{} rejected bare URL at scheme parsing",
+            fetcher.name()
+        );
+    }
 }
 
 #[tokio::test]

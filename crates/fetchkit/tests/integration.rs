@@ -430,7 +430,7 @@ async fn test_invalid_url_scheme() {
     assert!(result
         .unwrap_err()
         .to_string()
-        .contains("http:// or https://"));
+        .contains("http://, https://, or a bare domain URL"));
 }
 
 #[tokio::test]
