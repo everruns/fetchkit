@@ -112,6 +112,14 @@ pub struct FetchRequest {
     /// When set, the server may return 304 Not Modified if content unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub if_modified_since: Option<String>,
+
+    /// Discover same-origin links after fetching the seed URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crawl: Option<bool>,
+
+    /// Maximum pages to fetch when crawl discovery is enabled, including the seed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_pages: Option<usize>,
 }
 
 impl FetchRequest {
@@ -178,6 +186,18 @@ impl FetchRequest {
         self
     }
 
+    /// Enable bounded same-origin crawl discovery.
+    pub fn crawl(mut self, enable: bool) -> Self {
+        self.crawl = Some(enable);
+        self
+    }
+
+    /// Set max pages for crawl discovery, including the seed page.
+    pub fn max_pages(mut self, max_pages: usize) -> Self {
+        self.max_pages = Some(max_pages);
+        self
+    }
+
     /// Get the effective method (default to GET)
     pub fn effective_method(&self) -> HttpMethod {
         self.method.unwrap_or_default()
@@ -215,6 +235,11 @@ impl FetchRequest {
             .as_deref()
             .map(|f| f.eq_ignore_ascii_case("agent"))
             .unwrap_or(false)
+    }
+
+    /// Check if bounded crawl discovery is requested.
+    pub fn wants_crawl(&self) -> bool {
+        self.crawl.unwrap_or(false)
     }
 }
 
@@ -364,6 +389,59 @@ pub struct PageQuality {
     pub suggested_next_action: Option<String>,
 }
 
+/// Summary for one page visited by bounded crawl discovery.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct CrawlPage {
+    /// Final page URL.
+    pub url: String,
+
+    /// HTTP status code, when the page was fetched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+
+    /// Page title from metadata, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Page description from metadata, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Content-Type header, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+
+    /// Word count of returned content, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_count: Option<u64>,
+
+    /// Agent quality score, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<f32>,
+
+    /// Error for this crawl page, when fetching failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Bounded same-origin crawl discovery summary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct CrawlResult {
+    /// Seed URL requested by the caller.
+    pub seed_url: String,
+
+    /// Maximum page budget used for this crawl, including the seed.
+    pub max_pages: usize,
+
+    /// Pages visited or attempted, in discovery order.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub pages: Vec<CrawlPage>,
+
+    /// True when more same-origin candidates existed than the page budget allowed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
 /// Response from a fetch operation
 ///
 /// Contains the fetched content along with metadata like status code,
@@ -449,6 +527,10 @@ pub struct FetchResponse {
     /// Agent-facing content quality signals
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<PageQuality>,
+
+    /// Bounded same-origin crawl discovery result
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crawl: Option<CrawlResult>,
 
     /// Word count of the final content
     #[serde(skip_serializing_if = "Option::is_none")]

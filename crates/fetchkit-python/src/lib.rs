@@ -32,12 +32,15 @@ pub struct PyFetchRequest {
 impl PyFetchRequest {
     /// Create a new request
     #[new]
-    #[pyo3(signature = (url, method=None, as_markdown=None, as_text=None))]
+    #[pyo3(signature = (url, method=None, as_markdown=None, as_text=None, content_focus=None, crawl=None, max_pages=None))]
     fn new(
         url: String,
         method: Option<String>,
         as_markdown: Option<bool>,
         as_text: Option<bool>,
+        content_focus: Option<String>,
+        crawl: Option<bool>,
+        max_pages: Option<usize>,
     ) -> PyResult<Self> {
         let mut req = FetchRequest::new(url);
 
@@ -47,6 +50,9 @@ impl PyFetchRequest {
 
         req.as_markdown = as_markdown;
         req.as_text = as_text;
+        req.content_focus = content_focus;
+        req.crawl = crawl;
+        req.max_pages = max_pages;
 
         Ok(Self { inner: req })
     }
@@ -73,6 +79,24 @@ impl PyFetchRequest {
     #[getter]
     fn as_text(&self) -> Option<bool> {
         self.inner.as_text
+    }
+
+    /// Get content focus.
+    #[getter]
+    fn content_focus(&self) -> Option<&str> {
+        self.inner.content_focus.as_deref()
+    }
+
+    /// Get crawl flag.
+    #[getter]
+    fn crawl(&self) -> Option<bool> {
+        self.inner.crawl
+    }
+
+    /// Get max pages.
+    #[getter]
+    fn max_pages(&self) -> Option<usize> {
+        self.inner.max_pages
     }
 
     /// Convert to JSON string
@@ -301,32 +325,56 @@ impl PyFetchKitTool {
     }
 
     /// Fetch a URL directly (convenience method)
-    #[pyo3(signature = (url, method=None, as_markdown=None, as_text=None))]
+    #[pyo3(signature = (url, method=None, as_markdown=None, as_text=None, content_focus=None, crawl=None, max_pages=None))]
+    #[allow(clippy::too_many_arguments)]
     fn fetch(
         &self,
         url: String,
         method: Option<String>,
         as_markdown: Option<bool>,
         as_text: Option<bool>,
+        content_focus: Option<String>,
+        crawl: Option<bool>,
+        max_pages: Option<usize>,
     ) -> PyResult<PyFetchResponse> {
-        let request = PyFetchRequest::new(url, method, as_markdown, as_text)?;
+        let request = PyFetchRequest::new(
+            url,
+            method,
+            as_markdown,
+            as_text,
+            content_focus,
+            crawl,
+            max_pages,
+        )?;
         self.execute(request)
     }
 }
 
 /// Fetch a URL using default options (convenience function)
 #[pyfunction]
-#[pyo3(signature = (url, method=None, as_markdown=None, as_text=None))]
+#[pyo3(signature = (url, method=None, as_markdown=None, as_text=None, content_focus=None, crawl=None, max_pages=None))]
+#[allow(clippy::too_many_arguments)]
 fn fetch(
     url: String,
     method: Option<String>,
     as_markdown: Option<bool>,
     as_text: Option<bool>,
+    content_focus: Option<String>,
+    crawl: Option<bool>,
+    max_pages: Option<usize>,
 ) -> PyResult<PyFetchResponse> {
     let tool = PyFetchKitTool::new(
         true, true, None, None, None, None, true, false, None, None, None, false,
     )?;
-    tool.fetch(url, method, as_markdown, as_text)
+    tool.fetch(
+        url,
+        method,
+        as_markdown,
+        as_text,
+        content_focus,
+        crawl,
+        max_pages,
+    )
 }
 
 /// Python module definition

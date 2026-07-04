@@ -163,6 +163,9 @@ fn test_fetch_help_lists_hardening_flags() {
     assert!(output.status.success());
     assert!(stdout.contains("--hardened"));
     assert!(stdout.contains("--allow-env-proxy"));
+    assert!(stdout.contains("--content-focus"));
+    assert!(stdout.contains("--crawl"));
+    assert!(stdout.contains("--max-pages"));
 }
 
 #[test]

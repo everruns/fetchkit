@@ -14,7 +14,7 @@
 mod mcp;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use fetchkit::{FetchRequest, Tool, TOOL_LLMTXT};
+use fetchkit::{CrawlPage, FetchRequest, Tool, TOOL_LLMTXT};
 use std::io::{self, Write};
 
 /// Output format for fetch subcommand
@@ -88,6 +88,18 @@ enum Commands {
         /// Agent FQDN for Signature-Agent header (requires --bot-auth-key)
         #[arg(long)]
         bot_auth_agent: Option<String>,
+
+        /// Extraction focus: full, main, readable, or agent
+        #[arg(long)]
+        content_focus: Option<String>,
+
+        /// Discover and fetch a bounded set of same-origin pages
+        #[arg(long)]
+        crawl: bool,
+
+        /// Maximum crawl pages, including the seed
+        #[arg(long, default_value_t = 5)]
+        max_pages: usize,
     },
 }
 
@@ -125,17 +137,22 @@ async fn main() {
             allow_env_proxy,
             bot_auth_key,
             bot_auth_agent,
+            content_focus,
+            crawl,
+            max_pages,
         }) => {
-            run_fetch(
-                &url,
+            let options = FetchCommandOptions {
                 output,
                 user_agent,
                 hardened,
                 allow_env_proxy,
                 bot_auth_key,
                 bot_auth_agent,
-            )
-            .await;
+                content_focus,
+                crawl,
+                max_pages,
+            };
+            run_fetch(&url, options).await;
         }
         None => {
             eprintln!("Usage: fetchkit fetch <URL>");
@@ -192,28 +209,38 @@ fn build_tool(
     builder.build()
 }
 
-async fn run_fetch(
-    url: &str,
+struct FetchCommandOptions {
     output: OutputFormat,
     user_agent: Option<String>,
     hardened: bool,
     allow_env_proxy: bool,
     bot_auth_key: Option<String>,
     bot_auth_agent: Option<String>,
-) {
+    content_focus: Option<String>,
+    crawl: bool,
+    max_pages: usize,
+}
+
+async fn run_fetch(url: &str, options: FetchCommandOptions) {
     // Build request with markdown conversion
-    let request = FetchRequest::new(url).as_markdown();
+    let mut request = FetchRequest::new(url).as_markdown();
+    if let Some(focus) = options.content_focus {
+        request = request.content_focus(focus);
+    }
+    if options.crawl {
+        request = request.crawl(true).max_pages(options.max_pages);
+    }
     let tool = build_tool(
-        user_agent,
-        hardened,
-        allow_env_proxy,
-        bot_auth_key,
-        bot_auth_agent,
+        options.user_agent,
+        options.hardened,
+        options.allow_env_proxy,
+        options.bot_auth_key,
+        options.bot_auth_agent,
     );
 
     // Execute request
     match tool.execute(request).await {
-        Ok(response) => match output {
+        Ok(response) => match options.output {
             OutputFormat::Md => print_md_with_frontmatter(&response),
             OutputFormat::Json => {
                 let json = serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
@@ -277,6 +304,12 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
             output.push_str(&format!("suggested_next_action: {}\n", yaml_quote(action)));
         }
     }
+    if let Some(ref crawl) = response.crawl {
+        output.push_str(&format!("crawl_pages: {}\n", crawl.pages.len()));
+        if crawl.truncated.unwrap_or(false) {
+            output.push_str("crawl_truncated: true\n");
+        }
+    }
     output.push_str("---\n");
 
     // Append content, or error as body for unsupported content
@@ -285,8 +318,41 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
     } else if let Some(ref err) = response.error {
         output.push_str(err);
     }
+    append_crawl_summary(&mut output, response);
 
     output
+}
+
+fn append_crawl_summary(output: &mut String, response: &fetchkit::FetchResponse) {
+    let Some(ref crawl) = response.crawl else {
+        return;
+    };
+    if crawl.pages.is_empty() {
+        return;
+    }
+
+    output.push_str("\n\n## Crawl Discovery\n\n");
+    for page in &crawl.pages {
+        output.push_str(&format!("- {}\n", format_crawl_page(page)));
+    }
+}
+
+fn format_crawl_page(page: &CrawlPage) -> String {
+    let title = page.title.as_deref().unwrap_or(page.url.as_str());
+    let mut summary = format!("[{}]({})", title.replace(['[', ']'], ""), page.url);
+    if let Some(status_code) = page.status_code {
+        summary.push_str(&format!(" - status {status_code}"));
+    }
+    if let Some(score) = page.quality_score {
+        summary.push_str(&format!(", quality {score:.2}"));
+    }
+    if let Some(word_count) = page.word_count {
+        summary.push_str(&format!(", {word_count} words"));
+    }
+    if let Some(ref error) = page.error {
+        summary.push_str(&format!(", error: {error}"));
+    }
+    summary
 }
 
 /// Write to stdout, exit silently on broken pipe
@@ -305,7 +371,7 @@ fn writeln_safe(s: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fetchkit::{FetchResponse, PageQuality};
+    use fetchkit::{CrawlPage, CrawlResult, FetchResponse, PageQuality};
 
     #[test]
     fn test_format_md_basic() {
@@ -407,5 +473,36 @@ mod tests {
         assert!(output.contains("url: \"https://example.com/a\\nforged: true\"\n"));
         assert!(output.contains("filename: \"*alias\"\n"));
         assert!(!output.contains("\nforged: true\n"));
+    }
+
+    #[test]
+    fn test_format_md_includes_crawl_summary() {
+        let response = FetchResponse {
+            url: "https://example.com".to_string(),
+            status_code: 200,
+            content: Some("# Home".to_string()),
+            crawl: Some(CrawlResult {
+                seed_url: "https://example.com".to_string(),
+                max_pages: 2,
+                pages: vec![CrawlPage {
+                    url: "https://example.com/docs".to_string(),
+                    status_code: Some(200),
+                    title: Some("Docs".to_string()),
+                    word_count: Some(42),
+                    quality_score: Some(0.91),
+                    ..Default::default()
+                }],
+                truncated: Some(true),
+            }),
+            ..Default::default()
+        };
+
+        let output = format_md_with_frontmatter(&response);
+
+        assert!(output.contains("crawl_pages: 1\n"));
+        assert!(output.contains("crawl_truncated: true\n"));
+        assert!(output.contains("## Crawl Discovery"));
+        assert!(output
+            .contains("[Docs](https://example.com/docs) - status 200, quality 0.91, 42 words"));
     }
 }

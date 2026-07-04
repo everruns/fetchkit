@@ -201,6 +201,10 @@ pub async fn fetch_with_options(
     }
     req.normalize_url_for_fetch()?;
 
+    if req.wants_crawl() {
+        return crate::crawl::crawl_fetch_with_options(req, options).await;
+    }
+
     // Use registry with default fetchers
     let registry = FetcherRegistry::with_defaults();
     registry.fetch(req, options).await

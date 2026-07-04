@@ -77,6 +77,7 @@ pub mod bot_auth;
 
 pub mod client;
 mod convert;
+mod crawl;
 mod dns;
 mod error;
 pub mod fetchers;
@@ -106,7 +107,10 @@ pub use transport::{
     BodyStream, HttpTransport, ReqwestTransport, TransportError, TransportMethod, TransportRequest,
     TransportResponse,
 };
-pub use types::{FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata, PageQuality};
+pub use types::{
+    CrawlPage, CrawlResult, FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata,
+    PageQuality,
+};
 
 #[cfg(feature = "bot-auth")]
 pub use bot_auth::{BotAuthConfig, BotAuthError};
