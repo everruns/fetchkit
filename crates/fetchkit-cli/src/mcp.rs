@@ -216,6 +216,20 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
             output.push_str("truncated: true\n");
         }
     }
+    if let Some(ref quality) = response.quality {
+        output.push_str(&format!("quality_score: {:.2}\n", quality.score));
+        if !quality.warnings.is_empty() {
+            let warnings =
+                serde_json::to_string(&quality.warnings).unwrap_or_else(|_| "[]".to_string());
+            output.push_str(&format!("quality_warnings: {}\n", warnings));
+        }
+        if let Some(ref method) = quality.extraction_method {
+            output.push_str(&format!("extraction_method: {}\n", yaml_quote(method)));
+        }
+        if let Some(ref action) = quality.suggested_next_action {
+            output.push_str(&format!("suggested_next_action: {}\n", yaml_quote(action)));
+        }
+    }
     output.push_str("---\n");
 
     // Append content, or error as body for unsupported content
@@ -271,5 +285,34 @@ pub async fn run_server(tool: Tool) {
         let json = serde_json::to_string(&response).unwrap_or_default();
         let _ = writeln!(stdout, "{}", json);
         let _ = stdout.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_md_includes_quality_frontmatter() {
+        let response = fetchkit::FetchResponse {
+            url: "https://example.com".to_string(),
+            status_code: 200,
+            quality: Some(fetchkit::PageQuality {
+                score: 0.4,
+                warnings: vec!["low_content".to_string()],
+                extraction_method: Some("agent_main".to_string()),
+                suggested_next_action: Some("retry_with_agent_focus_or_crawl".to_string()),
+                ..Default::default()
+            }),
+            content: Some("short".to_string()),
+            ..Default::default()
+        };
+
+        let output = format_md_with_frontmatter(&response);
+
+        assert!(output.contains("quality_score: 0.40\n"));
+        assert!(output.contains("quality_warnings: [\"low_content\"]\n"));
+        assert!(output.contains("extraction_method: \"agent_main\"\n"));
+        assert!(output.contains("suggested_next_action: \"retry_with_agent_focus_or_crawl\"\n"));
     }
 }

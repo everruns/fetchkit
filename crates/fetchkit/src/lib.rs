@@ -106,7 +106,7 @@ pub use transport::{
     BodyStream, HttpTransport, ReqwestTransport, TransportError, TransportMethod, TransportRequest,
     TransportResponse,
 };
-pub use types::{FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata};
+pub use types::{FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata, PageQuality};
 
 #[cfg(feature = "bot-auth")]
 pub use bot_auth::{BotAuthConfig, BotAuthError};

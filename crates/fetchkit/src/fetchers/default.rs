@@ -17,7 +17,7 @@ use crate::error::FetchError;
 use crate::fetchers::Fetcher;
 use crate::file_saver::FileSaver;
 use crate::transport::{BodyStream, TransportMethod, TransportRequest, TransportResponse};
-use crate::types::{FetchRequest, FetchResponse, HttpMethod};
+use crate::types::{FetchRequest, FetchResponse, HttpMethod, PageQuality};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -312,6 +312,7 @@ impl Fetcher for DefaultFetcher {
                         "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."
                             .to_string(),
                     ),
+                    quality: Some(binary_quality_signal()),
                     ..Default::default()
                 });
             }
@@ -404,6 +405,14 @@ impl Fetcher for DefaultFetcher {
         if let (Some(metadata), Some(method)) = (&mut page_metadata, extraction_method) {
             metadata.extraction_method = Some(method.to_string());
         }
+        let quality = compute_quality_signal(
+            &final_content,
+            status_code,
+            truncated,
+            is_paywall,
+            extraction_method,
+            word_count,
+        );
 
         Ok(FetchResponse {
             url: final_url,
@@ -417,6 +426,7 @@ impl Fetcher for DefaultFetcher {
             content: Some(final_content),
             truncated: if truncated { Some(true) } else { None },
             metadata: page_metadata,
+            quality: Some(quality),
             word_count: Some(word_count),
             redirect_chain,
             is_paywall: if is_paywall { Some(true) } else { None },
@@ -786,6 +796,145 @@ pub(crate) async fn read_body_stream_with_timeout(
 /// Count words in text content.
 fn count_words(text: &str) -> u64 {
     text.split_whitespace().count() as u64
+}
+
+fn binary_quality_signal() -> PageQuality {
+    PageQuality {
+        score: 0.0,
+        warnings: vec!["binary_content".to_string()],
+        suggested_next_action: Some("use_save_to_file".to_string()),
+        ..Default::default()
+    }
+}
+
+fn compute_quality_signal(
+    content: &str,
+    status_code: u16,
+    truncated: bool,
+    is_paywall: bool,
+    extraction_method: Option<&str>,
+    word_count: u64,
+) -> PageQuality {
+    let mut warnings = Vec::new();
+    let mut score = 1.0f32;
+    let link_count = count_markdown_links(content);
+    let link_density = if word_count == 0 {
+        0.0
+    } else {
+        link_count as f32 / word_count as f32
+    };
+    let lower = content.to_lowercase();
+
+    if status_code >= 400 {
+        push_warning(&mut warnings, "http_error");
+        score -= 0.35;
+    }
+    if truncated {
+        push_warning(&mut warnings, "truncated");
+        score -= 0.20;
+    }
+    if word_count < 30 {
+        push_warning(&mut warnings, "low_content");
+        score -= 0.30;
+    }
+    if link_count >= 20 && link_density > 0.15 {
+        push_warning(&mut warnings, "too_many_links");
+        score -= 0.20;
+    }
+    if is_paywall {
+        push_warning(&mut warnings, "possible_paywall");
+        score -= 0.25;
+    }
+    if looks_like_login_wall(&lower) {
+        push_warning(&mut warnings, "possible_login_wall");
+        score -= 0.25;
+    }
+    if looks_like_consent_wall(&lower) {
+        push_warning(&mut warnings, "possible_consent_wall");
+        score -= 0.20;
+    }
+    if looks_like_javascript_required(&lower) {
+        push_warning(&mut warnings, "javascript_required");
+        score -= 0.30;
+    }
+
+    PageQuality {
+        score: score.clamp(0.0, 1.0),
+        suggested_next_action: suggested_next_action(&warnings).map(str::to_string),
+        warnings,
+        link_density: Some(link_density),
+        extraction_method: extraction_method.map(str::to_string),
+    }
+}
+
+fn count_markdown_links(content: &str) -> usize {
+    content.matches("](").count()
+}
+
+fn push_warning(warnings: &mut Vec<String>, warning: &str) {
+    if !warnings.iter().any(|existing| existing == warning) {
+        warnings.push(warning.to_string());
+    }
+}
+
+fn suggested_next_action(warnings: &[String]) -> Option<&'static str> {
+    if has_warning(warnings, "javascript_required") {
+        Some("retry_with_browser_rendering")
+    } else if has_warning(warnings, "possible_login_wall") {
+        Some("authenticate_or_use_browser")
+    } else if has_warning(warnings, "possible_paywall") {
+        Some("try_alternate_source")
+    } else if has_warning(warnings, "truncated") {
+        Some("retry_with_larger_limit_or_narrower_scope")
+    } else if has_warning(warnings, "low_content") || has_warning(warnings, "too_many_links") {
+        Some("retry_with_agent_focus_or_crawl")
+    } else if has_warning(warnings, "http_error") {
+        Some("check_url_or_retry_later")
+    } else {
+        None
+    }
+}
+
+fn has_warning(warnings: &[String], warning: &str) -> bool {
+    warnings.iter().any(|existing| existing == warning)
+}
+
+fn looks_like_login_wall(lower_content: &str) -> bool {
+    [
+        "sign in to continue",
+        "log in to continue",
+        "please sign in",
+        "please log in",
+        "login required",
+        "sign in required",
+    ]
+    .iter()
+    .any(|needle| lower_content.contains(needle))
+}
+
+fn looks_like_consent_wall(lower_content: &str) -> bool {
+    [
+        "accept cookies",
+        "cookie consent",
+        "manage cookies",
+        "privacy choices",
+        "we use cookies",
+        "consent preferences",
+    ]
+    .iter()
+    .any(|needle| lower_content.contains(needle))
+}
+
+fn looks_like_javascript_required(lower_content: &str) -> bool {
+    [
+        "enable javascript",
+        "javascript is disabled",
+        "requires javascript",
+        "please enable js",
+        "enable js",
+    ]
+    .iter()
+    .any(|needle| lower_content.contains(needle))
 }
 
 /// Common paywall indicators in raw HTML content.
@@ -1300,6 +1449,46 @@ mod tests {
         assert_eq!(count_words(""), 0);
         assert_eq!(count_words("  one  two  three  "), 3);
         assert_eq!(count_words("word"), 1);
+    }
+
+    #[test]
+    fn test_compute_quality_signal_clean_content() {
+        let content = "This page has enough useful words for an AI agent to answer with confidence. It includes actual content instead of just a menu, and it gives a short but complete explanation that should be useful for downstream reasoning.";
+        let quality = compute_quality_signal(
+            content,
+            200,
+            false,
+            false,
+            Some("agent_readable"),
+            count_words(content),
+        );
+
+        assert!(quality.score > 0.9, "{quality:?}");
+        assert!(quality.warnings.is_empty(), "{quality:?}");
+        assert_eq!(quality.extraction_method.as_deref(), Some("agent_readable"));
+        assert!(quality.suggested_next_action.is_none());
+    }
+
+    #[test]
+    fn test_compute_quality_signal_low_js_content() {
+        let quality = compute_quality_signal(
+            "Please enable JavaScript to view this app.",
+            200,
+            false,
+            false,
+            Some("full"),
+            7,
+        );
+
+        assert!(quality.score < 0.5, "{quality:?}");
+        assert!(quality.warnings.contains(&"low_content".to_string()));
+        assert!(quality
+            .warnings
+            .contains(&"javascript_required".to_string()));
+        assert_eq!(
+            quality.suggested_next_action.as_deref(),
+            Some("retry_with_browser_rendering")
+        );
     }
 
     #[test]

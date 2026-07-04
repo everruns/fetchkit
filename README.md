@@ -84,6 +84,8 @@ url: https://example.com
 status_code: 200
 source_content_type: text/html; charset=UTF-8
 source_size: 1256
+quality_score: 1.00
+extraction_method: "full"
 ---
 # Example Domain
 
@@ -236,6 +238,7 @@ response = tool.fetch("https://example.com")
 | `saved_path` | string? | Filesystem path when `save_to_file` succeeded |
 | `bytes_written` | int? | Bytes saved to file |
 | `metadata` | object? | Structured `PageMetadata` (title, description, links, headings, extraction method, …) |
+| `quality` | object? | Agent-facing `PageQuality` (score, warnings, link density, suggested next action) |
 | `word_count` | int? | Word count of returned content |
 | `redirect_chain` | string[] | URLs visited during redirects (empty if none) |
 | `is_paywall` | bool? | Heuristic paywall signal (soft, not guaranteed) |
