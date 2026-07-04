@@ -14,6 +14,7 @@ readme = "../../README.md"
 default = []
 bot-auth = ["dep:ed25519-dalek", "dep:base64", "dep:sha2", "dep:rand"]
 live-tests = []
+render-rakers = ["dep:rakers"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -29,6 +30,7 @@ bytes = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
 libc = { workspace = true }
+rakers = { workspace = true, optional = true }
 
 # Optional: bot-auth feature
 ed25519-dalek = { workspace = true, optional = true }

@@ -41,6 +41,8 @@ pub struct FetchOptions {
     pub blocked_hosts: Vec<String>,
     /// Restrict redirects to the original host only.
     pub same_host_redirects_only: bool,
+    /// Enable rakers-rendered HTML fetching. The request must still opt in.
+    pub enable_render_rakers: bool,
     /// Web Bot Authentication config (draft-meunier-web-bot-auth-architecture).
     /// When set, outgoing requests are signed with Ed25519.
     #[cfg(feature = "bot-auth")]
@@ -69,7 +71,8 @@ impl std::fmt::Debug for FetchOptions {
             .field("respect_proxy_env", &self.respect_proxy_env)
             .field("allowed_ports", &self.allowed_ports)
             .field("blocked_hosts", &self.blocked_hosts)
-            .field("same_host_redirects_only", &self.same_host_redirects_only);
+            .field("same_host_redirects_only", &self.same_host_redirects_only)
+            .field("enable_render_rakers", &self.enable_render_rakers);
         #[cfg(feature = "bot-auth")]
         d.field("bot_auth", &self.bot_auth);
         d.field(

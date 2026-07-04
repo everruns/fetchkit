@@ -31,6 +31,14 @@ pub enum HttpMethod {
     Head,
 }
 
+/// Optional browser-rendering backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RenderMode {
+    /// Lightweight rakers-based JavaScript/DOM rendering.
+    Rakers,
+}
+
 impl FromStr for HttpMethod {
     type Err = String;
 
@@ -120,6 +128,11 @@ pub struct FetchRequest {
     /// Maximum pages to fetch when crawl discovery is enabled, including the seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_pages: Option<usize>,
+
+    /// Optional browser rendering backend. Disabled unless the tool/options
+    /// explicitly enable the requested backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<RenderMode>,
 }
 
 impl FetchRequest {
@@ -198,6 +211,12 @@ impl FetchRequest {
         self
     }
 
+    /// Render HTML through the rakers backend before conversion.
+    pub fn render_rakers(mut self) -> Self {
+        self.render = Some(RenderMode::Rakers);
+        self
+    }
+
     /// Get the effective method (default to GET)
     pub fn effective_method(&self) -> HttpMethod {
         self.method.unwrap_or_default()
@@ -240,6 +259,11 @@ impl FetchRequest {
     /// Check if bounded crawl discovery is requested.
     pub fn wants_crawl(&self) -> bool {
         self.crawl.unwrap_or(false)
+    }
+
+    /// Check if rakers rendering is requested.
+    pub fn wants_rakers_render(&self) -> bool {
+        self.render == Some(RenderMode::Rakers)
     }
 }
 
@@ -543,6 +567,10 @@ pub struct FetchResponse {
     /// Heuristic paywall detection (soft signal, not guaranteed)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_paywall: Option<bool>,
+
+    /// Rendering backend used before conversion, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered_by: Option<String>,
 }
 
 #[cfg(test)]

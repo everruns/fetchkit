@@ -55,6 +55,9 @@ tower = { version = "0.5", features = ["util"] }
 # Platform filesystem flags
 libc = "0.2"
 
+# Optional rendered fetching
+rakers = { version = "0.1.7", default-features = false, features = ["rquickjs"] }
+
 # Crypto (bot-auth feature)
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 base64 = "0.22"

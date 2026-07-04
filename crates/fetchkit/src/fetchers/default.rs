@@ -87,6 +87,9 @@ const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(1);
 // THREAT[TM-DOS-002]: Body timeout caps total request duration
 pub(crate) const BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[cfg(feature = "render-rakers")]
+const RAKERS_SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Truncation message appended when body is cut short (timeout or size limit)
 pub(crate) const TRUNCATION_MESSAGE: &str = "\n\n[..content truncated...]";
 
@@ -236,6 +239,7 @@ impl Fetcher for DefaultFetcher {
         let method = request.effective_method();
         let wants_markdown = options.enable_markdown && request.wants_markdown();
         let wants_text = options.enable_text && request.wants_text();
+        validate_rakers_render_request(&request, options)?;
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
         let accept = if wants_markdown {
@@ -325,14 +329,18 @@ impl Fetcher for DefaultFetcher {
         let size = body.len() as u64;
 
         // Convert to string
-        let content = String::from_utf8_lossy(&body).to_string();
-
-        // Detect paywall before content is moved by conversion
-        let is_paywall = detect_paywall(&content);
+        let mut content = String::from_utf8_lossy(&body).to_string();
 
         // Determine format and convert if needed
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
         let is_html_content = is_html(&meta.content_type, &content);
+        let rendered_by = if is_html_content && request.wants_rakers_render() {
+            content = render_html_with_rakers(content, final_url.clone(), options).await?;
+            Some("rakers".to_string())
+        } else {
+            None
+        };
+        let is_paywall = detect_paywall(&content);
         let wants_main = request.wants_main_content();
         let wants_readable = request.wants_readable_content();
         let wants_agent = request.wants_agent_content();
@@ -430,6 +438,7 @@ impl Fetcher for DefaultFetcher {
             word_count: Some(word_count),
             redirect_chain,
             is_paywall: if is_paywall { Some(true) } else { None },
+            rendered_by,
             ..Default::default()
         })
     }
@@ -667,6 +676,128 @@ fn redirect_target(
     options.validate_redirect_target(base_url, &next_url)?;
 
     Ok(Some(next_url))
+}
+
+fn validate_rakers_render_request(
+    request: &FetchRequest,
+    options: &FetchOptions,
+) -> Result<(), FetchError> {
+    if !request.wants_rakers_render() {
+        return Ok(());
+    }
+
+    if !options.enable_render_rakers {
+        return Err(FetchError::RenderNotAvailable);
+    }
+
+    #[cfg(feature = "render-rakers")]
+    {
+        Ok(())
+    }
+
+    #[cfg(not(feature = "render-rakers"))]
+    {
+        Err(FetchError::RenderNotAvailable)
+    }
+}
+
+#[cfg(feature = "render-rakers")]
+async fn render_html_with_rakers(
+    html: String,
+    page_url: String,
+    options: &FetchOptions,
+) -> Result<String, FetchError> {
+    let user_agent = options.user_agent.clone();
+    tokio::task::spawn_blocking(move || {
+        let deny_proxy = DenyProxy::new().map_err(|_| {
+            FetchError::RequestError(
+                "failed to initialize rendered-fetch network guard".to_string(),
+            )
+        })?;
+        let cfg = rakers::HttpConfig {
+            user_agent,
+            headers: Vec::new(),
+            proxy: Some(deny_proxy.url()),
+            forward_headers: false,
+        };
+
+        rakers::render(
+            &html,
+            false,
+            Some(&page_url),
+            &cfg,
+            true,
+            Some(0),
+            Some(RAKERS_SCRIPT_TIMEOUT),
+        )
+        .map_err(|err| FetchError::FetcherError(format!("rakers render failed: {err}")))
+    })
+    .await
+    .map_err(|_| FetchError::FetcherError("rakers render task failed".to_string()))?
+}
+
+#[cfg(not(feature = "render-rakers"))]
+async fn render_html_with_rakers(
+    _html: String,
+    _page_url: String,
+    _options: &FetchOptions,
+) -> Result<String, FetchError> {
+    Err(FetchError::RenderNotAvailable)
+}
+
+#[cfg(feature = "render-rakers")]
+struct DenyProxy {
+    addr: std::net::SocketAddr,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(feature = "render-rakers")]
+impl DenyProxy {
+    fn new() -> std::io::Result<Self> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let addr = listener.local_addr()?;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let thread_stop = std::sync::Arc::clone(&stop);
+        let handle = std::thread::spawn(move || {
+            while !thread_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = std::io::Write::write_all(
+                            &mut stream,
+                            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok(Self {
+            addr,
+            stop,
+            handle: Some(handle),
+        })
+    }
+
+    fn url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+}
+
+#[cfg(feature = "render-rakers")]
+impl Drop for DenyProxy {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = std::net::TcpStream::connect(self.addr);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 /// Check if content type indicates binary content

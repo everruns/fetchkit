@@ -24,7 +24,8 @@ code where the API has changed.
    `CHANGELOG.md`.
 4. **Verify lockfile** - Ensure `Cargo.lock` reflects the updated versions
 5. **Build & test** - `cargo build --workspace && cargo test --workspace` must pass
-   after updates, with and without optional features (e.g. `--features bot-auth`)
+   after updates, with and without optional features (e.g. `--features bot-auth`;
+   `--features render-rakers` once implemented)
 6. **Audit advisories** - Run `cargo audit` (if available) to check for known vulnerabilities
 
 ### 2. Documentation Quality (docs.rs / rustdoc)
