@@ -220,6 +220,13 @@ async fn test_binary_content() {
     assert!(resp.content.is_none());
     assert!(resp.error.is_some());
     assert!(resp.error.unwrap().contains("Binary content"));
+    let quality = resp.quality.unwrap();
+    assert_eq!(quality.score, 0.0);
+    assert!(quality.warnings.contains(&"binary_content".to_string()));
+    assert_eq!(
+        quality.suggested_next_action.as_deref(),
+        Some("use_save_to_file")
+    );
 }
 
 #[tokio::test]

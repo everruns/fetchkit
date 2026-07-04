@@ -263,6 +263,20 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
             output.push_str("truncated: true\n");
         }
     }
+    if let Some(ref quality) = response.quality {
+        output.push_str(&format!("quality_score: {:.2}\n", quality.score));
+        if !quality.warnings.is_empty() {
+            let warnings =
+                serde_json::to_string(&quality.warnings).unwrap_or_else(|_| "[]".to_string());
+            output.push_str(&format!("quality_warnings: {}\n", warnings));
+        }
+        if let Some(ref method) = quality.extraction_method {
+            output.push_str(&format!("extraction_method: {}\n", yaml_quote(method)));
+        }
+        if let Some(ref action) = quality.suggested_next_action {
+            output.push_str(&format!("suggested_next_action: {}\n", yaml_quote(action)));
+        }
+    }
     output.push_str("---\n");
 
     // Append content, or error as body for unsupported content
@@ -291,7 +305,7 @@ fn writeln_safe(s: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fetchkit::FetchResponse;
+    use fetchkit::{FetchResponse, PageQuality};
 
     #[test]
     fn test_format_md_basic() {
@@ -322,6 +336,13 @@ mod tests {
             last_modified: Some("Wed, 01 Jan 2025 00:00:00 GMT".to_string()),
             filename: Some("page.html".to_string()),
             truncated: Some(true),
+            quality: Some(PageQuality {
+                score: 0.72,
+                warnings: vec!["low_content".to_string()],
+                extraction_method: Some("agent_main".to_string()),
+                suggested_next_action: Some("retry_with_agent_focus_or_crawl".to_string()),
+                ..Default::default()
+            }),
             content: Some("Content here".to_string()),
             ..Default::default()
         };
@@ -332,6 +353,10 @@ mod tests {
         assert!(output.contains("last_modified: \"Wed, 01 Jan 2025 00:00:00 GMT\"\n"));
         assert!(output.contains("filename: \"page.html\"\n"));
         assert!(output.contains("truncated: true\n"));
+        assert!(output.contains("quality_score: 0.72\n"));
+        assert!(output.contains("quality_warnings: [\"low_content\"]\n"));
+        assert!(output.contains("extraction_method: \"agent_main\"\n"));
+        assert!(output.contains("suggested_next_action: \"retry_with_agent_focus_or_crawl\"\n"));
     }
 
     #[test]

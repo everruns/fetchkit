@@ -95,6 +95,8 @@ Provide a builder to configure tool options, including:
   - `saved_path: Option<String>` (set when save_to_file succeeds)
   - `bytes_written: Option<u64>` (set when save_to_file succeeds)
   - `metadata: Option<PageMetadata>` (structured page metadata; populated for HTML)
+  - `quality: Option<PageQuality>` (agent-facing quality score, warnings, link density,
+    extraction method, and suggested next action)
   - `word_count: Option<u64>` (word count of final content)
   - `redirect_chain: Vec<String>` (URLs followed during redirects; empty if none)
   - `is_paywall: Option<bool>` (heuristic paywall signal; not guaranteed)
@@ -111,6 +113,17 @@ Provide a builder to configure tool options, including:
   - `extraction_method: Option<String>` (`"full"`, `"main"`, `"readable"`,
     `"readable_fallback_main"`, `"agent_readable"`, `"agent_main"`, `"native_markdown"`,
     `"native_text"`, or `"raw"`)
+- `PageQuality`
+  - `score: f32` (0.0 poor to 1.0 good)
+  - `warnings: Vec<String>` (machine-readable labels such as `low_content`, `truncated`,
+    `too_many_links`, `possible_login_wall`, `possible_consent_wall`, `possible_paywall`,
+    `javascript_required`, `http_error`, or `binary_content`)
+  - `link_density: Option<f32>` (approximate markdown link count divided by word count)
+  - `extraction_method: Option<String>` (mirrors returned extraction method for convenience)
+  - `suggested_next_action: Option<String>` (agent hint such as
+    `retry_with_browser_rendering`, `authenticate_or_use_browser`,
+    `try_alternate_source`, `retry_with_larger_limit_or_narrower_scope`,
+    `retry_with_agent_focus_or_crawl`, `check_url_or_retry_later`, or `use_save_to_file`)
 - `FetchError` enum
   - Missing url
   - Invalid url scheme
@@ -154,7 +167,8 @@ Provide a builder to configure tool options, including:
 - Output format (default `md`):
   - Markdown with YAML frontmatter containing metadata
   - Frontmatter fields: `url`, `status_code`, `source_content_type`, `source_size`,
-    `last_modified`, `filename`, `truncated`
+    `last_modified`, `filename`, `truncated`, `quality_score`, `quality_warnings`,
+    `extraction_method`, `suggested_next_action`
   - Content follows frontmatter (markdown-converted HTML or error message)
 - Output format (`json`):
   - JSON-serialized `FetchResponse` to stdout

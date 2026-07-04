@@ -338,6 +338,32 @@ impl PageMetadata {
     }
 }
 
+/// Agent-facing content quality signals.
+///
+/// These are heuristic hints for tool callers. They are intended to help agents
+/// decide whether to trust, retry, narrow, or escalate a fetch result.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PageQuality {
+    /// Normalized quality score from 0.0 (poor) to 1.0 (good).
+    pub score: f32,
+
+    /// Machine-readable warning labels, such as `low_content` or `truncated`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub warnings: Vec<String>,
+
+    /// Approximate markdown link count divided by word count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_density: Option<f32>,
+
+    /// Content extraction method used for the returned content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extraction_method: Option<String>,
+
+    /// Suggested next action for agents when warnings indicate a poor result.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_next_action: Option<String>,
+}
+
 /// Response from a fetch operation
 ///
 /// Contains the fetched content along with metadata like status code,
@@ -419,6 +445,10 @@ pub struct FetchResponse {
     /// Structured page metadata extracted from HTML
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<PageMetadata>,
+
+    /// Agent-facing content quality signals
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<PageQuality>,
 
     /// Word count of the final content
     #[serde(skip_serializing_if = "Option::is_none")]
