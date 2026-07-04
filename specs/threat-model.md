@@ -226,11 +226,15 @@ expected outbound path.
 **TM-INPUT-001 — Scheme validation (MITIGATED):**
 ```rust
 // THREAT[TM-INPUT-001]: Block non-HTTP schemes (file://, ftp://, data:, etc.)
-// Mitigation: Early return with InvalidUrlScheme error
-if !request.url.starts_with("http://") && !request.url.starts_with("https://") {
-    return Err(FetchError::InvalidUrlScheme);
-}
+// Mitigation: normalize domain-like bare hosts to https://, then reject any
+// remaining URL without an explicit http:// or https:// scheme.
+request.normalize_url_for_fetch()?;
 ```
+Bare URL normalization is deliberately narrow: domain-like hosts such as
+`example.com/docs` default to `https://example.com/docs`; non-web schemes,
+protocol-relative URLs, bare IP literals, and single-label local names are rejected.
+SSRF, DNS, port, allow-prefix, and block-prefix policies run after normalization
+against the canonical URL that will be fetched.
 
 **TM-INPUT-002 — URL prefix bypass via encoding (MITIGATED):**
 Prefix matching now uses the `url` crate to parse both the URL and the prefix,

@@ -2,7 +2,11 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::str::FromStr;
+use url::Url;
+
+use crate::error::FetchError;
 
 /// HTTP method for the request
 ///
@@ -70,7 +74,8 @@ impl std::fmt::Display for HttpMethod {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct FetchRequest {
-    /// The URL to fetch (required, must be http:// or https://)
+    /// The URL to fetch. HTTP/HTTPS URLs are accepted as-is; bare domain URLs
+    /// such as `example.com/docs` are normalized to `https://example.com/docs`.
     pub url: String,
 
     /// HTTP method (optional, default GET)
@@ -113,6 +118,12 @@ impl FetchRequest {
             url: url.into(),
             ..Default::default()
         }
+    }
+
+    /// Normalize browser-like bare host URLs before validation and fetching.
+    pub(crate) fn normalize_url_for_fetch(&mut self) -> Result<(), FetchError> {
+        self.url = canonical_fetch_url(&self.url)?;
+        Ok(())
     }
 
     /// Set the HTTP method
@@ -179,6 +190,43 @@ impl FetchRequest {
             .map(|f| f.eq_ignore_ascii_case("main"))
             .unwrap_or(false)
     }
+}
+
+fn canonical_fetch_url(raw_url: &str) -> Result<String, FetchError> {
+    if raw_url.starts_with("http://") || raw_url.starts_with("https://") {
+        return Ok(raw_url.to_string());
+    }
+
+    if raw_url.is_empty()
+        || raw_url.starts_with("//")
+        || raw_url.starts_with('/')
+        || raw_url.contains("://")
+        || raw_url.contains('\\')
+        || raw_url.chars().any(char::is_whitespace)
+        || raw_url.chars().any(char::is_control)
+    {
+        return Err(FetchError::InvalidUrlScheme);
+    }
+
+    let candidate = format!("https://{raw_url}");
+    let parsed = Url::parse(&candidate).map_err(|_| FetchError::InvalidUrlScheme)?;
+    let host = parsed.host_str().ok_or(FetchError::InvalidUrlScheme)?;
+
+    if !is_domain_like_bare_host(host)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(FetchError::InvalidUrlScheme);
+    }
+
+    Ok(candidate)
+}
+
+fn is_domain_like_bare_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host.contains('.')
+        && host.parse::<IpAddr>().is_err()
+        && host.chars().any(|ch| ch.is_ascii_alphabetic())
 }
 
 /// A link extracted from the page with its text and href.

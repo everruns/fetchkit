@@ -562,8 +562,9 @@ impl Tool {
     /// Create a single-use tool execution from JSON arguments.
     pub fn execution(&self, args: Value) -> Result<ToolExecution, ToolError> {
         validate_args(self, &args)?;
-        let request: FetchRequest = serde_json::from_value(args)
+        let mut request: FetchRequest = serde_json::from_value(args)
             .map_err(|err| invalid_arguments_error(self.locale(), &err.to_string()))?;
+        normalize_request(self, &mut request)?;
         validate_request(self, &request)?;
 
         Ok(ToolExecution {
@@ -580,7 +581,7 @@ impl Tool {
     /// Execute the tool with status updates.
     pub async fn execute_with_status<F>(
         &self,
-        req: FetchRequest,
+        mut req: FetchRequest,
         mut status_callback: F,
     ) -> Result<FetchResponse, FetchError>
     where
@@ -592,9 +593,7 @@ impl Tool {
             return Err(FetchError::MissingUrl);
         }
 
-        if !req.url.starts_with("http://") && !req.url.starts_with("https://") {
-            return Err(FetchError::InvalidUrlScheme);
-        }
+        req.normalize_url_for_fetch()?;
 
         status_callback(ToolStatus::new("connect").with_percent(10.0));
         status_callback(ToolStatus::new("fetch").with_percent(20.0));
@@ -618,6 +617,12 @@ impl Tool {
         req: FetchRequest,
         saver: Option<&dyn FileSaver>,
     ) -> Result<FetchResponse, FetchError> {
+        let mut req = req;
+        if req.url.is_empty() {
+            return Err(FetchError::MissingUrl);
+        }
+        req.normalize_url_for_fetch()?;
+
         if req.save_to_file.is_some() {
             if !self.enable_save_to_file {
                 return Err(FetchError::SaverNotAvailable);
@@ -773,6 +778,16 @@ fn validate_request(tool: &Tool, request: &FetchRequest) -> Result<(), ToolError
     Ok(())
 }
 
+fn normalize_request(tool: &Tool, request: &mut FetchRequest) -> Result<(), ToolError> {
+    if request.url.is_empty() {
+        return Err(map_fetch_error(tool.locale(), FetchError::MissingUrl));
+    }
+
+    request
+        .normalize_url_for_fetch()
+        .map_err(|err| map_fetch_error(tool.locale(), err))
+}
+
 fn build_input_schema(
     enable_markdown: bool,
     enable_text: bool,
@@ -781,7 +796,10 @@ fn build_input_schema(
     let mut properties = Map::new();
     properties.insert(
         "url".to_string(),
-        json!({"type": "string", "format": "uri"}),
+        json!({
+            "type": "string",
+            "description": "HTTP/HTTPS URL, or a bare domain URL normalized to https://"
+        }),
     );
     properties.insert(
         "method".to_string(),
@@ -1068,12 +1086,12 @@ fn build_help(tool: &Tool) -> String {
 
 fn parameter_description(locale: &str, field: &str) -> &'static str {
     match (is_ukrainian(locale), field) {
-        (true, "url") => "HTTP або HTTPS URL",
+        (true, "url") => "HTTP/HTTPS URL або доменний URL, який нормалізується до https://",
         (true, "method") => "`GET` або `HEAD`",
         (true, "as_markdown") => "Перетворити HTML у markdown",
         (true, "as_text") => "Перетворити HTML у plain text",
         (true, "save_to_file") => "Шлях призначення, визначений адаптером",
-        (false, "url") => "HTTP or HTTPS URL",
+        (false, "url") => "HTTP/HTTPS URL, or a bare domain URL normalized to `https://`",
         (false, "method") => "`GET` or `HEAD`",
         (false, "as_markdown") => "Convert HTML to markdown",
         (false, "as_text") => "Convert HTML to plain text",
@@ -1269,7 +1287,10 @@ mod tests {
         let output_schema = tool.output_schema();
 
         assert_eq!(input_schema["type"], "object");
-        assert_eq!(input_schema["properties"]["url"]["format"], "uri");
+        assert!(input_schema["properties"]["url"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("bare domain URL"));
         assert_eq!(input_schema["properties"]["method"]["default"], "GET");
         assert!(input_schema["properties"]["if_none_match"].is_object());
         assert!(input_schema["properties"]["if_modified_since"].is_object());
