@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-04
+
+### Highlights
+
+- Bare host inputs such as `example.com` are now accepted and normalized before fetching.
+- URL handling is more consistent across direct and specialized fetcher paths, including docs pages.
+- Vulnerable Rust dependencies were updated.
+
+### What's Changed
+
+* fix: normalize direct fetcher URLs ([#141](https://github.com/everruns/fetchkit/pull/141))
+* fix(fetcher): respect docs page URLs ([#140](https://github.com/everruns/fetchkit/pull/140))
+* fix(deps): update vulnerable Rust dependencies ([#139](https://github.com/everruns/fetchkit/pull/139))
+* fix: accept bare host URLs ([#138](https://github.com/everruns/fetchkit/pull/138))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.4.0...v0.4.1
+
 ## [0.4.0] - 2026-06-12
 
 ### Highlights
@@ -214,7 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/everruns/fetchkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/everruns/fetchkit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/everruns/fetchkit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/everruns/fetchkit/compare/v0.1.3...v0.2.0
