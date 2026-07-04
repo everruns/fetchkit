@@ -4,8 +4,8 @@
 //! returning clean content optimized for LLM consumption.
 //!
 //! Design: Matches known documentation site patterns (ReadTheDocs, docs.rs,
-//! Docusaurus, etc.) and explicit llms.txt/llms-full.txt URLs. For matched
-//! sites, probes for llms.txt before fetching the page. Falls through to
+//! Docusaurus, etc.) and explicit llms.txt/llms-full.txt URLs. For root docs
+//! URLs, probes for llms.txt before fetching the page. Falls through to
 //! DefaultFetcher for non-docs URLs.
 
 use crate::client::FetchOptions;
@@ -44,8 +44,8 @@ const DOCS_HOST_PREFIXES: &[&str] = &["docs.", "wiki.", "developer.", "devdocs."
 /// Documentation site fetcher with llms.txt support
 ///
 /// Matches known documentation sites and explicit llms.txt URLs.
-/// For matched sites, probes for llms-full.txt/llms.txt at the origin
-/// before returning content.
+/// For root docs URLs, probes for llms-full.txt/llms.txt at the origin before
+/// returning content.
 pub struct DocsSiteFetcher;
 
 impl DocsSiteFetcher {
@@ -57,6 +57,11 @@ impl DocsSiteFetcher {
     fn is_llms_txt_url(url: &Url) -> bool {
         let path = url.path();
         path == "/llms.txt" || path == "/llms-full.txt"
+    }
+
+    /// Check if a URL requests the docs site root rather than a specific page
+    fn is_root_docs_url(url: &Url) -> bool {
+        url.path() == "/"
     }
 
     /// Check if a URL belongs to a known documentation site
@@ -115,35 +120,39 @@ impl Fetcher for DocsSiteFetcher {
             return fetch_llms_txt_direct(url, ua_header, options).await;
         }
 
-        // For docs sites, probe for llms.txt at origin
-        let origin = format!(
-            "{}://{}{}",
-            url.scheme(),
-            url.host_str().unwrap_or_default(),
-            url.port().map(|p| format!(":{}", p)).unwrap_or_default()
-        );
+        if Self::is_root_docs_url(&url) {
+            // For root docs site requests, prefer an LLM-friendly site map.
+            let origin = format!(
+                "{}://{}{}",
+                url.scheme(),
+                url.host_str().unwrap_or_default(),
+                url.port().map(|p| format!(":{}", p)).unwrap_or_default()
+            );
 
-        // Try llms-full.txt first, then llms.txt
-        let probe_urls = [
-            (format!("{}/llms-full.txt", origin), "llms-full.txt"),
-            (format!("{}/llms.txt", origin), "llms.txt"),
-        ];
+            // Try llms-full.txt first, then llms.txt
+            let probe_urls = [
+                (format!("{}/llms-full.txt", origin), "llms-full.txt"),
+                (format!("{}/llms.txt", origin), "llms.txt"),
+            ];
 
-        for (probe_url, source) in &probe_urls {
-            let probe_url = Url::parse(probe_url).map_err(|_| FetchError::InvalidUrlScheme)?;
-            if let Some(content) = try_fetch_llms_txt(probe_url, ua_header.clone(), options).await {
-                return Ok(FetchResponse {
-                    url: request.url.clone(),
-                    status_code: 200,
-                    content_type: Some("text/plain".to_string()),
-                    format: Some("documentation".to_string()),
-                    content: Some(format!("<!-- Source: {} -->\n\n{}", source, content)),
-                    ..Default::default()
-                });
+            for (probe_url, source) in &probe_urls {
+                let probe_url = Url::parse(probe_url).map_err(|_| FetchError::InvalidUrlScheme)?;
+                if let Some(content) =
+                    try_fetch_llms_txt(probe_url, ua_header.clone(), options).await
+                {
+                    return Ok(FetchResponse {
+                        url: request.url.clone(),
+                        status_code: 200,
+                        content_type: Some("text/plain".to_string()),
+                        format: Some("documentation".to_string()),
+                        content: Some(format!("<!-- Source: {} -->\n\n{}", source, content)),
+                        ..Default::default()
+                    });
+                }
             }
         }
 
-        // No llms.txt — fetch the docs page directly and return raw content
+        // No root llms.txt, or a specific docs page — fetch the page directly.
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, ua_header);
         headers.insert(
@@ -305,6 +314,18 @@ async fn try_fetch_llms_txt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DnsPolicy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_options() -> FetchOptions {
+        FetchOptions {
+            enable_markdown: true,
+            enable_text: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_is_llms_txt_url() {
@@ -316,6 +337,18 @@ mod tests {
 
         let url = Url::parse("https://example.com/other.txt").unwrap();
         assert!(!DocsSiteFetcher::is_llms_txt_url(&url));
+    }
+
+    #[test]
+    fn test_is_root_docs_url() {
+        let url = Url::parse("https://docs.example.com/").unwrap();
+        assert!(DocsSiteFetcher::is_root_docs_url(&url));
+
+        let url = Url::parse("https://docs.example.com").unwrap();
+        assert!(DocsSiteFetcher::is_root_docs_url(&url));
+
+        let url = Url::parse("https://docs.example.com/guide/").unwrap();
+        assert!(!DocsSiteFetcher::is_root_docs_url(&url));
     }
 
     #[test]
@@ -363,5 +396,82 @@ mod tests {
         // Non-docs sites don't match
         let url = Url::parse("https://github.com/owner/repo").unwrap();
         assert!(!fetcher.matches(&url));
+    }
+
+    #[tokio::test]
+    async fn test_root_docs_url_uses_llms_txt() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/llms-full.txt"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/llms.txt"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/plain")
+                    .set_body_string("# Site index"),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/html")
+                    .set_body_string("<h1>Home page</h1>"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DocsSiteFetcher::new();
+        let request = FetchRequest::new(server.uri());
+        let response = fetcher.fetch(&request, &test_options()).await.unwrap();
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.format, Some("documentation".to_string()));
+        assert_eq!(
+            response.content.as_deref(),
+            Some("<!-- Source: llms.txt -->\n\n# Site index")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_specific_docs_page_ignores_origin_llms_txt() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/llms.txt"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/plain")
+                    .set_body_string("# Site index"),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/guide/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/html")
+                    .set_body_string("<h1>Specific guide</h1><p>Requested page.</p>"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DocsSiteFetcher::new();
+        let request = FetchRequest::new(format!("{}/guide/", server.uri()));
+        let response = fetcher.fetch(&request, &test_options()).await.unwrap();
+        let content = response.content.expect("should have content");
+
+        assert_eq!(response.status_code, 200);
+        assert!(content.contains("Specific guide"));
+        assert!(content.contains("Requested page"));
+        assert!(!content.contains("Site index"));
     }
 }

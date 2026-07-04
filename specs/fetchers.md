@@ -128,7 +128,7 @@ Central dispatcher that:
 #### DocsSiteFetcher
 
 - Matches: Direct `/llms.txt` or `/llms-full.txt` URLs, or known docs sites (ReadTheDocs, docs.rs, GitBook, etc.)
-- Behavior: Probes for llms-full.txt/llms.txt at origin; if not found, fetches page and converts HTML to markdown
+- Behavior: Direct `/llms.txt` or `/llms-full.txt` URLs fetch that file. Root docs site URLs probe for `llms-full.txt`/`llms.txt` at origin; if not found, fetch the root page. Specific docs page URLs fetch the requested page and convert HTML to markdown.
 - Response format field: `"documentation"` or `"markdown"`
 
 ### Response Extensions
