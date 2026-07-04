@@ -439,6 +439,7 @@ impl Fetcher for TwitterFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let (_username, tweet_id) = Self::parse_tweet_url(&url).ok_or_else(|| {

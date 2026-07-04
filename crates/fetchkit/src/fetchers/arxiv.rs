@@ -95,6 +95,7 @@ impl Fetcher for ArXivFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let paper_id = Self::parse_url(&url)

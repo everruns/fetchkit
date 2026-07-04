@@ -170,8 +170,9 @@ Provide a builder to configure tool options, including:
 ### Request Validation
 
 - `url` is required.
-- Only `http://` and `https://` URLs allowed.
-- Invalid URL: `Invalid URL: must start with http:// or https://`.
+- Explicit `http://` and `https://` URLs are allowed. Bare domain URLs are
+  accepted and normalized to `https://` before validation and fetch.
+- Invalid URL: `Invalid URL: must be http://, https://, or a bare domain URL`.
 - Invalid method: `Invalid method: must be GET or HEAD`.
 - Allow/block list prefixes (if configured) are applied before fetch.
   - If allow list is non-empty, URL must match at least one allow prefix.
@@ -321,7 +322,7 @@ Content is HTML if:
 ### Error Handling
 
 - Missing url -> tool error string "Missing required parameter: url".
-- Invalid URL -> tool error string "Invalid URL: must start with http:// or https://".
+- Invalid URL -> tool error string "Invalid URL: must be http://, https://, or a bare domain URL".
 - Invalid method -> tool error string "Invalid method: must be GET or HEAD".
 - Blocked URL (prefix or DNS policy) -> tool error string "Blocked URL: not allowed by policy".
 - First-byte timeout -> "Request timed out: server did not respond within 1 second".

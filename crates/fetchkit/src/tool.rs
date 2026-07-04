@@ -1020,25 +1020,25 @@ fn build_help(tool: &Tool) -> String {
     let errors = if is_ukrainian(tool.locale()) {
         if tool.enable_save_to_file {
             "- `MissingUrl` — параметр `url` обов’язковий\n\
-             - `InvalidUrlScheme` — схема URL має бути `http` або `https`\n\
+             - `InvalidUrlScheme` — URL має бути `http://`, `https://` або доменним URL\n\
              - `BlockedUrl` — URL заблокований політикою SSRF або allow/block правилами\n\
              - `FirstByteTimeout` — сервер не відповів протягом 1 секунди\n\
              - `SaverNotAvailable` — `save_to_file` потребує адаптер `FileSaver`\n"
         } else {
             "- `MissingUrl` — параметр `url` обов’язковий\n\
-             - `InvalidUrlScheme` — схема URL має бути `http` або `https`\n\
+             - `InvalidUrlScheme` — URL має бути `http://`, `https://` або доменним URL\n\
              - `BlockedUrl` — URL заблокований політикою SSRF або allow/block правилами\n\
              - `FirstByteTimeout` — сервер не відповів протягом 1 секунди\n"
         }
     } else if tool.enable_save_to_file {
         "- `MissingUrl` — `url` is required\n\
-         - `InvalidUrlScheme` — URL scheme must be `http` or `https`\n\
+         - `InvalidUrlScheme` — URL must be `http://`, `https://`, or a bare domain URL\n\
          - `BlockedUrl` — URL blocked by SSRF policy or allow/block rules\n\
          - `FirstByteTimeout` — server did not respond within 1 second\n\
          - `SaverNotAvailable` — `save_to_file` requires a `FileSaver` adapter\n"
     } else {
         "- `MissingUrl` — `url` is required\n\
-         - `InvalidUrlScheme` — URL scheme must be `http` or `https`\n\
+         - `InvalidUrlScheme` — URL must be `http://`, `https://`, or a bare domain URL\n\
          - `BlockedUrl` — URL blocked by SSRF policy or allow/block rules\n\
          - `FirstByteTimeout` — server did not respond within 1 second\n"
     };
@@ -1139,7 +1139,7 @@ fn unknown_parameter_error(locale: &str, key: &str) -> ToolError {
 fn user_text(locale: &str, key: &str) -> &'static str {
     match (is_ukrainian(locale), key) {
         (true, "missing_url") => "Параметр url обов’язковий.",
-        (true, "invalid_scheme") => "Схема URL має бути http або https.",
+        (true, "invalid_scheme") => "URL має бути http://, https:// або доменним URL.",
         (true, "invalid_method") => "Метод має бути GET або HEAD.",
         (true, "blocked_url") => "URL заблокований політикою безпеки.",
         (true, "timeout") => {
@@ -1153,7 +1153,7 @@ fn user_text(locale: &str, key: &str) -> &'static str {
         (true, "save_error") => "Не вдалося зберегти файл. Перевірте шлях призначення.",
         (true, "saver_missing") => "save_to_file потребує адаптер FileSaver.",
         (false, "missing_url") => "url is required.",
-        (false, "invalid_scheme") => "URL scheme must be http or https.",
+        (false, "invalid_scheme") => "URL must be http://, https://, or a bare domain URL.",
         (false, "invalid_method") => "Method must be GET or HEAD.",
         (false, "blocked_url") => "URL is blocked by security policy.",
         (false, "timeout") => {
@@ -1357,7 +1357,7 @@ mod tests {
         assert!(err
             .unwrap_err()
             .to_string()
-            .contains("URL scheme must be http or https"));
+            .contains("URL must be http://, https://, or a bare domain URL"));
     }
 
     #[test]

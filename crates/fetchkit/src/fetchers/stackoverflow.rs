@@ -120,6 +120,7 @@ impl Fetcher for StackOverflowFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         let url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let (site, question_id) = Self::parse_url(&url).ok_or_else(|| {

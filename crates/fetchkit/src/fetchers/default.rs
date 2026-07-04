@@ -227,6 +227,7 @@ impl Fetcher for DefaultFetcher {
         request: &FetchRequest,
         options: &FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        let request = request.normalized_for_fetch()?;
         if request.url.is_empty() {
             return Err(FetchError::MissingUrl);
         }
@@ -244,7 +245,7 @@ impl Fetcher for DefaultFetcher {
             "*/*"
         };
 
-        let headers = build_headers(options, accept, request);
+        let headers = build_headers(options, accept, &request);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let reqwest_method = match method {
@@ -416,6 +417,7 @@ impl Fetcher for DefaultFetcher {
             Some(path) => path.clone(),
             None => return self.fetch(request, options).await,
         };
+        let request = request.normalized_for_fetch()?;
 
         if request.url.is_empty() {
             return Err(FetchError::MissingUrl);
@@ -424,7 +426,7 @@ impl Fetcher for DefaultFetcher {
         let method = request.effective_method();
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
-        let headers = build_headers(options, "*/*", request);
+        let headers = build_headers(options, "*/*", &request);
         let parsed_url = url::Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
         let reqwest_method = match method {

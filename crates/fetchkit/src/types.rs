@@ -126,6 +126,13 @@ impl FetchRequest {
         Ok(())
     }
 
+    /// Return a normalized copy for APIs that accept `&FetchRequest`.
+    pub(crate) fn normalized_for_fetch(&self) -> Result<Self, FetchError> {
+        let mut request = self.clone();
+        request.normalize_url_for_fetch()?;
+        Ok(request)
+    }
+
     /// Set the HTTP method
     pub fn method(mut self, method: HttpMethod) -> Self {
         self.method = Some(method);
