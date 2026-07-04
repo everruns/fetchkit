@@ -8,6 +8,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **Pluggable fetchers** - URL-aware dispatch to specialized handlers for repos, docs, feeds, videos, papers, and more
 - **HTML-to-Markdown** - Built-in conversion optimized for LLMs, with fetched relative links/images resolved to absolute URLs
 - **Agent content focus** - Optional low-noise extraction mode for AI agents
+- **Crawl discovery** - Optional bounded same-origin page discovery for AI agents
 - **HTML-to-Text** - Plain text extraction with clean formatting
 - **Binary detection** - Returns metadata only for images, PDFs, etc.
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
@@ -71,6 +72,9 @@ fetchkit fetch https://example.com --user-agent "MyBot/1.0"
 
 # Hardened outbound policy for cluster/data-plane use
 fetchkit fetch https://example.com --hardened
+
+# Discover a small same-origin page map for an agent
+fetchkit fetch https://example.com --content-focus agent --crawl --max-pages 5
 
 # Show full documentation
 fetchkit --llmtxt
@@ -216,6 +220,8 @@ response = tool.fetch("https://example.com")
 | `as_text` | bool? | Convert HTML to plain text |
 | `save_to_file` | string? | Save body to path (requires `FileSaver`) |
 | `content_focus` | string? | `"full"`/unset returns everything; `"main"` strips semantic boilerplate; `"readable"` selects article-like content; `"agent"` selects the best low-noise strategy for AI agents |
+| `crawl` | bool? | Fetch the seed URL, then discover and fetch bounded same-origin pages |
+| `max_pages` | int? | Maximum crawl pages, including the seed; default 5, max 20 |
 | `if_none_match` | string? | ETag for conditional `If-None-Match` |
 | `if_modified_since` | string? | Timestamp for conditional `If-Modified-Since` |
 
@@ -239,6 +245,7 @@ response = tool.fetch("https://example.com")
 | `bytes_written` | int? | Bytes saved to file |
 | `metadata` | object? | Structured `PageMetadata` (title, description, links, headings, extraction method, …) |
 | `quality` | object? | Agent-facing `PageQuality` (score, warnings, link density, suggested next action) |
+| `crawl` | object? | Bounded crawl discovery result with visited page summaries |
 | `word_count` | int? | Word count of returned content |
 | `redirect_chain` | string[] | URLs visited during redirects (empty if none) |
 | `is_paywall` | bool? | Heuristic paywall signal (soft, not guaranteed) |

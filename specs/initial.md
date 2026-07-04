@@ -20,7 +20,8 @@ that expose the same tool contract.
 - Provide a reusable library API and a CLI wrapper.
 - Provide an MCP server exposing the tool.
 - Provide Python bindings that expose the same tool contract.
-- No crawling, no JS execution, no cookies, no auth.
+- No JS execution, no cookies, no auth. Crawl support is bounded same-origin
+  discovery only.
 
 ### Library
 
@@ -77,6 +78,8 @@ Provide a builder to configure tool options, including:
     - `"agent"` selects the best low-noise strategy for AI agents, currently readable-first then `"main"`
   - `if_none_match: Option<String>` (sets `If-None-Match` for conditional requests)
   - `if_modified_since: Option<String>` (sets `If-Modified-Since` for conditional requests)
+  - `crawl: Option<bool>` enables bounded same-origin discovery after fetching the seed URL
+  - `max_pages: Option<usize>` caps crawl discovery, including the seed page (default 5, max 20)
 - `HttpMethod` enum: `Get`, `Head`
   - Case-insensitive parser accepts only GET/HEAD.
 - `FetchResponse`
@@ -97,6 +100,7 @@ Provide a builder to configure tool options, including:
   - `metadata: Option<PageMetadata>` (structured page metadata; populated for HTML)
   - `quality: Option<PageQuality>` (agent-facing quality score, warnings, link density,
     extraction method, and suggested next action)
+  - `crawl: Option<CrawlResult>` (bounded same-origin discovery result)
   - `word_count: Option<u64>` (word count of final content)
   - `redirect_chain: Vec<String>` (URLs followed during redirects; empty if none)
   - `is_paywall: Option<bool>` (heuristic paywall signal; not guaranteed)
@@ -124,6 +128,20 @@ Provide a builder to configure tool options, including:
     `retry_with_browser_rendering`, `authenticate_or_use_browser`,
     `try_alternate_source`, `retry_with_larger_limit_or_narrower_scope`,
     `retry_with_agent_focus_or_crawl`, `check_url_or_retry_later`, or `use_save_to_file`)
+- `CrawlResult`
+  - `seed_url: String`
+  - `max_pages: usize`
+  - `pages: Vec<CrawlPage>` in discovery order
+  - `truncated: Option<bool>` when more candidates existed than the page budget allowed
+- `CrawlPage`
+  - `url: String`
+  - `status_code: Option<u16>`
+  - `title: Option<String>`
+  - `description: Option<String>`
+  - `content_type: Option<String>`
+  - `word_count: Option<u64>`
+  - `quality_score: Option<f32>`
+  - `error: Option<String>`
 - `FetchError` enum
   - Missing url
   - Invalid url scheme
@@ -157,6 +175,9 @@ Provide a builder to configure tool options, including:
   - `--user-agent <UA>` (optional, overrides default User-Agent)
   - `--hardened` (optional, applies the hardened outbound policy profile)
   - `--allow-env-proxy` (optional, opt in to `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`)
+  - `--content-focus <full|main|readable|agent>` (optional, extraction focus)
+  - `--crawl` (optional, bounded same-origin discovery)
+  - `--max-pages <N>` (optional, crawl page cap, default 5, max 20)
   - `--help` (standard help)
 - MCP subcommand options:
   - `--hardened` (optional, applies the hardened outbound policy profile)
@@ -168,8 +189,9 @@ Provide a builder to configure tool options, including:
   - Markdown with YAML frontmatter containing metadata
   - Frontmatter fields: `url`, `status_code`, `source_content_type`, `source_size`,
     `last_modified`, `filename`, `truncated`, `quality_score`, `quality_warnings`,
-    `extraction_method`, `suggested_next_action`
+    `extraction_method`, `suggested_next_action`, `crawl_pages`, `crawl_truncated`
   - Content follows frontmatter (markdown-converted HTML or error message)
+  - When `crawl` is present, append a `Crawl Discovery` markdown list after content
 - Output format (`json`):
   - JSON-serialized `FetchResponse` to stdout
 - Exit code: non-zero for `FetchError`.
@@ -202,6 +224,19 @@ Provide a builder to configure tool options, including:
     If the prefix omits a port, any port on the same scheme+host matches.
 - Exact host and hostname suffix block rules (if configured) are applied before DNS resolution.
 - If one or more allowed ports are configured, the URL port must match one of them.
+
+### Crawl Discovery
+
+- Crawl discovery is opt-in via `crawl: true` or CLI `--crawl`.
+- FetchKit first fetches the seed URL normally, then inspects extracted page links.
+- Only same-origin HTTP(S) links are eligible: same scheme, normalized host, and port.
+- Obvious static assets (`.js`, `.css`, images, PDFs, archives) are skipped.
+- `max_pages` includes the seed page, defaults to 5, and is clamped to 20.
+- Each discovered page is fetched with markdown conversion and `content_focus="agent"`.
+- Fetch errors for discovered pages are captured in that page's `error`; they do not fail
+  the whole crawl when the seed fetch succeeded.
+- URL allow/block lists, host/port policy, DNS policy, redirect validation, body caps, and
+  timeout behavior apply to every discovered page.
 
 ### SSRF Prevention (DNS Policy)
 

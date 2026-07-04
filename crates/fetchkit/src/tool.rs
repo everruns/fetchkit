@@ -754,7 +754,7 @@ fn validate_args(tool: &Tool, args: &Value) -> Result<(), ToolError> {
             "as_markdown" => tool.enable_markdown,
             "as_text" => tool.enable_text,
             "save_to_file" => tool.enable_save_to_file,
-            "if_none_match" | "if_modified_since" => true,
+            "content_focus" | "if_none_match" | "if_modified_since" | "crawl" | "max_pages" => true,
             _ => false,
         };
 
@@ -831,6 +831,15 @@ fn build_input_schema(
     }
 
     properties.insert(
+        "content_focus".to_string(),
+        json!({
+            "type": "string",
+            "enum": ["full", "main", "readable", "agent"],
+            "default": "full",
+            "description": "Extraction focus. Use agent for low-noise AI-agent content."
+        }),
+    );
+    properties.insert(
         "if_none_match".to_string(),
         json!({
             "type": "string",
@@ -842,6 +851,24 @@ fn build_input_schema(
         json!({
             "type": "string",
             "description": "Last-Modified value for conditional requests (If-Modified-Since header)"
+        }),
+    );
+    properties.insert(
+        "crawl".to_string(),
+        json!({
+            "type": "boolean",
+            "default": false,
+            "description": "Fetch the seed URL, then discover and fetch a bounded set of same-origin pages."
+        }),
+    );
+    properties.insert(
+        "max_pages".to_string(),
+        json!({
+            "type": "integer",
+            "minimum": 1,
+            "maximum": crate::crawl::MAX_CRAWL_MAX_PAGES,
+            "default": crate::crawl::DEFAULT_CRAWL_MAX_PAGES,
+            "description": "Maximum pages for crawl discovery, including the seed page."
         }),
     );
 
@@ -872,6 +899,8 @@ fn build_output_schema() -> Value {
             "saved_path": {"type": "string"},
             "bytes_written": {"type": "integer", "minimum": 0},
             "word_count": {"type": "integer", "minimum": 0},
+            "quality": {"type": "object"},
+            "crawl": {"type": "object"},
             "redirect_chain": {"type": "array", "items": {"type": "string"}},
             "is_paywall": {"type": "boolean"}
         },
@@ -1012,6 +1041,20 @@ fn build_help(tool: &Tool) -> String {
         "\"full\"",
         parameter_description(tool.locale(), "content_focus"),
     ));
+    rows.push(table_row(
+        "crawl",
+        "boolean",
+        "no",
+        "false",
+        parameter_description(tool.locale(), "crawl"),
+    ));
+    rows.push(table_row(
+        "max_pages",
+        "integer",
+        "no",
+        "5",
+        parameter_description(tool.locale(), "max_pages"),
+    ));
 
     let adapters = if tool.enable_save_to_file {
         if is_ukrainian(tool.locale()) {
@@ -1100,12 +1143,16 @@ fn parameter_description(locale: &str, field: &str) -> &'static str {
         (true, "as_text") => "Перетворити HTML у plain text",
         (true, "save_to_file") => "Шлях призначення, визначений адаптером",
         (true, "content_focus") => "`full`, `main`, `readable`, або `agent`",
+        (true, "crawl") => "Обмежене same-origin виявлення сторінок для агентів",
+        (true, "max_pages") => "Максимум сторінок для crawl, включно з початковою",
         (false, "url") => "HTTP/HTTPS URL, or a bare domain URL normalized to `https://`",
         (false, "method") => "`GET` or `HEAD`",
         (false, "as_markdown") => "Convert HTML to markdown",
         (false, "as_text") => "Convert HTML to plain text",
         (false, "save_to_file") => "Adapter-defined destination path",
         (false, "content_focus") => "`full`, `main`, `readable`, or `agent`",
+        (false, "crawl") => "Bounded same-origin page discovery for agents",
+        (false, "max_pages") => "Maximum crawl pages, including the seed",
         _ => "",
     }
 }
@@ -1302,11 +1349,16 @@ mod tests {
             .unwrap()
             .contains("bare domain URL"));
         assert_eq!(input_schema["properties"]["method"]["default"], "GET");
+        assert!(input_schema["properties"]["content_focus"].is_object());
+        assert!(input_schema["properties"]["crawl"].is_object());
+        assert!(input_schema["properties"]["max_pages"].is_object());
         assert!(input_schema["properties"]["if_none_match"].is_object());
         assert!(input_schema["properties"]["if_modified_since"].is_object());
         assert!(output_schema["properties"]["url"].is_object());
         assert!(output_schema["properties"]["status_code"].is_object());
         assert!(output_schema["properties"]["word_count"].is_object());
+        assert!(output_schema["properties"]["quality"].is_object());
+        assert!(output_schema["properties"]["crawl"].is_object());
         assert!(output_schema["properties"]["redirect_chain"].is_object());
         assert!(output_schema["properties"]["is_paywall"].is_object());
         assert!(output_schema["properties"]["etag"].is_object());
@@ -1356,6 +1408,17 @@ mod tests {
             "url": "https://example.com",
             "if_none_match": "\"abc\"",
             "if_modified_since": "Wed, 21 Oct 2015 07:28:00 GMT"
+        }));
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn test_execution_accepts_agent_crawl_arguments() {
+        let ok = Tool::default().execution(json!({
+            "url": "https://example.com",
+            "content_focus": "agent",
+            "crawl": true,
+            "max_pages": 3
         }));
         assert!(ok.is_ok());
     }

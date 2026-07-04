@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) server implementation
 
-use fetchkit::Tool;
+use fetchkit::{CrawlPage, Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -230,6 +230,12 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
             output.push_str(&format!("suggested_next_action: {}\n", yaml_quote(action)));
         }
     }
+    if let Some(ref crawl) = response.crawl {
+        output.push_str(&format!("crawl_pages: {}\n", crawl.pages.len()));
+        if crawl.truncated.unwrap_or(false) {
+            output.push_str("crawl_truncated: true\n");
+        }
+    }
     output.push_str("---\n");
 
     // Append content, or error as body for unsupported content
@@ -238,8 +244,41 @@ fn format_md_with_frontmatter(response: &fetchkit::FetchResponse) -> String {
     } else if let Some(ref err) = response.error {
         output.push_str(err);
     }
+    append_crawl_summary(&mut output, response);
 
     output
+}
+
+fn append_crawl_summary(output: &mut String, response: &fetchkit::FetchResponse) {
+    let Some(ref crawl) = response.crawl else {
+        return;
+    };
+    if crawl.pages.is_empty() {
+        return;
+    }
+
+    output.push_str("\n\n## Crawl Discovery\n\n");
+    for page in &crawl.pages {
+        output.push_str(&format!("- {}\n", format_crawl_page(page)));
+    }
+}
+
+fn format_crawl_page(page: &CrawlPage) -> String {
+    let title = page.title.as_deref().unwrap_or(page.url.as_str());
+    let mut summary = format!("[{}]({})", title.replace(['[', ']'], ""), page.url);
+    if let Some(status_code) = page.status_code {
+        summary.push_str(&format!(" - status {status_code}"));
+    }
+    if let Some(score) = page.quality_score {
+        summary.push_str(&format!(", quality {score:.2}"));
+    }
+    if let Some(word_count) = page.word_count {
+        summary.push_str(&format!(", {word_count} words"));
+    }
+    if let Some(ref error) = page.error {
+        summary.push_str(&format!(", error: {error}"));
+    }
+    summary
 }
 
 fn yaml_quote(value: &str) -> String {
@@ -314,5 +353,36 @@ mod tests {
         assert!(output.contains("quality_warnings: [\"low_content\"]\n"));
         assert!(output.contains("extraction_method: \"agent_main\"\n"));
         assert!(output.contains("suggested_next_action: \"retry_with_agent_focus_or_crawl\"\n"));
+    }
+
+    #[test]
+    fn test_format_md_includes_crawl_summary() {
+        let response = fetchkit::FetchResponse {
+            url: "https://example.com".to_string(),
+            status_code: 200,
+            content: Some("# Home".to_string()),
+            crawl: Some(fetchkit::CrawlResult {
+                seed_url: "https://example.com".to_string(),
+                max_pages: 2,
+                pages: vec![fetchkit::CrawlPage {
+                    url: "https://example.com/docs".to_string(),
+                    status_code: Some(200),
+                    title: Some("Docs".to_string()),
+                    word_count: Some(42),
+                    quality_score: Some(0.91),
+                    ..Default::default()
+                }],
+                truncated: Some(true),
+            }),
+            ..Default::default()
+        };
+
+        let output = format_md_with_frontmatter(&response);
+
+        assert!(output.contains("crawl_pages: 1\n"));
+        assert!(output.contains("crawl_truncated: true\n"));
+        assert!(output.contains("## Crawl Discovery"));
+        assert!(output
+            .contains("[Docs](https://example.com/docs) - status 200, quality 0.91, 42 words"));
     }
 }
