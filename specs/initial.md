@@ -64,7 +64,8 @@ Provide a builder to configure tool options, including:
 #### Types
 
 - `FetchRequest`
-  - `url: String` (required)
+  - `url: String` (required; explicit `http://` and `https://` are accepted as-is;
+    bare domain URLs such as `example.com/docs` are normalized to `https://example.com/docs`)
   - `method: HttpMethod` (optional, default GET)
   - `as_markdown: bool` (optional, feature-gated)
   - `as_text: bool` (optional, feature-gated)

@@ -7,9 +7,10 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use fetchkit::{
-    DnsPolicy, FetchOptions, FetchRequest, Fetcher, HttpMethod, HttpTransport, TransportError,
-    TransportMethod, TransportRequest, TransportResponse,
+    DnsPolicy, FetchError, FetchOptions, FetchRequest, Fetcher, HttpMethod, HttpTransport,
+    TransportError, TransportMethod, TransportRequest, TransportResponse,
 };
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 
 /// One canned response keyed by URL substring.
@@ -271,6 +272,126 @@ async fn tool_execute_uses_injected_transport() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].1, TransportMethod::Get);
     assert!(calls[0].0.contains("example.test/tool"));
+}
+
+#[tokio::test]
+async fn tool_execute_defaults_bare_host_urls_to_https() {
+    let mock = Arc::new(MockTransport::new().route(
+        "paseo.sh/docs/custom-providers",
+        200,
+        "text/plain",
+        b"bare host normalized",
+    ));
+
+    let tool = fetchkit::Tool::builder()
+        .block_private_ips(false)
+        .transport(mock.clone())
+        .build();
+
+    let response = tool
+        .execute(FetchRequest::new("paseo.sh/docs/custom-providers"))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.url, "https://paseo.sh/docs/custom-providers");
+    assert_eq!(response.content.as_deref(), Some("bare host normalized"));
+
+    let calls = mock.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "https://paseo.sh/docs/custom-providers");
+}
+
+#[tokio::test]
+async fn tool_execution_defaults_bare_host_urls_to_https() {
+    let mock = Arc::new(MockTransport::new().route(
+        "paseo.sh/docs/custom-providers",
+        200,
+        "text/plain",
+        b"toolkit normalized",
+    ));
+
+    let tool = fetchkit::Tool::builder()
+        .block_private_ips(false)
+        .transport(mock.clone())
+        .build();
+
+    let output = tool
+        .execution(json!({
+            "url": "paseo.sh/docs/custom-providers"
+        }))
+        .unwrap()
+        .execute()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        output.result["url"],
+        "https://paseo.sh/docs/custom-providers"
+    );
+    assert_eq!(output.result["content"], "toolkit normalized");
+
+    let calls = mock.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "https://paseo.sh/docs/custom-providers");
+}
+
+#[tokio::test]
+async fn bare_host_policy_checks_use_canonical_https_url() {
+    let mock = Arc::new(MockTransport::new().route(
+        "paseo.sh/docs/custom-providers",
+        200,
+        "text/plain",
+        b"allowed canonical URL",
+    ));
+
+    let allow_tool = fetchkit::Tool::builder()
+        .block_private_ips(false)
+        .allow_prefix("https://paseo.sh/docs")
+        .transport(mock.clone())
+        .build();
+
+    let allowed = allow_tool
+        .execute(FetchRequest::new("paseo.sh/docs/custom-providers"))
+        .await
+        .unwrap();
+    assert_eq!(allowed.url, "https://paseo.sh/docs/custom-providers");
+
+    let block_tool = fetchkit::Tool::builder()
+        .block_private_ips(false)
+        .block_prefix("https://paseo.sh/docs")
+        .transport(mock.clone())
+        .build();
+
+    let blocked = block_tool
+        .execute(FetchRequest::new("paseo.sh/docs/custom-providers"))
+        .await
+        .unwrap_err();
+    assert!(matches!(blocked, FetchError::BlockedUrl));
+}
+
+#[tokio::test]
+async fn bare_url_normalization_rejects_non_web_and_localish_inputs() {
+    let mock = Arc::new(MockTransport::new());
+    let tool = fetchkit::Tool::builder()
+        .block_private_ips(false)
+        .transport(mock.clone())
+        .build();
+
+    for url in [
+        "ftp://example.com/file",
+        "file:///etc/passwd",
+        "mailto:test@example.com",
+        "//example.com/path",
+        "localhost/path",
+        "intranet/path",
+        "127.0.0.1/path",
+    ] {
+        let err = tool.execute(FetchRequest::new(url)).await.unwrap_err();
+        assert!(matches!(err, FetchError::InvalidUrlScheme), "{url}: {err}");
+    }
+
+    assert!(mock.calls().is_empty());
 }
 
 #[tokio::test]

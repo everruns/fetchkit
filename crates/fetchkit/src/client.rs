@@ -192,13 +192,14 @@ pub async fn fetch(req: FetchRequest) -> Result<FetchResponse, FetchError> {
 /// Uses the default fetcher registry with all built-in fetchers.
 /// For custom fetcher configuration, use [`FetcherRegistry`] directly.
 pub async fn fetch_with_options(
-    req: FetchRequest,
+    mut req: FetchRequest,
     options: FetchOptions,
 ) -> Result<FetchResponse, FetchError> {
     // Validate URL early
     if req.url.is_empty() {
         return Err(FetchError::MissingUrl);
     }
+    req.normalize_url_for_fetch()?;
 
     // Use registry with default fetchers
     let registry = FetcherRegistry::with_defaults();

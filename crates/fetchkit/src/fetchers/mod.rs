@@ -224,9 +224,10 @@ impl FetcherRegistry {
     /// (shouldn't happen with DefaultFetcher registered).
     pub async fn fetch(
         &self,
-        request: FetchRequest,
+        mut request: FetchRequest,
         options: FetchOptions,
     ) -> Result<FetchResponse, FetchError> {
+        request.normalize_url_for_fetch()?;
         let (fetcher, _) = self.validate_and_find_fetcher(&request, &options)?;
         debug!(fetcher = fetcher.name(), url = %request.url, "Using fetcher");
         fetcher.fetch(&request, &options).await
@@ -235,10 +236,11 @@ impl FetcherRegistry {
     /// Fetch a URL and save to file using the appropriate fetcher
     pub async fn fetch_to_file(
         &self,
-        request: FetchRequest,
+        mut request: FetchRequest,
         options: FetchOptions,
         saver: &dyn FileSaver,
     ) -> Result<FetchResponse, FetchError> {
+        request.normalize_url_for_fetch()?;
         let (fetcher, _) = self.validate_and_find_fetcher(&request, &options)?;
         tracing::debug!(fetcher = fetcher.name(), url = %request.url, "Using fetcher (save to file)");
         fetcher.fetch_to_file(&request, &options, saver).await
