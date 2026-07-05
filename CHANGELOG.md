@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Optional `render-rakers` feature for explicit, per-request lightweight JS/DOM rendering before markdown/text conversion. The backend is disabled by default, exposed only when a host enables it, and denies rakers-initiated subresource network requests.
 
+### Fixed
+
+- Stack Overflow question fetching now returns question and answer content again, including code snippets.
+
 ## [0.4.1] - 2026-07-04
 
 ### Highlights
