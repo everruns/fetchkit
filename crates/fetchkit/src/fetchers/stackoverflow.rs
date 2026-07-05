@@ -4,6 +4,7 @@
 //! Q&A content stripped of noise via the Stack Exchange API.
 
 use crate::client::FetchOptions;
+use crate::convert::{html_to_markdown_with_base_url, html_to_text};
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
 use crate::fetchers::Fetcher;
@@ -81,7 +82,7 @@ struct ApiResponse<T> {
 #[derive(Debug, Deserialize)]
 struct Question {
     title: String,
-    body_markdown: Option<String>,
+    body: Option<String>,
     score: i64,
     view_count: Option<u64>,
     answer_count: u64,
@@ -93,7 +94,7 @@ struct Question {
 
 #[derive(Debug, Deserialize)]
 struct Answer {
-    body_markdown: Option<String>,
+    body: Option<String>,
     score: i64,
     is_accepted: bool,
     owner: Option<Owner>,
@@ -152,9 +153,10 @@ impl Fetcher for StackOverflowFetcher {
             }
         };
 
-        // Fetch question with markdown body
+        // Fetch question with body HTML. The Stack Exchange API's built-in
+        // `withbody` filter is stable; FetchKit converts the HTML locally.
         let question_url = format!(
-            "https://api.stackexchange.com/2.3/questions/{}?site={}&filter=withbody_markdown",
+            "https://api.stackexchange.com/2.3/questions/{}?site={}&filter=withbody",
             question_id, site
         );
 
@@ -184,10 +186,10 @@ impl Fetcher for StackOverflowFetcher {
             FetchError::FetcherError(format!("Question {} not found", question_id))
         })?;
 
-        // Fetch answers sorted by votes, with markdown body
+        // Fetch answers sorted by votes, with body HTML.
         let answers = if question.answer_count > 0 {
             let answers_url = format!(
-                "https://api.stackexchange.com/2.3/questions/{}/answers?site={}&sort=votes&order=desc&pagesize={}&filter=withbody_markdown",
+                "https://api.stackexchange.com/2.3/questions/{}/answers?site={}&sort=votes&order=desc&pagesize={}&filter=withbody",
                 question_id, site, MAX_ANSWERS
             );
 
@@ -207,6 +209,14 @@ impl Fetcher for StackOverflowFetcher {
         };
 
         let content = format_qa_response(&question, answers.as_deref());
+        if is_minimal_qa_content(&question, answers.as_deref(), &content) {
+            return Ok(FetchResponse {
+                url: request.url.clone(),
+                status_code: 502,
+                error: Some("Stack Exchange API returned minimal or empty Q&A content".to_string()),
+                ..Default::default()
+            });
+        }
 
         Ok(FetchResponse {
             url: request.url.clone(),
@@ -223,7 +233,7 @@ fn format_qa_response(question: &Question, answers: Option<&[Answer]>) -> String
     let mut out = String::new();
 
     // Title
-    out.push_str(&format!("# {}\n\n", question.title));
+    out.push_str(&format!("# {}\n\n", html_to_text(&question.title)));
 
     // Question metadata
     out.push_str("## Question\n\n");
@@ -256,7 +266,7 @@ fn format_qa_response(question: &Question, answers: Option<&[Answer]>) -> String
     out.push_str(&format!("- **URL:** {}\n", question.link));
 
     // Question body
-    if let Some(body) = &question.body_markdown {
+    if let Some(body) = markdown_body(question.body.as_deref(), &question.link) {
         out.push_str(&format!("\n{}\n", body));
     }
 
@@ -282,8 +292,8 @@ fn format_qa_response(question: &Question, answers: Option<&[Answer]>) -> String
                     answer.score, accepted, author
                 ));
 
-                if let Some(body) = &answer.body_markdown {
-                    out.push_str(body);
+                if let Some(body) = markdown_body(answer.body.as_deref(), &question.link) {
+                    out.push_str(&body);
                     out.push('\n');
                 }
             }
@@ -293,9 +303,111 @@ fn format_qa_response(question: &Question, answers: Option<&[Answer]>) -> String
     out
 }
 
+fn markdown_body(body_html: Option<&str>, base_url: &str) -> Option<String> {
+    let body = body_html?;
+    let markdown = html_to_markdown_with_base_url(body, base_url);
+    let markdown = markdown.trim();
+    (!markdown.is_empty()).then(|| markdown.to_string())
+}
+
+fn is_minimal_qa_content(question: &Question, answers: Option<&[Answer]>, content: &str) -> bool {
+    let has_question_body = markdown_body(question.body.as_deref(), &question.link).is_some();
+    let has_answer_body = answers
+        .unwrap_or(&[])
+        .iter()
+        .any(|answer| markdown_body(answer.body.as_deref(), &question.link).is_some());
+
+    !has_question_body && !has_answer_body || content.split_whitespace().count() < 20
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::DnsPolicy;
+    use crate::transport::{
+        HttpTransport, TransportError, TransportMethod, TransportRequest, TransportResponse,
+    };
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct Canned {
+        status: u16,
+        body: Vec<u8>,
+    }
+
+    struct MockTransport {
+        calls: Mutex<Vec<(String, TransportMethod)>>,
+        routes: Vec<(String, Canned)>,
+    }
+
+    impl MockTransport {
+        fn new() -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                routes: Vec::new(),
+            }
+        }
+
+        fn route(mut self, contains: &str, status: u16, body: &[u8]) -> Self {
+            self.routes.push((
+                contains.to_string(),
+                Canned {
+                    status,
+                    body: body.to_vec(),
+                },
+            ));
+            self
+        }
+
+        fn calls(&self) -> Vec<(String, TransportMethod)> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl HttpTransport for MockTransport {
+        async fn execute(
+            &self,
+            req: TransportRequest,
+        ) -> Result<TransportResponse, TransportError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((req.url.to_string(), req.method));
+
+            let canned = self
+                .routes
+                .iter()
+                .find(|(needle, _)| req.url.as_str().contains(needle.as_str()))
+                .map(|(_, canned)| canned.clone())
+                .unwrap_or(Canned {
+                    status: 404,
+                    body: b"not found".to_vec(),
+                });
+
+            let body = Bytes::from(canned.body);
+            let stream = futures::stream::once(async move { Ok(body) });
+
+            Ok(TransportResponse {
+                status: canned.status,
+                url: req.url,
+                headers: vec![("content-type".to_string(), "application/json".to_string())],
+                body: Box::pin(stream),
+            })
+        }
+    }
+
+    fn options_with(transport: Arc<dyn HttpTransport>) -> FetchOptions {
+        FetchOptions {
+            enable_markdown: true,
+            enable_text: true,
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_parse_stackoverflow_url() {
@@ -379,7 +491,7 @@ mod tests {
     fn test_format_qa_response() {
         let question = Question {
             title: "How to parse JSON in Rust?".to_string(),
-            body_markdown: Some("I need to parse JSON.".to_string()),
+            body: Some("<p>I need to parse JSON.</p>".to_string()),
             score: 15,
             view_count: Some(1000),
             answer_count: 2,
@@ -394,7 +506,7 @@ mod tests {
 
         let answers = vec![
             Answer {
-                body_markdown: Some("Use serde_json crate.".to_string()),
+                body: Some("<p>Use serde_json crate.</p>".to_string()),
                 score: 20,
                 is_accepted: true,
                 owner: Some(Owner {
@@ -403,7 +515,7 @@ mod tests {
                 }),
             },
             Answer {
-                body_markdown: Some("Try simd-json for speed.".to_string()),
+                body: Some("<p>Try simd-json for speed.</p>".to_string()),
                 score: 5,
                 is_accepted: false,
                 owner: Some(Owner {
@@ -424,5 +536,91 @@ mod tests {
         assert!(output.contains("Accepted"));
         assert!(output.contains("Use serde_json crate."));
         assert!(output.contains("Try simd-json for speed."));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_stackoverflow_question_preserves_question_answers_and_code() {
+        let question_json = br#"{
+            "items": [{
+                "tags": ["python", "namespaces"],
+                "owner": {"reputation": 184993, "display_name": "Devoted"},
+                "is_answered": true,
+                "view_count": 5030222,
+                "answer_count": 40,
+                "score": 8438,
+                "link": "https://stackoverflow.com/questions/419163/what-does-if-name-main-do",
+                "title": "What does if __name__ == &quot;__main__&quot;: do?",
+                "body": "<p>What does this do, and why should one include the <code>if</code> statement?</p>\n<pre class=\"lang-py prettyprint-override\"><code>if __name__ == &quot;__main__&quot;:\n    print(&quot;Hello, World!&quot;)\n</code></pre>"
+            }]
+        }"#;
+        let answers_json = br#"{
+            "items": [{
+                "owner": {"reputation": 200000, "display_name": "bobince"},
+                "is_accepted": true,
+                "score": 5630,
+                "body": "<p>When the Python interpreter reads a source file, it sets <code>__name__</code>.</p>\n<pre class=\"lang-py\"><code>if __name__ == \"__main__\":\n    main()\n</code></pre>"
+            }]
+        }"#;
+        let mock = Arc::new(
+            MockTransport::new()
+                .route(
+                    "/2.3/questions/419163?site=stackoverflow&filter=withbody",
+                    200,
+                    question_json,
+                )
+                .route(
+                    "/2.3/questions/419163/answers?site=stackoverflow",
+                    200,
+                    answers_json,
+                ),
+        );
+        let options = options_with(mock.clone());
+        let fetcher = StackOverflowFetcher::new();
+        let request = FetchRequest::new(
+            "https://stackoverflow.com/questions/419163/what-does-if-name-main-do",
+        )
+        .as_markdown();
+
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+        let content = response.content.as_deref().unwrap();
+
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.format.as_deref(), Some("stackoverflow_qa"));
+        assert!(content.contains("What does if __name__ == \"__main__\": do?"));
+        assert!(content.contains("What does this do"));
+        assert!(content.contains("## Answers (1)"));
+        assert!(content.contains("✓ Accepted"));
+        assert!(content.contains("__main__"));
+        assert!(content.contains("```"));
+        assert!(content.contains("if __name__ == \"__main__\":"));
+        assert!(content.contains("main()"));
+
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls
+            .iter()
+            .all(|(_, method)| *method == TransportMethod::Get));
+        assert!(calls.iter().all(|(url, _)| url.contains("filter=withbody")));
+        assert!(calls
+            .iter()
+            .all(|(url, _)| !url.contains("withbody_markdown")));
+    }
+
+    #[test]
+    fn test_minimal_stackoverflow_content_is_not_successful() {
+        let question = Question {
+            title: "Blocked".to_string(),
+            body: None,
+            score: 0,
+            view_count: None,
+            answer_count: 0,
+            tags: vec![],
+            owner: None,
+            link: "https://stackoverflow.com/questions/1".to_string(),
+            is_answered: false,
+        };
+        let content = format_qa_response(&question, None);
+
+        assert!(is_minimal_qa_content(&question, None, &content));
     }
 }
