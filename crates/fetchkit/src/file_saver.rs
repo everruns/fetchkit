@@ -1,4 +1,4 @@
-//! File saving abstractions for FetchKit
+//! File saving abstractions for Fetchkit
 //!
 //! Consumers implement [`FileSaver`] to control where fetched bytes land:
 //! - CLI: writes to real filesystem ([`LocalFileSaver`])

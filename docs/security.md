@@ -1,6 +1,6 @@
 # Security Notes
 
-FetchKit is intended to run in agent, server, and cluster environments where URL input may be
+Fetchkit is intended to run in agent, server, and cluster environments where URL input may be
 user-controlled.
 
 ## Safe Defaults
@@ -18,7 +18,7 @@ For shared VMs, containers, or clusters:
 - Keep private-IP blocking enabled.
 - Keep proxy inheritance disabled unless outbound traffic must traverse a trusted proxy.
 - Use allow-lists where possible instead of relying only on block-lists.
-- Apply caller-side rate limits and concurrency limits around FetchKit.
+- Apply caller-side rate limits and concurrency limits around Fetchkit.
 
 If you need different limits, configure them through `ToolBuilder`:
 
@@ -35,7 +35,7 @@ See [`specs/threat-model.md`](../specs/threat-model.md) for the full threat inve
 
 ## Web Bot Authentication
 
-FetchKit optionally supports the [Web Bot Authentication Architecture](https://datatracker.ietf.org/doc/html/draft-meunier-web-bot-auth-architecture),
+Fetchkit optionally supports the [Web Bot Authentication Architecture](https://datatracker.ietf.org/doc/html/draft-meunier-web-bot-auth-architecture),
 which signs outgoing requests with Ed25519 signatures per RFC 9421. This lets
 origins verify bot identity cryptographically instead of relying on User-Agent
 strings.

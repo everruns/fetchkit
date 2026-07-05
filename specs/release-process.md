@@ -1,5 +1,5 @@
 # Decisions:
-# - Spec mirrors Bashkit's agent-driven release flow, adapted to FetchKit's crates.
+# - Spec mirrors Bashkit's agent-driven release flow, adapted to Fetchkit's crates.
 # - GitHub Release creation is the handoff point to publishing; publish retries use `workflow_dispatch`.
 # - `fetchkit-python` is explicitly out of the crates.io publish flow until PyPI packaging exists.
 
@@ -7,7 +7,7 @@
 
 ## Abstract
 
-Define how FetchKit releases are prepared by a coding agent, reviewed by a human,
+Define how Fetchkit releases are prepared by a coding agent, reviewed by a human,
 and published by GitHub Actions. The process must keep `CHANGELOG.md`,
 workspace versions, and release automation in sync.
 
@@ -15,7 +15,7 @@ workspace versions, and release automation in sync.
 
 ### Versioning
 
-- FetchKit follows Semantic Versioning.
+- Fetchkit follows Semantic Versioning.
 - Version source of truth is `[workspace.package].version` in root `Cargo.toml`.
 - Internal crate dependency versions must match the workspace version when published
   crates depend on each other.

@@ -1,4 +1,4 @@
-//! Integration tests for FetchKit using wiremock
+//! Integration tests for Fetchkit using wiremock
 
 use fetchkit::{
     fetch_with_options, DnsPolicy, FetchError, FetchOptions, FetchRequest, FetcherRegistry,

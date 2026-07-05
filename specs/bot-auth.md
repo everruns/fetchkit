@@ -3,7 +3,7 @@
 ## Abstract
 
 Optional support for the Web Bot Authentication Architecture
-(draft-meunier-web-bot-auth-architecture). When enabled, FetchKit signs
+(draft-meunier-web-bot-auth-architecture). When enabled, Fetchkit signs
 outgoing HTTP requests with Ed25519 signatures per RFC 9421, allowing
 origins to cryptographically verify bot identity.
 

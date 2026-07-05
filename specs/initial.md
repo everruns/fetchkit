@@ -1,14 +1,14 @@
 # Decisions:
-# - Spec mirrors current FetchKit tool behavior (no new features) unless noted below.
+# - Spec mirrors current Fetchkit tool behavior (no new features) unless noted below.
 # - Rust is the source of truth: library + CLI + MCP server + Python bindings.
 # - HTML conversion is built-in (no external HTML conversion deps).
 # - `FetchRequest` and `FetchResponse` are defined in this crate (no external dependency).
 
-# FetchKit Specification
+# Fetchkit Specification
 
 ## Abstract
 
-Define a standalone Rust crate named `fetchkit` that implements the existing FetchKit tool
+Define a standalone Rust crate named `fetchkit` that implements the existing Fetchkit tool
 behavior: fetch URL content, optional HTML conversion, strict timeouts, and metadata-only
 responses for binary content. The crate also ships a CLI, an MCP server, and Python bindings
 that expose the same tool contract.
@@ -17,6 +17,9 @@ that expose the same tool contract.
 
 ### Scope
 
+- Product name in prose, generated user-facing text, and new API identifiers is
+  `Fetchkit`, not `FetchKit`. Existing `FetchKit` identifiers may remain only as
+  deprecated compatibility shims with warnings.
 - Provide a reusable library API and a CLI wrapper.
 - Provide an MCP server exposing the tool.
 - Provide Python bindings that expose the same tool contract.
@@ -228,7 +231,7 @@ Provide a builder to configure tool options, including:
 ### Crawl Discovery
 
 - Crawl discovery is opt-in via `crawl: true` or CLI `--crawl`.
-- FetchKit first fetches the seed URL normally, then inspects extracted page links.
+- Fetchkit first fetches the seed URL normally, then inspects extracted page links.
 - Only same-origin HTTP(S) links are eligible: same scheme, normalized host, and port.
 - Obvious static assets (`.js`, `.css`, images, PDFs, archives) are skipped.
 - `max_pages` includes the seed page, defaults to 5, and is clamped to 20.
@@ -240,7 +243,7 @@ Provide a builder to configure tool options, including:
 
 ### SSRF Prevention (DNS Policy)
 
-By default, FetchKit blocks connections to private/reserved IP ranges:
+By default, Fetchkit blocks connections to private/reserved IP ranges:
 - Resolves hostnames to IP addresses before connecting (resolve-then-check).
 - Validates resolved IPs against blocked ranges (loopback, private, link-local,
   cloud metadata, carrier-grade NAT, documentation, benchmarking, multicast, broadcast).
@@ -252,7 +255,7 @@ By default, FetchKit blocks connections to private/reserved IP ranges:
 ### HTTP Behavior
 
 - User-Agent: configurable via tool builder or CLI/MCP/Python options
-  (default `Everruns FetchKit/1.0`).
+  (default `Everruns Fetchkit/1.0`).
 - Ambient proxy environment variables are ignored by default.
   - Opt in via `ToolBuilder::respect_proxy_env(true)` or CLI `--allow-env-proxy`.
 - Accept header:

@@ -2,9 +2,9 @@
 
 ## Abstract
 
-Threat model for FetchKit, an AI-friendly web content fetching library. FetchKit is designed
+Threat model for Fetchkit, an AI-friendly web content fetching library. Fetchkit is designed
 to be embedded in AI agent platforms (e.g., Everruns) where untrusted user prompts can
-influence which URLs are fetched. This document identifies threats that arise when FetchKit
+influence which URLs are fetched. This document identifies threats that arise when Fetchkit
 runs inside a container or cluster with access to internal network resources, and tracks
 mitigations implemented in the library.
 
@@ -59,7 +59,7 @@ Verified in this review:
 │  │           Container / Sandbox                 │   │
 │  │                                               │   │
 │  │  ┌─────────────┐     ┌──────────────────┐    │   │
-│  │  │  AI Agent    │────▶│    FetchKit      │    │   │
+│  │  │  AI Agent    │────▶│    Fetchkit      │    │   │
 │  │  │  (LLM loop)  │     │  (library/CLI/   │    │   │
 │  │  │              │     │   MCP server)    │    │   │
 │  │  └─────────────┘     └───────┬──────────┘    │   │
@@ -93,18 +93,18 @@ Verified in this review:
                └─────────────────────┘
 ```
 
-**Trust Boundary 1 — Agent to FetchKit:**
-The AI agent passes user-influenced URLs to FetchKit. FetchKit must treat all
+**Trust Boundary 1 — Agent to Fetchkit:**
+The AI agent passes user-influenced URLs to Fetchkit. Fetchkit must treat all
 URLs as untrusted input. The agent cannot be relied upon to validate URLs since
 adversarial prompts can manipulate it.
 
 **Trust Boundary 2 — Container to Internal Network:**
 The container typically has network access to internal services (metadata endpoints,
-Kubernetes API, databases). FetchKit must prevent requests that cross this boundary
+Kubernetes API, databases). Fetchkit must prevent requests that cross this boundary
 unless explicitly allowed.
 
 **Trust Boundary 3 — Cluster to Public Internet:**
-Outbound requests to the public internet are the intended use case. FetchKit should
+Outbound requests to the public internet are the intended use case. Fetchkit should
 only allow connections to publicly-routable IP addresses by default.
 
 ## 1. Server-Side Request Forgery (TM-SSRF)
@@ -126,7 +126,7 @@ only allow connections to publicly-routable IP addresses by default.
 ### Mitigation Details
 
 **TM-SSRF-001 — Resolve-then-check (MITIGATED):**
-FetchKit resolves the hostname to IP addresses using the system resolver, validates
+Fetchkit resolves the hostname to IP addresses using the system resolver, validates
 each resolved IP against blocked ranges, and pins the validated IP via
 `reqwest::ClientBuilder::resolve()` to prevent re-resolution.
 
@@ -143,12 +143,12 @@ Blocked ranges:
 - Broadcast: `255.255.255.255/32`
 
 **TM-SSRF-004 — Numeric IP variants (MITIGATED):**
-The `url` crate normalizes IP representations during parsing. FetchKit validates
+The `url` crate normalizes IP representations during parsing. Fetchkit validates
 the resolved `IpAddr` (not the string), so octal/hex/decimal-encoded IPs are
 caught after normalization.
 
 **TM-SSRF-005 — DNS rebinding (MITIGATED):**
-After validating the resolved IP, FetchKit uses `reqwest::ClientBuilder::resolve(host, addr)`
+After validating the resolved IP, Fetchkit uses `reqwest::ClientBuilder::resolve(host, addr)`
 to pin the connection to the validated IP. This prevents reqwest from re-resolving
 the hostname during connection establishment.
 
@@ -159,15 +159,15 @@ does not extract. `is_blocked_ipv6()` now detects both formats, extracts
 the embedded IPv4, and validates it against the blocked ranges.
 
 **TM-SSRF-009 — URL credentials (ACCEPTED):**
-FetchKit passes URLs to reqwest as-is. If credentials are embedded in the URL,
+Fetchkit passes URLs to reqwest as-is. If credentials are embedded in the URL,
 they are sent with the request. This is acceptable because:
-- FetchKit only supports GET/HEAD (read-only operations)
+- Fetchkit only supports GET/HEAD (read-only operations)
 - The URL comes from the caller who controls what credentials to include
 - Stripping credentials would break legitimate use cases
 - **Risk:** Low. Mitigated at the caller level.
 
 **TM-SSRF-010 — Redirect to internal resource (MITIGATED):**
-Automatic redirects are disabled via `reqwest::redirect::Policy::none()`. FetchKit
+Automatic redirects are disabled via `reqwest::redirect::Policy::none()`. Fetchkit
 manually follows redirects (up to 10 hops) and performs full IP validation
 (resolve-then-check with DNS pinning) at each hop. Scheme validation is also
 enforced at each hop, preventing redirects to non-HTTP schemes (e.g., `file://`).
@@ -188,10 +188,10 @@ redirect target, not the original host.
 ### Mitigation Details
 
 **TM-NET-001 — HTTP downgrade (ACCEPTED):**
-FetchKit validates the scheme at each redirect hop — non-HTTP(S) schemes are
+Fetchkit validates the scheme at each redirect hop — non-HTTP(S) schemes are
 rejected (see TM-INPUT-001). However, HTTPS→HTTP downgrade is still allowed.
 This is accepted because:
-- FetchKit is designed for content fetching, not security-sensitive operations
+- Fetchkit is designed for content fetching, not security-sensitive operations
 - The caller controls which URLs to fetch
 - Enforcing HTTPS-only would break many legitimate use cases
 
@@ -201,7 +201,7 @@ connection pool state from leaking between requests. This is a defense-in-depth
 measure.
 
 **TM-NET-004 — Proxy environment variables (MITIGATED):**
-FetchKit disables ambient `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` handling by
+Fetchkit disables ambient `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` handling by
 default via `reqwest::ClientBuilder::no_proxy()`. Callers must opt in explicitly
 via `ToolBuilder::respect_proxy_env(true)` or the CLI `--allow-env-proxy` flag.
 This prevents inherited container proxy settings from silently bypassing the
@@ -275,14 +275,14 @@ Accepted because:
 | TM-DOS-001 | Unbounded response body | Medium | Configurable `max_body_size` (default 10 MB); truncates with `truncated: true` | MITIGATED |
 | TM-DOS-002 | Slowloris / slow body | Low | 1-second first-byte timeout; 30-second body timeout | MITIGATED |
 | TM-DOS-003 | Compressed content bomb (gzip bomb) | Medium | `max_body_size` enforced on decompressed stream; truncates large payloads | MITIGATED |
-| TM-DOS-004 | Rapid request flooding via tool | Low | No rate limiting in FetchKit; caller responsibility | **CALLER RISK** |
+| TM-DOS-004 | Rapid request flooding via tool | Low | No rate limiting in Fetchkit; caller responsibility | **CALLER RISK** |
 | TM-DOS-005 | DNS resolution delay | Low | DNS resolution uses system resolver; no explicit timeout on DNS lookup | **ACCEPTED** |
 | TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
 
 ### Mitigation Details
 
 **TM-DOS-001 — Unbounded response body (MITIGATED):**
-FetchKit enforces a configurable `max_body_size` (default 10 MB) during streaming
+Fetchkit enforces a configurable `max_body_size` (default 10 MB) during streaming
 body reads. When the limit is reached, the response is truncated and
 `truncated: true` is set in the response. The 30-second body timeout provides
 additional protection. Configurable via `ToolBuilder::max_body_size()`.
@@ -304,14 +304,14 @@ against unbounded responses (TM-DOS-001).
 |----|--------|----------|------------|--------|
 | TM-LEAK-001 | Error messages reveal internal network topology | Medium | Error messages include connect/timeout details but not resolved IPs | MITIGATED |
 | TM-LEAK-002 | DNS resolution errors reveal internal DNS | Low | DNS errors surfaced as connect errors; hostname visible in error | **ACCEPTED** |
-| TM-LEAK-003 | Response content leaks internal data | Low | FetchKit returns content as-is; caller must filter sensitive data | **CALLER RISK** |
-| TM-LEAK-004 | User-Agent reveals software version | Info | Default UA `Everruns FetchKit/1.0` reveals stack; configurable | **BY DESIGN** |
+| TM-LEAK-003 | Response content leaks internal data | Low | Fetchkit returns content as-is; caller must filter sensitive data | **CALLER RISK** |
+| TM-LEAK-004 | User-Agent reveals software version | Info | Default UA `Everruns Fetchkit/1.0` reveals stack; configurable | **BY DESIGN** |
 | TM-LEAK-005 | Timing side-channels (connect time reveals network proximity) | Low | 1-second timeout masks some timing; not fully mitigated | **ACCEPTED** |
 
 ### Mitigation Details
 
 **TM-LEAK-001 — Error message detail (MITIGATED):**
-FetchKit's error types (`FetchError`) use generic messages that don't include
+Fetchkit's error types (`FetchError`) use generic messages that don't include
 resolved IP addresses or internal hostnames. Connect errors say "Failed to connect
 to server" and the `from_reqwest()` fallback path classifies errors by type
 (redirect, body, decode) instead of passing through raw reqwest error strings
@@ -323,7 +323,7 @@ which could contain hostnames or URL details.
 |----|--------|----------|------------|--------|
 | TM-CONV-001 | Script injection in converted markdown | Low | `<script>` tags stripped during HTML-to-markdown conversion | MITIGATED |
 | TM-CONV-002 | Excessive memory from deeply nested HTML | Medium | No recursion depth limit in HTML parser | **ACCEPTED** |
-| TM-CONV-003 | Markdown injection (crafted HTML producing executable markdown) | Low | FetchKit produces markdown text; execution depends on downstream consumer | **BY DESIGN** |
+| TM-CONV-003 | Markdown injection (crafted HTML producing executable markdown) | Low | Fetchkit produces markdown text; execution depends on downstream consumer | **BY DESIGN** |
 | TM-CONV-004 | Entity decoding producing unexpected characters | Low | Limited entity set decoded; no arbitrary numeric entity expansion | MITIGATED |
 
 ### Mitigation Details
@@ -408,7 +408,7 @@ None — all previously open threats have been mitigated.
 | Proxy config | TM-NET-004 | Opt in with `respect_proxy_env(true)` only when an explicit proxy is required |
 | Content filtering | TM-LEAK-003 | Filter sensitive data from responses |
 | URL allow-listing | TM-INPUT-002, TM-INPUT-007 | Use allow_prefixes for positive security model (now URL-aware) |
-| Network isolation | TM-SSRF, TM-NET | Route FetchKit through dedicated egress controls; library checks are defense in depth |
+| Network isolation | TM-SSRF, TM-NET | Route Fetchkit through dedicated egress controls; library checks are defense in depth |
 | Key entropy | TM-AUTH-004 | Provide high-entropy Ed25519 seeds; library does not validate seed randomness |
 
 ## Security Controls Matrix
@@ -445,7 +445,7 @@ None — all previously open threats have been mitigated.
 
 ## References
 
-- `specs/initial.md` — FetchKit tool specification
+- `specs/initial.md` — Fetchkit tool specification
 - `specs/fetchers.md` — Pluggable fetcher system
 - [OWASP SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
 - [CWE-918: Server-Side Request Forgery](https://cwe.mitre.org/data/definitions/918.html)

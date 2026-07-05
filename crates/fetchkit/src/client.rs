@@ -1,4 +1,4 @@
-//! HTTP client for FetchKit
+//! HTTP client for Fetchkit
 //!
 //! This module provides the main entry points for fetching URLs.
 //! The actual fetch logic is implemented by fetchers in the [`fetchers`](crate::fetchers) module.

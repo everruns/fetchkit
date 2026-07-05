@@ -1,4 +1,4 @@
-//! FetchKit - AI-friendly web content fetching library
+//! Fetchkit - AI-friendly web content fetching library
 //!
 //! This crate provides a reusable library API for fetching web content,
 //! with optional HTML to markdown/text conversion optimized for LLM consumption.
@@ -53,7 +53,7 @@
 //!
 //! # Fetcher System
 //!
-//! FetchKit uses a pluggable fetcher system where specialized fetchers
+//! Fetchkit uses a pluggable fetcher system where specialized fetchers
 //! handle specific URL patterns. The [`FetcherRegistry`] dispatches
 //! requests to the appropriate fetcher based on URL matching.
 //!
@@ -116,7 +116,7 @@ pub use types::{
 pub use bot_auth::{BotAuthConfig, BotAuthError};
 
 /// Default User-Agent string
-pub const DEFAULT_USER_AGENT: &str = "Everruns FetchKit/1.0";
+pub const DEFAULT_USER_AGENT: &str = "Everruns Fetchkit/1.0";
 
 /// Backward-compatible full description string with file-saving enabled.
 pub const TOOL_DESCRIPTION: &str =
