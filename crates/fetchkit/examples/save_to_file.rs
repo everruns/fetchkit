@@ -9,7 +9,7 @@ use fetchkit::{FetchRequest, LocalFileSaver, Tool};
 
 #[tokio::main]
 async fn main() {
-    println!("FetchKit save_to_file Example");
+    println!("Fetchkit save_to_file Example");
     println!("==============================\n");
 
     let dir = tempfile::tempdir().expect("Failed to create temp dir");

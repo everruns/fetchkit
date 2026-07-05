@@ -1,4 +1,4 @@
-//! Tool builder and toolkit-library contract for FetchKit.
+//! Tool builder and toolkit-library contract for Fetchkit.
 //
 // DECISION: keep the legacy typed `execute`/`llmtxt` surface as wrappers around the
 // toolkit-library contract so existing fetchkit callers can migrate incrementally.
@@ -100,7 +100,7 @@ pub struct ToolOutput {
     pub metadata: ToolOutputMetadata,
 }
 
-/// Builder for configuring the FetchKit tool
+/// Builder for configuring the Fetchkit tool
 ///
 /// # Examples
 ///
@@ -304,7 +304,7 @@ impl ToolBuilder {
 
     /// Control private/reserved IP range blocking (SSRF prevention)
     ///
-    /// Enabled by default. When enabled, FetchKit resolves hostnames to IP
+    /// Enabled by default. When enabled, Fetchkit resolves hostnames to IP
     /// addresses before connecting and validates that the resolved IP is not
     /// in a private or reserved range. DNS pinning prevents rebinding attacks.
     ///
@@ -442,7 +442,7 @@ impl ToolBuilder {
     }
 }
 
-/// Configured FetchKit tool
+/// Configured Fetchkit tool
 ///
 /// Created via [`ToolBuilder`]. Provides methods for executing fetch requests,
 /// retrieving schemas, and accessing tool metadata.

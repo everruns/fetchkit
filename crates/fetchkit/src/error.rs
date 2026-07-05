@@ -1,4 +1,4 @@
-//! Error types for FetchKit
+//! Error types for Fetchkit
 
 use thiserror::Error;
 

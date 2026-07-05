@@ -3,13 +3,13 @@
 //! Run with: cargo run -p fetchkit --example fetch_urls
 //!
 //! Demonstrates the library API by fetching real URLs and showing
-//! how FetchKit handles different content types (HTML, JSON, plain text).
+//! how Fetchkit handles different content types (HTML, JSON, plain text).
 
 use fetchkit::{FetchRequest, Tool};
 
 #[tokio::main]
 async fn main() {
-    println!("FetchKit URL Examples");
+    println!("Fetchkit URL Examples");
     println!("=====================\n");
 
     let tool = Tool::builder().enable_markdown(true).build();

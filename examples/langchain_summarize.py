@@ -8,14 +8,14 @@
 # ]
 # ///
 """
-LangChain agent example using FetchKit MCP server for web fetching.
+LangChain agent example using Fetchkit MCP server for web fetching.
 
 This example creates a LangChain agent that can fetch web content using the
-FetchKit MCP tool and summarize it using an LLM.
+Fetchkit MCP tool and summarize it using an LLM.
 
 Requirements:
     - OPENAI_API_KEY environment variable set
-    - FetchKit CLI built: cargo build -p fetchkit-cli --release
+    - Fetchkit CLI built: cargo build -p fetchkit-cli --release
 
 Usage:
     uv run examples/langchain_summarize.py
@@ -40,11 +40,11 @@ async def main():
     # URL to summarize
     url = "https://everruns.com/"
 
-    print("Creating LangChain agent with FetchKit MCP tool...")
+    print("Creating LangChain agent with Fetchkit MCP tool...")
     print(f"Target URL: {url}")
     print()
 
-    # Create MCP client connected to FetchKit server
+    # Create MCP client connected to Fetchkit server
     mcp_client = MultiServerMCPClient(
         {
             "fetchkit": {

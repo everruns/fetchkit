@@ -1,19 +1,19 @@
-//! Python bindings for FetchKit
+//! Python bindings for Fetchkit
 //!
-//! Exposes the FetchKit tool contract to Python via PyO3.
+//! Exposes the Fetchkit tool contract to Python via PyO3.
 //!
 //! # Python Usage
 //!
 //! ```python
-//! from fetchkit_py import FetchKitTool, FetchRequest
+//! from fetchkit_py import FetchkitTool, FetchRequest
 //!
-//! tool = FetchKitTool()
+//! tool = FetchkitTool()
 //! response = tool.fetch("https://example.com", as_markdown=True)
 //! print(response.content)
 //! ```
 
 use fetchkit::{FetchError, FetchRequest, FetchResponse, HttpMethod, Tool, ToolBuilder};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyDeprecationWarning, PyValueError};
 use pyo3::prelude::*;
 
 /// Convert FetchError to PyErr
@@ -190,15 +190,15 @@ impl PyFetchResponse {
     }
 }
 
-/// Python wrapper for FetchKit Tool
-#[pyclass(name = "FetchKitTool")]
-pub struct PyFetchKitTool {
+/// Python wrapper for Fetchkit Tool
+#[pyclass(name = "FetchkitTool")]
+pub struct PyFetchkitTool {
     inner: Tool,
     runtime: tokio::runtime::Runtime,
 }
 
 #[pymethods]
-impl PyFetchKitTool {
+impl PyFetchkitTool {
     /// Create a new tool with default options
     #[new]
     #[allow(clippy::too_many_arguments)]
@@ -350,6 +350,65 @@ impl PyFetchKitTool {
     }
 }
 
+#[deprecated(note = "Use PyFetchkitTool / Python FetchkitTool; FetchKitTool is deprecated.")]
+pub type PyFetchKitTool = PyFetchkitTool;
+
+/// Deprecated constructor shim for the old Python class spelling.
+#[pyfunction(name = "FetchKitTool")]
+#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (
+    enable_markdown=true,
+    enable_text=true,
+    user_agent=None,
+    allow_prefixes=None,
+    block_prefixes=None,
+    max_body_size=None,
+    block_private_ips=true,
+    respect_proxy_env=false,
+    allowed_ports=None,
+    blocked_hosts=None,
+    same_host_redirects_only=None,
+    hardened=false
+))]
+fn deprecated_fetch_kit_tool(
+    py: Python<'_>,
+    enable_markdown: bool,
+    enable_text: bool,
+    user_agent: Option<String>,
+    allow_prefixes: Option<Vec<String>>,
+    block_prefixes: Option<Vec<String>>,
+    max_body_size: Option<usize>,
+    block_private_ips: bool,
+    respect_proxy_env: bool,
+    allowed_ports: Option<Vec<u16>>,
+    blocked_hosts: Option<Vec<String>>,
+    same_host_redirects_only: Option<bool>,
+    hardened: bool,
+) -> PyResult<PyFetchkitTool> {
+    let warning = py.get_type::<PyDeprecationWarning>();
+    PyErr::warn(
+        py,
+        &warning,
+        c"FetchKitTool is deprecated; use FetchkitTool instead.",
+        1,
+    )?;
+
+    PyFetchkitTool::new(
+        enable_markdown,
+        enable_text,
+        user_agent,
+        allow_prefixes,
+        block_prefixes,
+        max_body_size,
+        block_private_ips,
+        respect_proxy_env,
+        allowed_ports,
+        blocked_hosts,
+        same_host_redirects_only,
+        hardened,
+    )
+}
+
 /// Fetch a URL using default options (convenience function)
 #[pyfunction]
 #[pyo3(signature = (url, method=None, as_markdown=None, as_text=None, content_focus=None, crawl=None, max_pages=None))]
@@ -363,7 +422,7 @@ fn fetch(
     crawl: Option<bool>,
     max_pages: Option<usize>,
 ) -> PyResult<PyFetchResponse> {
-    let tool = PyFetchKitTool::new(
+    let tool = PyFetchkitTool::new(
         true, true, None, None, None, None, true, false, None, None, None, false,
     )?;
     tool.fetch(
@@ -382,7 +441,8 @@ fn fetch(
 fn fetchkit_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFetchRequest>()?;
     m.add_class::<PyFetchResponse>()?;
-    m.add_class::<PyFetchKitTool>()?;
+    m.add_class::<PyFetchkitTool>()?;
+    m.add_function(wrap_pyfunction!(deprecated_fetch_kit_tool, m)?)?;
     m.add_function(wrap_pyfunction!(fetch, m)?)?;
     Ok(())
 }

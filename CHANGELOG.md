@@ -160,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- Hardened redirect handling to revalidate every hop against FetchKit's SSRF policy
+- Hardened redirect handling to revalidate every hop against Fetchkit's SSRF policy
 - Tightened allow/block prefix matching to use parsed URL components instead of raw string prefixes
 - Added FileSaver trait for saving fetched content to files
 - Mitigated 6 open threats from threat model

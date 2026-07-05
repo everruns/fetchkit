@@ -1,4 +1,4 @@
-//! FetchKit CLI - Command-line interface for fetching web content
+//! Fetchkit CLI - Command-line interface for fetching web content
 //!
 //! Provides the `fetchkit` binary with subcommands for fetching URLs
 //! and running an MCP server.
@@ -27,7 +27,7 @@ enum OutputFormat {
     Json,
 }
 
-/// FetchKit - AI-friendly web content fetching tool
+/// Fetchkit - AI-friendly web content fetching tool
 #[derive(Parser, Debug)]
 #[command(name = "fetchkit")]
 #[command(author, version, about, long_about = None)]

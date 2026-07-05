@@ -148,7 +148,7 @@ fn test_help_flag() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("fetchkit") || stdout.contains("FetchKit"));
+    assert!(stdout.contains("fetchkit") || stdout.contains("Fetchkit"));
     assert!(stdout.contains("fetch") || stdout.contains("mcp"));
 }
 

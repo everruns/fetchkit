@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FetchKit Python bindings example.
+Fetchkit Python bindings example.
 
 Demonstrates the fetchkit_py module: fetching URLs, accessing metadata,
 and verifying tool contract (schemas, descriptions).
@@ -16,13 +16,13 @@ import sys
 
 def main():
     try:
-        from fetchkit_py import FetchKitTool, FetchRequest, fetch
+        from fetchkit_py import FetchkitTool, FetchRequest, fetch
     except ImportError:
         print("Error: fetchkit_py module not found.")
         print("Build it with: maturin develop -m crates/fetchkit-python/Cargo.toml")
         sys.exit(1)
 
-    print("FetchKit Python Example")
+    print("Fetchkit Python Example")
     print("========================\n")
 
     passed = 0
@@ -30,7 +30,7 @@ def main():
 
     # 1. Tool metadata
     print("1. Tool metadata")
-    tool = FetchKitTool()
+    tool = FetchkitTool()
     desc = tool.description()
     llmtxt = tool.llmtxt()
     schema = tool.input_schema()

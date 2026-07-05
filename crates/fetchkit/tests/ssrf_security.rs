@@ -1,4 +1,4 @@
-//! SSRF security tests for FetchKit
+//! SSRF security tests for Fetchkit
 //!
 //! Tests that validate the resolve-then-check DNS policy prevents
 //! server-side request forgery attacks. These tests verify the threat

@@ -19,7 +19,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 
 ## Built-in Fetchers
 
-FetchKit routes each request through an ordered fetcher registry. Specialized
+Fetchkit routes each request through an ordered fetcher registry. Specialized
 fetchers match first; the default fetcher handles everything else.
 
 - `GitHubCodeFetcher` - GitHub source file URLs (`/blob/...`)
@@ -211,14 +211,14 @@ pip install fetchkit
 ```
 
 ```python
-from fetchkit_py import fetch, FetchRequest, FetchKitTool
+from fetchkit_py import fetch, FetchRequest, FetchkitTool
 
 # Simple fetch
 response = fetch("https://example.com", as_markdown=True)
 print(response.content)
 
 # With configuration
-tool = FetchKitTool(
+tool = FetchkitTool(
     enable_markdown=True,
     user_agent="MyBot/1.0",
     allow_prefixes=["https://docs.example.com"]
@@ -282,7 +282,7 @@ Errors are returned in the `error` field:
 
 ## Security
 
-FetchKit blocks connections to private/reserved IP ranges by default, preventing SSRF attacks when used in server-side or AI agent contexts.
+Fetchkit blocks connections to private/reserved IP ranges by default, preventing SSRF attacks when used in server-side or AI agent contexts.
 
 **Blocked by default:** loopback, private networks (10.x, 172.16-31.x, 192.168.x), link-local (169.254.x including cloud metadata), IPv6 equivalents, multicast, and other reserved ranges.
 
