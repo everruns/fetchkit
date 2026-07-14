@@ -138,6 +138,14 @@ Central dispatcher that:
 - Behavior: Fetches paper metadata via arXiv Atom XML API
 - Response format field: `"arxiv_paper"`
 
+#### PubMedFetcher
+
+- Matches canonical PubMed article URLs and PubMed Central article URLs on NCBI hosts
+- PubMed responses use Europe PMC structured metadata and include citation details, authors, abstract, and keywords
+- PubMed Central responses use NCBI BioC JSON and preserve full-text section order
+- Search pages and malformed identifiers are not matched
+- Response format fields: `"pubmed_article"` or `"pmc_article"`
+
 #### HackerNewsFetcher
 
 - Matches: `https://news.ycombinator.com/item?id={id}`

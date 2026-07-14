@@ -14,6 +14,7 @@ mod gitlab;
 mod hackernews;
 mod jupyter_notebook;
 mod package_registry;
+mod pubmed;
 mod rss_feed;
 mod stackoverflow;
 mod twitter;
@@ -31,6 +32,7 @@ pub use gitlab::GitLabFetcher;
 pub use hackernews::HackerNewsFetcher;
 pub use jupyter_notebook::JupyterNotebookFetcher;
 pub use package_registry::PackageRegistryFetcher;
+pub use pubmed::PubMedFetcher;
 pub use rss_feed::RSSFeedFetcher;
 pub use stackoverflow::StackOverflowFetcher;
 pub use twitter::TwitterFetcher;
@@ -165,6 +167,7 @@ impl FetcherRegistry {
         registry.register(Box::new(WikipediaFetcher::new()));
         registry.register(Box::new(YouTubeFetcher::new()));
         registry.register(Box::new(ArXivFetcher::new()));
+        registry.register(Box::new(PubMedFetcher::new()));
         registry.register(Box::new(HackerNewsFetcher::new()));
         registry.register(Box::new(RSSFeedFetcher::new()));
         // DocsSiteFetcher for docs sites and llms.txt
@@ -363,11 +366,12 @@ mod tests {
         assert_eq!(registry.fetchers[9].name(), "wikipedia");
         assert_eq!(registry.fetchers[10].name(), "youtube");
         assert_eq!(registry.fetchers[11].name(), "arxiv");
-        assert_eq!(registry.fetchers[12].name(), "hackernews");
-        assert_eq!(registry.fetchers[13].name(), "rss_feed");
-        assert_eq!(registry.fetchers[14].name(), "docs_site");
-        assert_eq!(registry.fetchers[15].name(), "default");
-        assert_eq!(registry.fetchers.len(), 16);
+        assert_eq!(registry.fetchers[12].name(), "pubmed");
+        assert_eq!(registry.fetchers[13].name(), "hackernews");
+        assert_eq!(registry.fetchers[14].name(), "rss_feed");
+        assert_eq!(registry.fetchers[15].name(), "docs_site");
+        assert_eq!(registry.fetchers[16].name(), "default");
+        assert_eq!(registry.fetchers.len(), 17);
     }
 
     #[test]
