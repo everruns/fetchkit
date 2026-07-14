@@ -4,6 +4,7 @@
 //! FetcherRegistry dispatches to the first matching fetcher.
 
 mod arxiv;
+mod crossref;
 mod default;
 mod docs_site;
 mod github_code;
@@ -22,6 +23,7 @@ mod wikipedia;
 mod youtube;
 
 pub use arxiv::ArXivFetcher;
+pub use crossref::CrossrefFetcher;
 pub use default::DefaultFetcher;
 pub use docs_site::DocsSiteFetcher;
 pub use github_code::GitHubCodeFetcher;
@@ -167,6 +169,7 @@ impl FetcherRegistry {
         registry.register(Box::new(WikipediaFetcher::new()));
         registry.register(Box::new(YouTubeFetcher::new()));
         registry.register(Box::new(ArXivFetcher::new()));
+        registry.register(Box::new(CrossrefFetcher::new()));
         registry.register(Box::new(PubMedFetcher::new()));
         registry.register(Box::new(HackerNewsFetcher::new()));
         registry.register(Box::new(RSSFeedFetcher::new()));
@@ -366,12 +369,13 @@ mod tests {
         assert_eq!(registry.fetchers[9].name(), "wikipedia");
         assert_eq!(registry.fetchers[10].name(), "youtube");
         assert_eq!(registry.fetchers[11].name(), "arxiv");
-        assert_eq!(registry.fetchers[12].name(), "pubmed");
-        assert_eq!(registry.fetchers[13].name(), "hackernews");
-        assert_eq!(registry.fetchers[14].name(), "rss_feed");
-        assert_eq!(registry.fetchers[15].name(), "docs_site");
-        assert_eq!(registry.fetchers[16].name(), "default");
-        assert_eq!(registry.fetchers.len(), 17);
+        assert_eq!(registry.fetchers[12].name(), "crossref");
+        assert_eq!(registry.fetchers[13].name(), "pubmed");
+        assert_eq!(registry.fetchers[14].name(), "hackernews");
+        assert_eq!(registry.fetchers[15].name(), "rss_feed");
+        assert_eq!(registry.fetchers[16].name(), "docs_site");
+        assert_eq!(registry.fetchers[17].name(), "default");
+        assert_eq!(registry.fetchers.len(), 18);
     }
 
     #[test]

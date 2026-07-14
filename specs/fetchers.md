@@ -138,6 +138,14 @@ Central dispatcher that:
 - Behavior: Fetches paper metadata via arXiv Atom XML API
 - Response format field: `"arxiv_paper"`
 
+#### CrossrefFetcher
+
+- Matches DOI resolver URLs on `doi.org` and legacy `dx.doi.org`
+- Validates and normalizes DOI identifiers, then queries the Crossref works API
+- Returns citation metadata, authors, subjects, license, and abstract when available
+- Converts JATS/HTML abstracts to Markdown and enforces the configured response limit
+- Response format field: `"crossref_work"`
+
 #### PubMedFetcher
 
 - Matches canonical PubMed article URLs and PubMed Central article URLs on NCBI hosts
