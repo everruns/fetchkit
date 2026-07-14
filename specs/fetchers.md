@@ -85,6 +85,15 @@ Central dispatcher that:
 - Quoted tweets rendered as blockquotes
 - Both APIs are unauthenticated; syndication API is undocumented but widely used
 
+#### JupyterNotebookFetcher
+
+- Matches `.ipynb` source blob URLs on GitHub and GitLab
+- Runs before generic GitHub and GitLab source fetchers
+- Renders Markdown, code, raw cells, execution counts, and textual outputs as Markdown
+- Omits binary display payloads such as base64-encoded images
+- Uses collision-safe Markdown fences and enforces the configured maximum response size
+- Response format field: `"jupyter_notebook"`
+
 #### GitHubCodeFetcher
 
 - Matches: `https://github.com/{owner}/{repo}/blob/{ref}/{path}`
