@@ -724,6 +724,7 @@ dependencies = [
  "futures",
  "libc",
  "mira-eval",
+ "percent-encoding",
  "rakers",
  "rand 0.10.2",
  "reqwest",
