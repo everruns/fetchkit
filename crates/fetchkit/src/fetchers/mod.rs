@@ -12,6 +12,7 @@ mod github_release;
 mod github_repo;
 mod gitlab;
 mod hackernews;
+mod jupyter_notebook;
 mod package_registry;
 mod rss_feed;
 mod stackoverflow;
@@ -28,6 +29,7 @@ pub use github_release::GitHubReleaseFetcher;
 pub use github_repo::GitHubRepoFetcher;
 pub use gitlab::GitLabFetcher;
 pub use hackernews::HackerNewsFetcher;
+pub use jupyter_notebook::JupyterNotebookFetcher;
 pub use package_registry::PackageRegistryFetcher;
 pub use rss_feed::RSSFeedFetcher;
 pub use stackoverflow::StackOverflowFetcher;
@@ -136,18 +138,21 @@ impl FetcherRegistry {
     /// Create a registry with default fetchers pre-registered
     ///
     /// Includes (in order of priority):
-    /// 1. GitHubCodeFetcher - handles GitHub blob/file URLs
-    /// 2. GitHubIssueFetcher - handles GitHub issue/PR URLs
-    /// 3. GitHubReleaseFetcher - handles GitHub release URLs
-    /// 4. GitHubRepoFetcher - handles GitHub repository URLs
-    /// 5. GitLabFetcher - handles GitLab project and resource URLs
-    /// 6. TwitterFetcher - handles Twitter/X tweet URLs
-    /// 7. StackOverflowFetcher - handles Stack Exchange Q&A URLs
-    /// 8. DocsSiteFetcher - handles docs sites and llms.txt URLs
-    /// 9. DefaultFetcher - handles all remaining HTTP/HTTPS URLs
+    /// 1. JupyterNotebookFetcher - handles GitHub and GitLab notebook blob URLs
+    /// 2. GitHubCodeFetcher - handles GitHub blob/file URLs
+    /// 3. GitHubIssueFetcher - handles GitHub issue/PR URLs
+    /// 4. GitHubReleaseFetcher - handles GitHub release URLs
+    /// 5. GitHubRepoFetcher - handles GitHub repository URLs
+    /// 6. GitLabFetcher - handles GitLab project and resource URLs
+    /// 7. TwitterFetcher - handles Twitter/X tweet URLs
+    /// 8. StackOverflowFetcher - handles Stack Exchange Q&A URLs
+    /// 9. DocsSiteFetcher - handles docs sites and llms.txt URLs
+    /// 10. DefaultFetcher - handles all remaining HTTP/HTTPS URLs
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Register specialized fetchers first (higher priority)
+        // Notebooks precede the generic GitHub and GitLab blob fetchers.
+        registry.register(Box::new(JupyterNotebookFetcher::new()));
         // GitHub fetchers: code > issue > release > repo (most specific first)
         registry.register(Box::new(GitHubCodeFetcher::new()));
         registry.register(Box::new(GitHubIssueFetcher::new()));
@@ -346,22 +351,23 @@ mod tests {
     #[test]
     fn test_registry_with_defaults() {
         let registry = FetcherRegistry::with_defaults();
-        assert_eq!(registry.fetchers[0].name(), "github_code");
-        assert_eq!(registry.fetchers[1].name(), "github_issue");
-        assert_eq!(registry.fetchers[2].name(), "github_release");
-        assert_eq!(registry.fetchers[3].name(), "github_repo");
-        assert_eq!(registry.fetchers[4].name(), "gitlab");
-        assert_eq!(registry.fetchers[5].name(), "twitter_tweet");
-        assert_eq!(registry.fetchers[6].name(), "stackoverflow");
-        assert_eq!(registry.fetchers[7].name(), "package_registry");
-        assert_eq!(registry.fetchers[8].name(), "wikipedia");
-        assert_eq!(registry.fetchers[9].name(), "youtube");
-        assert_eq!(registry.fetchers[10].name(), "arxiv");
-        assert_eq!(registry.fetchers[11].name(), "hackernews");
-        assert_eq!(registry.fetchers[12].name(), "rss_feed");
-        assert_eq!(registry.fetchers[13].name(), "docs_site");
-        assert_eq!(registry.fetchers[14].name(), "default");
-        assert_eq!(registry.fetchers.len(), 15);
+        assert_eq!(registry.fetchers[0].name(), "jupyter_notebook");
+        assert_eq!(registry.fetchers[1].name(), "github_code");
+        assert_eq!(registry.fetchers[2].name(), "github_issue");
+        assert_eq!(registry.fetchers[3].name(), "github_release");
+        assert_eq!(registry.fetchers[4].name(), "github_repo");
+        assert_eq!(registry.fetchers[5].name(), "gitlab");
+        assert_eq!(registry.fetchers[6].name(), "twitter_tweet");
+        assert_eq!(registry.fetchers[7].name(), "stackoverflow");
+        assert_eq!(registry.fetchers[8].name(), "package_registry");
+        assert_eq!(registry.fetchers[9].name(), "wikipedia");
+        assert_eq!(registry.fetchers[10].name(), "youtube");
+        assert_eq!(registry.fetchers[11].name(), "arxiv");
+        assert_eq!(registry.fetchers[12].name(), "hackernews");
+        assert_eq!(registry.fetchers[13].name(), "rss_feed");
+        assert_eq!(registry.fetchers[14].name(), "docs_site");
+        assert_eq!(registry.fetchers[15].name(), "default");
+        assert_eq!(registry.fetchers.len(), 16);
     }
 
     #[test]
