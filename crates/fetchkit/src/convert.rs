@@ -948,18 +948,14 @@ pub fn strip_boilerplate(html: &str) -> String {
 /// penalizes link-heavy or boilerplate-looking blocks, and returns `None` when
 /// confidence is too low so callers can fall back to the existing main/full modes.
 pub fn extract_readable_content(html: &str) -> Option<String> {
-    let candidates = collect_readable_candidates(html);
-    let best = candidates
-        .into_iter()
+    let best = collect_best_readable_candidate(html)
         .filter(|candidate| candidate.word_count >= 20)
-        .max_by_key(|candidate| candidate.score)?;
-
-    if best.score < 100 {
-        return None;
-    }
+        .filter(|candidate| candidate.score >= 100)?;
 
     Some(strip_boilerplate_elements(&best.html))
 }
+
+const MAX_READABLE_CANDIDATES: usize = 64;
 
 #[derive(Debug)]
 struct ReadableCandidate {
@@ -968,20 +964,41 @@ struct ReadableCandidate {
     word_count: usize,
 }
 
-fn collect_readable_candidates(html: &str) -> Vec<ReadableCandidate> {
-    let mut candidates = Vec::new();
-    for tag_name in ["article", "main", "section", "div"] {
-        collect_tag_candidates(html, tag_name, &mut candidates);
-    }
-    candidates
+#[derive(Debug)]
+struct ReadableCandidateScore {
+    score: i64,
+    word_count: usize,
 }
 
-fn collect_tag_candidates(html: &str, tag_name: &str, candidates: &mut Vec<ReadableCandidate>) {
+fn collect_best_readable_candidate(html: &str) -> Option<ReadableCandidate> {
     let lower = html.to_ascii_lowercase();
+    let mut best = None;
+    let mut scored_count = 0usize;
+
+    for tag_name in ["article", "main", "section", "div"] {
+        collect_best_tag_candidate(html, &lower, tag_name, &mut best, &mut scored_count);
+        if scored_count >= MAX_READABLE_CANDIDATES {
+            break;
+        }
+    }
+
+    best
+}
+
+fn collect_best_tag_candidate(
+    html: &str,
+    lower: &str,
+    tag_name: &str,
+    best: &mut Option<ReadableCandidate>,
+    scored_count: &mut usize,
+) {
     let open_prefix = format!("<{tag_name}");
     let mut search_start = 0usize;
 
-    while let Some(relative_start) = lower[search_start..].find(&open_prefix) {
+    while *scored_count < MAX_READABLE_CANDIDATES {
+        let Some(relative_start) = lower[search_start..].find(&open_prefix) else {
+            break;
+        };
         let tag_start = search_start + relative_start;
         let after_name = tag_start + open_prefix.len();
         let Some(next) = lower[after_name..].chars().next() else {
@@ -1003,13 +1020,24 @@ fn collect_tag_candidates(html: &str, tag_name: &str, candidates: &mut Vec<Reada
             continue;
         }
 
-        let Some(close_start) = find_matching_close(&lower, tag_name, tag_start, open_end + 1)
+        let Some(close_start) = find_matching_close(lower, tag_name, tag_start, open_end + 1)
         else {
             break;
         };
-        let inner = html[open_end + 1..close_start].to_string();
-        if let Some(candidate) = score_readable_candidate(open_tag, inner) {
-            candidates.push(candidate);
+        let inner = &html[open_end + 1..close_start];
+        if let Some(score) = score_readable_candidate(open_tag, inner) {
+            *scored_count += 1;
+            let replace_best = best
+                .as_ref()
+                .map(|candidate| score.score > candidate.score)
+                .unwrap_or(true);
+            if replace_best {
+                *best = Some(ReadableCandidate {
+                    html: inner.to_string(),
+                    score: score.score,
+                    word_count: score.word_count,
+                });
+            }
         }
 
         search_start = open_end + 1;
@@ -1090,14 +1118,14 @@ fn looks_like_content_container(open_tag: &str) -> bool {
         && !negative.iter().any(|needle| lower.contains(needle))
 }
 
-fn score_readable_candidate(open_tag: &str, html: String) -> Option<ReadableCandidate> {
-    let text = html_to_text(&html);
+fn score_readable_candidate(open_tag: &str, html: &str) -> Option<ReadableCandidateScore> {
+    let text = html_to_text(html);
     let word_count = text.split_whitespace().count();
     if word_count == 0 {
         return None;
     }
 
-    let link_word_count = link_text_word_count(&html);
+    let link_word_count = link_text_word_count(html);
     let paragraph_count = html.matches("<p").count() + html.matches("<P").count();
     let heading_count = html.matches("<h1").count()
         + html.matches("<h2").count()
@@ -1128,11 +1156,7 @@ fn score_readable_candidate(open_tag: &str, html: String) -> Option<ReadableCand
         - (link_word_count as i64 * 6)
         - boilerplate_penalty;
 
-    Some(ReadableCandidate {
-        html,
-        score,
-        word_count,
-    })
+    Some(ReadableCandidateScore { score, word_count })
 }
 
 fn looks_like_boilerplate(lower_tag: &str) -> bool {
@@ -1891,6 +1915,27 @@ mod tests {
     fn test_extract_readable_content_returns_none_for_low_signal_html() {
         let html = r#"<div class="content"><a href="/one">One</a><a href="/two">Two</a></div>"#;
         assert!(extract_readable_content(html).is_none());
+    }
+
+    #[test]
+    fn test_extract_readable_content_handles_deep_nested_content() {
+        let mut html = String::new();
+        for _ in 0..128 {
+            html.push_str(r#"<div class="content">"#);
+        }
+        html.push_str("<h1>Nested Article</h1>");
+        for _ in 0..24 {
+            html.push_str(
+                "<p>This readable paragraph gives agents useful bounded extraction text.</p>",
+            );
+        }
+        for _ in 0..128 {
+            html.push_str("</div>");
+        }
+
+        let result = extract_readable_content(&html).unwrap();
+        assert!(result.contains("Nested Article"));
+        assert!(result.contains("bounded extraction text"));
     }
 
     #[test]
