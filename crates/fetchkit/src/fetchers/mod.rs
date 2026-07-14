@@ -8,6 +8,7 @@ mod default;
 mod docs_site;
 mod github_code;
 mod github_issue;
+mod github_release;
 mod github_repo;
 mod hackernews;
 mod package_registry;
@@ -22,6 +23,7 @@ pub use default::DefaultFetcher;
 pub use docs_site::DocsSiteFetcher;
 pub use github_code::GitHubCodeFetcher;
 pub use github_issue::GitHubIssueFetcher;
+pub use github_release::GitHubReleaseFetcher;
 pub use github_repo::GitHubRepoFetcher;
 pub use hackernews::HackerNewsFetcher;
 pub use package_registry::PackageRegistryFetcher;
@@ -134,17 +136,19 @@ impl FetcherRegistry {
     /// Includes (in order of priority):
     /// 1. GitHubCodeFetcher - handles GitHub blob/file URLs
     /// 2. GitHubIssueFetcher - handles GitHub issue/PR URLs
-    /// 3. GitHubRepoFetcher - handles GitHub repository URLs
-    /// 4. TwitterFetcher - handles Twitter/X tweet URLs
-    /// 5. StackOverflowFetcher - handles Stack Exchange Q&A URLs
-    /// 6. DocsSiteFetcher - handles docs sites and llms.txt URLs
-    /// 7. DefaultFetcher - handles all remaining HTTP/HTTPS URLs
+    /// 3. GitHubReleaseFetcher - handles GitHub release URLs
+    /// 4. GitHubRepoFetcher - handles GitHub repository URLs
+    /// 5. TwitterFetcher - handles Twitter/X tweet URLs
+    /// 6. StackOverflowFetcher - handles Stack Exchange Q&A URLs
+    /// 7. DocsSiteFetcher - handles docs sites and llms.txt URLs
+    /// 8. DefaultFetcher - handles all remaining HTTP/HTTPS URLs
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Register specialized fetchers first (higher priority)
-        // GitHub fetchers: code > issue > repo (most specific first)
+        // GitHub fetchers: code > issue > release > repo (most specific first)
         registry.register(Box::new(GitHubCodeFetcher::new()));
         registry.register(Box::new(GitHubIssueFetcher::new()));
+        registry.register(Box::new(GitHubReleaseFetcher::new()));
         registry.register(Box::new(GitHubRepoFetcher::new()));
         registry.register(Box::new(TwitterFetcher::new()));
         registry.register(Box::new(StackOverflowFetcher::new()));
@@ -340,18 +344,19 @@ mod tests {
         let registry = FetcherRegistry::with_defaults();
         assert_eq!(registry.fetchers[0].name(), "github_code");
         assert_eq!(registry.fetchers[1].name(), "github_issue");
-        assert_eq!(registry.fetchers[2].name(), "github_repo");
-        assert_eq!(registry.fetchers[3].name(), "twitter_tweet");
-        assert_eq!(registry.fetchers[4].name(), "stackoverflow");
-        assert_eq!(registry.fetchers[5].name(), "package_registry");
-        assert_eq!(registry.fetchers[6].name(), "wikipedia");
-        assert_eq!(registry.fetchers[7].name(), "youtube");
-        assert_eq!(registry.fetchers[8].name(), "arxiv");
-        assert_eq!(registry.fetchers[9].name(), "hackernews");
-        assert_eq!(registry.fetchers[10].name(), "rss_feed");
-        assert_eq!(registry.fetchers[11].name(), "docs_site");
-        assert_eq!(registry.fetchers[12].name(), "default");
-        assert_eq!(registry.fetchers.len(), 13);
+        assert_eq!(registry.fetchers[2].name(), "github_release");
+        assert_eq!(registry.fetchers[3].name(), "github_repo");
+        assert_eq!(registry.fetchers[4].name(), "twitter_tweet");
+        assert_eq!(registry.fetchers[5].name(), "stackoverflow");
+        assert_eq!(registry.fetchers[6].name(), "package_registry");
+        assert_eq!(registry.fetchers[7].name(), "wikipedia");
+        assert_eq!(registry.fetchers[8].name(), "youtube");
+        assert_eq!(registry.fetchers[9].name(), "arxiv");
+        assert_eq!(registry.fetchers[10].name(), "hackernews");
+        assert_eq!(registry.fetchers[11].name(), "rss_feed");
+        assert_eq!(registry.fetchers[12].name(), "docs_site");
+        assert_eq!(registry.fetchers[13].name(), "default");
+        assert_eq!(registry.fetchers.len(), 14);
     }
 
     #[test]

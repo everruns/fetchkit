@@ -41,6 +41,13 @@ Central dispatcher that:
   - Decompressed body size cap with partial content truncation
 - Returns: Standard `FetchResponse` with format `"markdown"`, `"text"`, or `"raw"`
 
+#### GitHubReleaseFetcher
+
+- Matches: `https://github.com/{owner}/{repo}/releases/tag/{tag}`
+- Behavior: Fetches tagged release metadata, notes, and assets through the public GitHub API
+- Enforces the configured maximum response body size
+- Response format field: `"github_release"`
+
 #### GitHubRepoFetcher
 
 - Matches: `https://github.com/{owner}/{repo}` (exactly 2 path segments)
