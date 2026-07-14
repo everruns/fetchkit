@@ -47,7 +47,10 @@ pub(crate) async fn crawl_fetch_with_options(
         let mut page_request = FetchRequest::new(url.as_str()).as_markdown();
         page_request.content_focus = Some("agent".to_string());
 
-        match registry.fetch(page_request, options.clone()).await {
+        let mut page_options = options.clone();
+        page_options.redirect_origin = Some(discovery_base_url.clone());
+
+        match registry.fetch(page_request, page_options).await {
             Ok(response) => pages.push(page_from_response(&response)),
             Err(err) => pages.push(CrawlPage {
                 url: url.to_string(),
@@ -182,6 +185,61 @@ mod tests {
             .iter()
             .any(|page| page.url.ends_with("/docs") && page.title.as_deref() == Some("Docs")));
         assert_eq!(crawl.truncated, None);
+    }
+
+    #[tokio::test]
+    async fn test_crawl_blocks_redirects_outside_seed_origin() {
+        let seed_server = MockServer::start().await;
+        let attacker_server = MockServer::start().await;
+        let attacker_url = format!("{}/landing", attacker_server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/html")
+                    .set_body_string(r#"<html><head><title>Home</title></head><body><a href="/go">Go</a></body></html>"#),
+            )
+            .mount(&seed_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/go"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", attacker_url))
+            .mount(&seed_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/landing"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/html")
+                    .set_body_string("<title>Attacker</title>"),
+            )
+            .mount(&attacker_server)
+            .await;
+
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let response = crawl_fetch_with_options(
+            FetchRequest::new(seed_server.uri())
+                .crawl(true)
+                .max_pages(5),
+            options,
+        )
+        .await
+        .unwrap();
+
+        let crawl = response.crawl.unwrap();
+        assert_eq!(crawl.pages.len(), 2);
+        assert!(crawl.pages.iter().any(|page| {
+            page.url.ends_with("/go")
+                && page.error.as_deref() == Some("Blocked URL: not allowed by policy")
+        }));
+        assert!(!crawl.pages.iter().any(|page| page
+            .url
+            .contains(&attacker_server.address().port().to_string())));
     }
 
     #[test]
