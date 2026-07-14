@@ -334,12 +334,17 @@ impl Fetcher for DefaultFetcher {
         // Determine format and convert if needed
         // THREAT[TM-DOS-006]: Conversion input is bounded by max_body_size
         let is_html_content = is_html(&meta.content_type, &content);
+        let mut rendered_truncated = false;
         let rendered_by = if is_html_content && request.wants_rakers_render() {
             content = render_html_with_rakers(content, final_url.clone(), options).await?;
+            // THREAT[TM-DOS-006]: Rendering can expand a small page; re-apply the
+            // body-size cap before metadata extraction or conversion.
+            rendered_truncated = truncate_string_to_max_bytes(&mut content, max_body_size);
             Some("rakers".to_string())
         } else {
             None
         };
+        let truncated = truncated || rendered_truncated;
         let is_paywall = detect_paywall(&content);
         let wants_main = request.wants_main_content();
         let wants_readable = request.wants_readable_content();
@@ -699,6 +704,19 @@ fn validate_rakers_render_request(
     {
         Err(FetchError::RenderNotAvailable)
     }
+}
+
+fn truncate_string_to_max_bytes(content: &mut String, max_size: usize) -> bool {
+    if content.len() <= max_size {
+        return false;
+    }
+
+    let mut end = max_size;
+    while end > 0 && !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    content.truncate(end);
+    true
 }
 
 #[cfg(feature = "render-rakers")]

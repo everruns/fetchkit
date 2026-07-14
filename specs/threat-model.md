@@ -447,7 +447,7 @@ None — all previously open threats have been mitigated.
 | Path traversal prevention | TM-INPUT | Preflight destination validation, lexical normalization, and save-time parent-directory symlink rejection in `LocalFileSaver` |
 | Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |
 | Bot-auth feature gating | TM-AUTH | `bot-auth` Cargo feature disabled by default; no crypto deps unless opted in |
-| Rendered fetch feature gating | TM-SSRF, TM-NET, TM-DOS | Browser-rendered fetching disabled by default; lightweight rakers-style rendering must be gated by `render-rakers`, require an explicit request/config switch, apply fetchkit URL, DNS, proxy, timeout, and body-size policy to the initial page, and deny rakers-initiated subresource network requests unless they can be routed through fetchkit policy |
+| Rendered fetch feature gating | TM-SSRF, TM-NET, TM-DOS | Browser-rendered fetching disabled by default; lightweight rakers-style rendering must be gated by `render-rakers`, require an explicit request/config switch, apply fetchkit URL, DNS, proxy, timeout, and body-size policy to the initial page, re-apply body-size policy to rendered HTML before conversion, and deny rakers-initiated subresource network requests unless they can be routed through fetchkit policy |
 | Signature nonce + timestamps | TM-AUTH | 32-byte random nonce + created/expires per signature prevents replay |
 | Authority-scoped signatures | TM-AUTH | Signature covers `@authority`; per-host binding |
 | Graceful signing failure | TM-AUTH | Signing errors logged, request proceeds unsigned |

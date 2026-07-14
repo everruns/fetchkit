@@ -253,6 +253,43 @@ async fn test_render_rakers_executes_inline_js_before_markdown_conversion() {
 
 #[cfg(feature = "render-rakers")]
 #[tokio::test]
+async fn test_render_rakers_output_is_capped_before_conversion() {
+    let server = MockServer::start().await;
+    let html = r#"<!doctype html>
+<html>
+  <body>
+    <main><p>small</p></main>
+    <script>
+      document.body.innerHTML = '<main>' + '<p>expanded</p>'.repeat(2000) + '</main>';
+    </script>
+  </body>
+</html>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/spa"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(html, "text/html"))
+        .mount(&server)
+        .await;
+
+    let tool = Tool::builder()
+        .block_private_ips(false)
+        .max_body_size(1024)
+        .enable_render_rakers(true)
+        .build();
+    let response = tool
+        .execute(FetchRequest::new(format!("{}/spa", server.uri())).render_rakers())
+        .await
+        .unwrap();
+
+    assert_eq!(response.rendered_by.as_deref(), Some("rakers"));
+    assert_eq!(response.truncated, Some(true));
+    let content = response.content.unwrap();
+    assert!(content.len() <= 1024 + "\n\n[..content truncated...]".len());
+    assert!(content.contains("[..content truncated...]"));
+}
+
+#[cfg(feature = "render-rakers")]
+#[tokio::test]
 async fn test_render_rakers_does_not_fetch_page_subresources() {
     let server = MockServer::start().await;
     let html = r#"<!doctype html>
