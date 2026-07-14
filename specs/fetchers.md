@@ -41,6 +41,14 @@ Central dispatcher that:
   - Decompressed body size cap with partial content truncation
 - Returns: Standard `FetchResponse` with format `"markdown"`, `"text"`, or `"raw"`
 
+#### GitHubCommitFetcher
+
+- Matches canonical GitHub commit and comparison URLs (`/{owner}/{repo}/commit/{ref}` and `/{owner}/{repo}/compare/{base}...{head}`)
+- Uses GitHub's REST API for commit metadata, authorship, signature verification, changed-file statistics, and patches
+- Comparison responses include ahead/behind counts, merge base, and included commits
+- Limits each patch excerpt to 2,000 Unicode characters and enforces the configured overall response limit
+- Response format field: `"github_commit"` or `"github_compare"`
+
 #### GitHubActionsRunFetcher
 
 - Matches canonical GitHub Actions workflow run URLs (`/{owner}/{repo}/actions/runs/{id}`)
