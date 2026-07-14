@@ -98,7 +98,7 @@ impl LocalFileSaver {
 
     /// Resolve and validate a path, returning the normalized absolute path.
     fn resolve_path(&self, path: &str) -> Result<PathBuf, FileSaveError> {
-        if path.is_empty() {
+        if path.trim().is_empty() {
             return Err(FileSaveError::PathNotAllowed(
                 "Path must name a file".into(),
             ));
@@ -129,6 +129,34 @@ impl LocalFileSaver {
                 ));
             }
             Ok(normalize_path(&input))
+        }
+    }
+
+    async fn validate_resolved_path(&self, resolved: &Path) -> Result<(), FileSaveError> {
+        if let Some(base_dir) = &self.base_dir {
+            if resolved == normalize_path(base_dir) {
+                return Err(FileSaveError::PathNotAllowed(format!(
+                    "Destination is the configured base directory, not a file: {}",
+                    resolved.display()
+                )));
+            }
+        }
+
+        if resolved.file_name().is_none() {
+            return Err(FileSaveError::PathNotAllowed(format!(
+                "Destination must name a file, not a root directory: {}",
+                resolved.display()
+            )));
+        }
+
+        match tokio::fs::symlink_metadata(resolved).await {
+            Ok(metadata) if metadata.is_dir() => Err(FileSaveError::PathNotAllowed(format!(
+                "Destination is a directory: {}",
+                resolved.display()
+            ))),
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -283,16 +311,7 @@ impl LocalFileSaver {
 impl FileSaver for LocalFileSaver {
     async fn save(&self, path: &str, bytes: &[u8]) -> Result<SaveResult, FileSaveError> {
         let resolved = self.resolve_path(path)?;
-        if let Some(base_dir) = &self.base_dir {
-            if resolved == normalize_path(base_dir) {
-                return Err(FileSaveError::PathNotAllowed(
-                    "Path must name a file".into(),
-                ));
-            }
-        }
-        resolved
-            .file_name()
-            .ok_or_else(|| FileSaveError::PathNotAllowed("Path must name a file".into()))?;
+        self.validate_resolved_path(&resolved).await?;
 
         let final_path = self.write_resolved_path(resolved, bytes).await?;
 
@@ -303,8 +322,8 @@ impl FileSaver for LocalFileSaver {
     }
 
     async fn validate_path(&self, path: &str) -> Result<(), FileSaveError> {
-        self.resolve_path(path)?;
-        Ok(())
+        let resolved = self.resolve_path(path)?;
+        self.validate_resolved_path(&resolved).await
     }
 }
 
@@ -625,5 +644,29 @@ mod tests {
         assert!(saver.validate_path("safe.txt").await.is_ok());
         assert!(saver.validate_path("sub/dir/safe.txt").await.is_ok());
         assert!(saver.validate_path("../../escape.txt").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_local_file_saver_validate_path_rejects_non_file_destinations() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("existing")).unwrap();
+        let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+
+        for path in ["", "   ", ".", "existing"] {
+            let error = saver.validate_path(path).await.unwrap_err();
+            assert!(matches!(error, FileSaveError::PathNotAllowed(_)), "{path}");
+        }
+
+        let error = saver.validate_path("existing").await.unwrap_err();
+        assert!(error.to_string().contains("Destination is a directory"));
+    }
+
+    #[tokio::test]
+    async fn test_local_file_saver_validate_path_rejects_root_destination() {
+        let saver = LocalFileSaver::new(None);
+        let error = saver.validate_path("/").await.unwrap_err();
+
+        assert!(matches!(error, FileSaveError::PathNotAllowed(_)));
+        assert!(error.to_string().contains("root directory"));
     }
 }

@@ -846,7 +846,9 @@ fn build_input_schema(
             "save_to_file".to_string(),
             json!({
                 "type": "string",
-                "description": "Adapter-defined destination path"
+                "description": "Adapter-defined destination path",
+                "minLength": 1,
+                "pattern": "\\S"
             }),
         );
     }

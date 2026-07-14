@@ -13,7 +13,7 @@ Each fetcher must implement:
 1. **`name()`** - Unique identifier string for logging/debugging
 2. **`matches(url)`** - Returns true if this fetcher handles the URL
 3. **`fetch(request, options)`** - Async fetch returning `FetchResponse` or error
-4. **`fetch_to_file(request, options, saver)`** - Optional. Default implementation calls `fetch()` then saves string content via `FileSaver`. Fetchers may override for binary-aware saving (e.g., `DefaultFetcher` accepts binary content when saving to file).
+4. **`fetch_to_file(request, options, saver)`** - Optional. Path validation runs before fetching. Default implementation then calls `fetch()` and saves string content via `FileSaver`. Fetchers may override for binary-aware saving (e.g., `DefaultFetcher` accepts binary content when saving to file).
 
 ### Fetcher Registry
 

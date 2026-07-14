@@ -1040,15 +1040,12 @@ fn find_matching_close(
                     .map(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
                     .unwrap_or(false);
                 if is_same_tag {
-                    if let Some(end) = lower_html[open..].find('>') {
-                        let tag = &lower_html[open..open + end + 1];
-                        if !tag.ends_with("/>") {
-                            depth += 1;
-                        }
-                        cursor = open + end + 1;
-                    } else {
-                        return None;
+                    let end = lower_html[open..].find('>')?;
+                    let tag = &lower_html[open..open + end + 1];
+                    if !tag.ends_with("/>") {
+                        depth += 1;
                     }
+                    cursor = open + end + 1;
                 } else {
                     cursor = after_name;
                 }
