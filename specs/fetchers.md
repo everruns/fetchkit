@@ -195,6 +195,8 @@ markdown/text conversion path.
   complete DOM/CSS engine.
 - Must honor fetchkit URL validation, allow/block lists, DNS policy, proxy
   policy, timeout policy, and body-size limits for the initial page.
+- Must re-apply the configured body-size limit to rendered HTML before
+  metadata extraction, boilerplate stripping, or markdown/text conversion.
 - Must not let the rakers runtime bypass fetchkit egress policy. Until
   subresource fetches can be routed through fetchkit policy, rakers-initiated
   external script, fetch, and XHR requests must be denied.
