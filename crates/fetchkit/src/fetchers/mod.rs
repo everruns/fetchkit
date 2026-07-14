@@ -75,8 +75,9 @@ pub trait Fetcher: Send + Sync {
         options: &FetchOptions,
         saver: &dyn FileSaver,
     ) -> Result<FetchResponse, FetchError> {
+        let save_path = preflight_save_path(request, saver).await?;
         let response = self.fetch(request, options).await?;
-        if let (Some(path), Some(content)) = (&request.save_to_file, &response.content) {
+        if let (Some(path), Some(content)) = (save_path, &response.content) {
             let result = saver
                 .save(path, content.as_bytes())
                 .await
@@ -242,9 +243,33 @@ impl FetcherRegistry {
     ) -> Result<FetchResponse, FetchError> {
         request.normalize_url_for_fetch()?;
         let (fetcher, _) = self.validate_and_find_fetcher(&request, &options)?;
+        preflight_save_path(&request, saver).await?;
         tracing::debug!(fetcher = fetcher.name(), url = %request.url, "Using fetcher (save to file)");
         fetcher.fetch_to_file(&request, &options, saver).await
     }
+}
+
+// THREAT[TM-INPUT-010]: Invalid file destinations must fail before any outbound request.
+// Mitigation: reject blank paths and invoke the adapter's preflight validation first.
+async fn preflight_save_path<'a>(
+    request: &'a FetchRequest,
+    saver: &dyn FileSaver,
+) -> Result<Option<&'a str>, FetchError> {
+    let Some(path) = request.save_to_file.as_deref() else {
+        return Ok(None);
+    };
+
+    if path.trim().is_empty() {
+        return Err(FetchError::SaveError(
+            "Path not allowed: Path must name a file".to_string(),
+        ));
+    }
+
+    saver
+        .validate_path(path)
+        .await
+        .map_err(|error| FetchError::SaveError(error.to_string()))?;
+    Ok(Some(path))
 }
 
 // THREAT[TM-INPUT-002]: URL-aware prefix matching normalizes both the URL and the prefix

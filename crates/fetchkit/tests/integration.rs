@@ -2,7 +2,7 @@
 
 use fetchkit::{
     fetch_with_options, DnsPolicy, FetchError, FetchOptions, FetchRequest, FetcherRegistry,
-    HttpMethod, LocalFileSaver, Tool,
+    FileSaveError, FileSaver, HttpMethod, LocalFileSaver, SaveResult, Tool,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -32,6 +32,21 @@ fn test_tool_with_save() -> Tool {
         .block_private_ips(false)
         .enable_save_to_file(true)
         .build()
+}
+
+struct RejectingFileSaver;
+
+#[async_trait::async_trait]
+impl FileSaver for RejectingFileSaver {
+    async fn save(&self, _path: &str, _bytes: &[u8]) -> Result<SaveResult, FileSaveError> {
+        panic!("save must not run after failed path validation");
+    }
+
+    async fn validate_path(&self, _path: &str) -> Result<(), FileSaveError> {
+        Err(FileSaveError::PathNotAllowed(
+            "rejected by test saver".to_string(),
+        ))
+    }
 }
 
 async fn spawn_malformed_chunked_server() -> String {
@@ -1018,6 +1033,51 @@ async fn test_save_to_file_rejects_path_traversal() {
 }
 
 #[tokio::test]
+async fn test_save_to_file_rejects_invalid_path_before_request() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("should not be fetched"))
+        .mount(&mock_server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let saver = LocalFileSaver::new(Some(dir.path().to_path_buf()));
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).save_to_file(" \t\n ");
+
+    let error = test_tool_with_save()
+        .execute_with_saver(req, Some(&saver))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, FetchError::SaveError(_)));
+    assert!(error.to_string().contains("Path must name a file"));
+    assert!(mock_server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_save_to_file_invokes_saver_validation_before_request() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("should not be fetched"))
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/", mock_server.uri())).save_to_file("blocked.txt");
+    let error = test_tool_with_save()
+        .execute_with_saver(req, Some(&RejectingFileSaver))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, FetchError::SaveError(_)));
+    assert!(error.to_string().contains("rejected by test saver"));
+    assert!(mock_server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn test_save_to_file_without_saver_errors() {
     let tool = test_tool_with_save();
 
@@ -1060,6 +1120,8 @@ async fn test_save_to_file_schema_gating() {
     let schema = tool.input_schema();
     if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
         assert!(props.contains_key("save_to_file"));
+        assert_eq!(props["save_to_file"]["minLength"], 1);
+        assert_eq!(props["save_to_file"]["pattern"], "\\S");
     }
 }
 

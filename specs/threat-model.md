@@ -220,6 +220,7 @@ expected outbound path.
 | TM-INPUT-007 | Block prefix matching is string-based, not URL-aware | Medium | URL-aware prefix matching compares parsed components (scheme, host, path) | MITIGATED |
 | TM-INPUT-008 | Symlink-based path traversal in LocalFileSaver | Medium | Save-time parent-directory walk rejects symlinks and re-checks canonical path under base_dir | MITIGATED |
 | TM-INPUT-009 | LocalFileSaver without base_dir allows arbitrary writes | Medium | Documented limitation; callers should always set base_dir in untrusted contexts | **ACCEPTED** |
+| TM-INPUT-010 | Invalid save destination triggers unnecessary network/body download | Low | Schema rejects blank strings; runtime calls `FileSaver::validate_path` before transport | MITIGATED |
 
 ### Mitigation Details
 
@@ -258,8 +259,8 @@ matching). `http://internal.example.com` correctly does NOT match
 save-time enforcement now walks each parent directory component under `base_dir`
 using directory handles, rejects symlinks with no-follow opens, and opens the
 final file relative to the verified parent with no-follow semantics.
-`execute_with_saver()` no longer performs a separate `validate_path()` preflight,
-so path checks now happen at write time instead of in a validate-then-write split.
+`execute_with_saver()` also performs `validate_path()` preflight before transport;
+the descriptor-anchored save-time checks remain authoritative against path changes.
 
 **TM-INPUT-009 — No base_dir allows arbitrary writes (ACCEPTED):**
 `LocalFileSaver::new(None)` only requires absolute paths, with no directory restriction.
@@ -267,6 +268,14 @@ Accepted because:
 - This mode is for CLI/trusted contexts only
 - The `FileSaver` trait allows custom implementations with stricter controls
 - `enable_save_to_file` is disabled by default
+
+**TM-INPUT-010 — Save destination preflight (MITIGATED):**
+The input schema requires `save_to_file` to contain at least one non-whitespace
+character. Runtime execution independently rejects blank destinations and calls
+the configured `FileSaver::validate_path` before any HTTP request or body download.
+`LocalFileSaver` preflight also rejects its configured base directory, root-like
+destinations, and existing directories. Save-time no-follow checks remain in place
+to protect against changes between validation and write.
 
 ## 4. Denial of Service (TM-DOS)
 
@@ -435,7 +444,7 @@ None — all previously open threats have been mitigated.
 | Pluggable transport keeps policy in fetchkit | TM-SSRF, TM-NET | `HttpTransport` only performs the socket send; DNS policy (resolve-then-check), redirect following, and proxy suppression stay in fetchkit. `TransportRequest.pinned_addrs` (from `DnsPolicy`) constrains a custom transport to fetchkit-validated addresses; the default `ReqwestTransport` enforces this via `resolve_to_addrs()` |
 | Fetcher API URL hardcoding | TM-SSRF | Specialized fetchers (GitHub, Twitter) connect to hardcoded API hosts, not user-controlled URLs; DNS validation applied on initial connect |
 | Proxy env isolation | TM-NET | `reqwest::ClientBuilder::no_proxy()` by default |
-| Path traversal prevention | TM-INPUT | Lexical normalization plus save-time parent-directory symlink rejection in `LocalFileSaver` |
+| Path traversal prevention | TM-INPUT | Preflight destination validation, lexical normalization, and save-time parent-directory symlink rejection in `LocalFileSaver` |
 | Save feature gating | TM-INPUT | `enable_save_to_file` disabled by default; schema gated |
 | Bot-auth feature gating | TM-AUTH | `bot-auth` Cargo feature disabled by default; no crypto deps unless opted in |
 | Rendered fetch feature gating | TM-SSRF, TM-NET, TM-DOS | Browser-rendered fetching disabled by default; lightweight rakers-style rendering must be gated by `render-rakers`, require an explicit request/config switch, apply fetchkit URL, DNS, proxy, timeout, and body-size policy to the initial page, and deny rakers-initiated subresource network requests unless they can be routed through fetchkit policy |

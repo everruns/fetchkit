@@ -73,7 +73,8 @@ Provide a builder to configure tool options, including:
   - `method: HttpMethod` (optional, default GET)
   - `as_markdown: bool` (optional, feature-gated)
   - `as_text: bool` (optional, feature-gated)
-  - `save_to_file: Option<String>` (optional, feature-gated via `enable_save_to_file`)
+  - `save_to_file: Option<String>` (optional, feature-gated via `enable_save_to_file`;
+    when present, must contain at least one non-whitespace character)
   - `content_focus: Option<String>` controls extraction before HTML conversion:
     - `"full"` or unset returns everything
     - `"main"` strips semantic boilerplate
@@ -320,6 +321,8 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
 #### Save to File
 
 When `save_to_file` is set on the request:
+- Empty and whitespace-only destinations are rejected.
+- `FileSaver::validate_path` runs before any HTTP request or body download.
 - Binary content is NOT rejected (accepted for file saves).
 - Raw bytes are saved via the `FileSaver` trait implementation.
 - Response includes `saved_path` and `bytes_written` instead of `content`.
@@ -327,6 +330,7 @@ When `save_to_file` is set on the request:
 - The `FileSaver` trait provides path validation (traversal prevention) and async save.
 - `LocalFileSaver` is the built-in implementation for CLI/local use:
   - Resolves paths relative to a configurable base directory.
+  - Rejects the configured base directory, root-like paths, and existing directories as destinations.
   - Rejects path traversal via lexical normalization and save-time symlink checks.
   - Creates parent directories as needed.
 

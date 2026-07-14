@@ -234,7 +234,7 @@ response = tool.fetch("https://example.com")
 | `method` | enum? | `GET` (default) or `HEAD` |
 | `as_markdown` | bool? | Convert HTML to markdown |
 | `as_text` | bool? | Convert HTML to plain text |
-| `save_to_file` | string? | Save body to path (requires `FileSaver`) |
+| `save_to_file` | string? | Non-blank destination path; validated by `FileSaver` before fetching |
 | `content_focus` | string? | `"full"`/unset returns everything; `"main"` strips semantic boilerplate; `"readable"` selects article-like content; `"agent"` selects the best low-noise strategy for AI agents |
 | `crawl` | bool? | Fetch the seed URL, then discover and fetch bounded same-origin pages |
 | `max_pages` | int? | Maximum crawl pages, including the seed; default 5, max 20 |

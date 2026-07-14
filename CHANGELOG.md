@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Stack Overflow question fetching now returns question and answer content again, including code snippets.
+- Invalid `save_to_file` destinations are rejected before any HTTP request or body download.
 
 ## [0.4.1] - 2026-07-04
 

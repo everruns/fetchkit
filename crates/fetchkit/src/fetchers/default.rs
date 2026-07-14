@@ -453,8 +453,8 @@ impl Fetcher for DefaultFetcher {
         options: &FetchOptions,
         saver: &dyn FileSaver,
     ) -> Result<FetchResponse, FetchError> {
-        let save_path = match &request.save_to_file {
-            Some(path) => path.clone(),
+        let save_path = match super::preflight_save_path(request, saver).await? {
+            Some(path) => path,
             None => return self.fetch(request, options).await,
         };
         let request = request.normalized_for_fetch()?;
@@ -511,7 +511,7 @@ impl Fetcher for DefaultFetcher {
 
         // Save through the FileSaver
         let save_result = saver
-            .save(&save_path, &body)
+            .save(save_path, &body)
             .await
             .map_err(|e| FetchError::SaveError(e.to_string()))?;
 
