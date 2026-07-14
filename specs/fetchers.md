@@ -41,6 +41,14 @@ Central dispatcher that:
   - Decompressed body size cap with partial content truncation
 - Returns: Standard `FetchResponse` with format `"markdown"`, `"text"`, or `"raw"`
 
+#### GitHubActionsRunFetcher
+
+- Matches canonical GitHub Actions workflow run URLs (`/{owner}/{repo}/actions/runs/{id}`)
+- Uses GitHub's REST API to retrieve public workflow run metadata and up to 100 jobs
+- Includes workflow status, conclusion, trigger, actor, branch/SHA, timing, and job details
+- Highlights failed or incomplete steps without downloading potentially large log archives
+- Response format field: `"github_actions_run"`
+
 #### GitHubReleaseFetcher
 
 - Matches: `https://github.com/{owner}/{repo}/releases/tag/{tag}`

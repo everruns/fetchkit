@@ -7,6 +7,7 @@ mod arxiv;
 mod crossref;
 mod default;
 mod docs_site;
+mod github_actions_run;
 mod github_code;
 mod github_issue;
 mod github_release;
@@ -27,6 +28,7 @@ pub use arxiv::ArXivFetcher;
 pub use crossref::CrossrefFetcher;
 pub use default::DefaultFetcher;
 pub use docs_site::DocsSiteFetcher;
+pub use github_actions_run::GitHubActionsRunFetcher;
 pub use github_code::GitHubCodeFetcher;
 pub use github_issue::GitHubIssueFetcher;
 pub use github_release::GitHubReleaseFetcher;
@@ -161,6 +163,7 @@ impl FetcherRegistry {
         registry.register(Box::new(JupyterNotebookFetcher::new()));
         // GitHub fetchers: code > issue > release > repo (most specific first)
         registry.register(Box::new(GitHubCodeFetcher::new()));
+        registry.register(Box::new(GitHubActionsRunFetcher::new()));
         registry.register(Box::new(GitHubIssueFetcher::new()));
         registry.register(Box::new(GitHubReleaseFetcher::new()));
         registry.register(Box::new(GitHubRepoFetcher::new()));
@@ -362,24 +365,25 @@ mod tests {
         let registry = FetcherRegistry::with_defaults();
         assert_eq!(registry.fetchers[0].name(), "jupyter_notebook");
         assert_eq!(registry.fetchers[1].name(), "github_code");
-        assert_eq!(registry.fetchers[2].name(), "github_issue");
-        assert_eq!(registry.fetchers[3].name(), "github_release");
-        assert_eq!(registry.fetchers[4].name(), "github_repo");
-        assert_eq!(registry.fetchers[5].name(), "gitlab");
-        assert_eq!(registry.fetchers[6].name(), "twitter_tweet");
-        assert_eq!(registry.fetchers[7].name(), "stackoverflow");
-        assert_eq!(registry.fetchers[8].name(), "package_registry");
-        assert_eq!(registry.fetchers[9].name(), "wikipedia");
-        assert_eq!(registry.fetchers[10].name(), "youtube");
-        assert_eq!(registry.fetchers[11].name(), "arxiv");
-        assert_eq!(registry.fetchers[12].name(), "crossref");
-        assert_eq!(registry.fetchers[13].name(), "ietf_rfc");
-        assert_eq!(registry.fetchers[14].name(), "pubmed");
-        assert_eq!(registry.fetchers[15].name(), "hackernews");
-        assert_eq!(registry.fetchers[16].name(), "rss_feed");
-        assert_eq!(registry.fetchers[17].name(), "docs_site");
-        assert_eq!(registry.fetchers[18].name(), "default");
-        assert_eq!(registry.fetchers.len(), 19);
+        assert_eq!(registry.fetchers[2].name(), "github_actions_run");
+        assert_eq!(registry.fetchers[3].name(), "github_issue");
+        assert_eq!(registry.fetchers[4].name(), "github_release");
+        assert_eq!(registry.fetchers[5].name(), "github_repo");
+        assert_eq!(registry.fetchers[6].name(), "gitlab");
+        assert_eq!(registry.fetchers[7].name(), "twitter_tweet");
+        assert_eq!(registry.fetchers[8].name(), "stackoverflow");
+        assert_eq!(registry.fetchers[9].name(), "package_registry");
+        assert_eq!(registry.fetchers[10].name(), "wikipedia");
+        assert_eq!(registry.fetchers[11].name(), "youtube");
+        assert_eq!(registry.fetchers[12].name(), "arxiv");
+        assert_eq!(registry.fetchers[13].name(), "crossref");
+        assert_eq!(registry.fetchers[14].name(), "ietf_rfc");
+        assert_eq!(registry.fetchers[15].name(), "pubmed");
+        assert_eq!(registry.fetchers[16].name(), "hackernews");
+        assert_eq!(registry.fetchers[17].name(), "rss_feed");
+        assert_eq!(registry.fetchers[18].name(), "docs_site");
+        assert_eq!(registry.fetchers[19].name(), "default");
+        assert_eq!(registry.fetchers.len(), 20);
     }
 
     #[test]
