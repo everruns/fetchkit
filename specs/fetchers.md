@@ -61,6 +61,15 @@ Central dispatcher that:
 - Response format field: `"github_repo"`
 - Metadata includes: stars, forks, issues, language, license, topics, dates
 
+#### GitLabFetcher
+
+- Matches public `gitlab.com` project pages and project URLs for source blobs, issues, merge requests, and releases
+- Supports nested GitLab groups
+- Uses the public GitLab v4 API without authentication
+- Converts structured metadata and source content to bounded Markdown
+- Response format fields: `"gitlab_project"`, `"gitlab_blob"`, `"gitlab_issue"`, `"gitlab_merge_request"`, or `"gitlab_release"`
+- Self-managed GitLab instances are not matched
+
 #### TwitterFetcher
 
 - Matches: `https://x.com/{user}/status/{id}` and `https://twitter.com/{user}/status/{id}`
