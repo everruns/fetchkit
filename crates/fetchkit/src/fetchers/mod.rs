@@ -13,6 +13,7 @@ mod github_release;
 mod github_repo;
 mod gitlab;
 mod hackernews;
+mod ietf_rfc;
 mod jupyter_notebook;
 mod package_registry;
 mod pubmed;
@@ -32,6 +33,7 @@ pub use github_release::GitHubReleaseFetcher;
 pub use github_repo::GitHubRepoFetcher;
 pub use gitlab::GitLabFetcher;
 pub use hackernews::HackerNewsFetcher;
+pub use ietf_rfc::IetfRfcFetcher;
 pub use jupyter_notebook::JupyterNotebookFetcher;
 pub use package_registry::PackageRegistryFetcher;
 pub use pubmed::PubMedFetcher;
@@ -170,6 +172,7 @@ impl FetcherRegistry {
         registry.register(Box::new(YouTubeFetcher::new()));
         registry.register(Box::new(ArXivFetcher::new()));
         registry.register(Box::new(CrossrefFetcher::new()));
+        registry.register(Box::new(IetfRfcFetcher::new()));
         registry.register(Box::new(PubMedFetcher::new()));
         registry.register(Box::new(HackerNewsFetcher::new()));
         registry.register(Box::new(RSSFeedFetcher::new()));
@@ -370,12 +373,13 @@ mod tests {
         assert_eq!(registry.fetchers[10].name(), "youtube");
         assert_eq!(registry.fetchers[11].name(), "arxiv");
         assert_eq!(registry.fetchers[12].name(), "crossref");
-        assert_eq!(registry.fetchers[13].name(), "pubmed");
-        assert_eq!(registry.fetchers[14].name(), "hackernews");
-        assert_eq!(registry.fetchers[15].name(), "rss_feed");
-        assert_eq!(registry.fetchers[16].name(), "docs_site");
-        assert_eq!(registry.fetchers[17].name(), "default");
-        assert_eq!(registry.fetchers.len(), 18);
+        assert_eq!(registry.fetchers[13].name(), "ietf_rfc");
+        assert_eq!(registry.fetchers[14].name(), "pubmed");
+        assert_eq!(registry.fetchers[15].name(), "hackernews");
+        assert_eq!(registry.fetchers[16].name(), "rss_feed");
+        assert_eq!(registry.fetchers[17].name(), "docs_site");
+        assert_eq!(registry.fetchers[18].name(), "default");
+        assert_eq!(registry.fetchers.len(), 19);
     }
 
     #[test]
