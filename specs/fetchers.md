@@ -138,6 +138,14 @@ Central dispatcher that:
 - Behavior: Fetches paper metadata via arXiv Atom XML API
 - Response format field: `"arxiv_paper"`
 
+#### IetfRfcFetcher
+
+- Matches canonical RFC URLs on IETF Datatracker, RFC Editor, IETF, and legacy IETF Tools hosts
+- Normalizes the RFC number and retrieves the canonical plain-text publication from RFC Editor
+- Preserves section numbering, ASCII diagrams, references, and status boilerplate
+- Normalizes line endings and enforces the configured response limit
+- Response format field: `"ietf_rfc"`
+
 #### CrossrefFetcher
 
 - Matches DOI resolver URLs on `doi.org` and legacy `dx.doi.org`
