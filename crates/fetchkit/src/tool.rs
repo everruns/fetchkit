@@ -670,6 +670,7 @@ impl Tool {
             allowed_ports: self.allowed_ports.clone(),
             blocked_hosts: self.blocked_hosts.clone(),
             same_host_redirects_only: self.same_host_redirects_only,
+            redirect_origin: None,
             enable_render_rakers: self.enable_render_rakers,
             #[cfg(feature = "bot-auth")]
             bot_auth: self.bot_auth.clone(),

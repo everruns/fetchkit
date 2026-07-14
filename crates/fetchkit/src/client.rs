@@ -41,6 +41,9 @@ pub struct FetchOptions {
     pub blocked_hosts: Vec<String>,
     /// Restrict redirects to the original host only.
     pub same_host_redirects_only: bool,
+    /// Internal crawl boundary: redirects must stay on this exact origin.
+    #[doc(hidden)]
+    pub redirect_origin: Option<Url>,
     /// Enable rakers-rendered HTML fetching. The request must still opt in.
     pub enable_render_rakers: bool,
     /// Web Bot Authentication config (draft-meunier-web-bot-auth-architecture).
@@ -72,6 +75,7 @@ impl std::fmt::Debug for FetchOptions {
             .field("allowed_ports", &self.allowed_ports)
             .field("blocked_hosts", &self.blocked_hosts)
             .field("same_host_redirects_only", &self.same_host_redirects_only)
+            .field("redirect_origin", &self.redirect_origin)
             .field("enable_render_rakers", &self.enable_render_rakers);
         #[cfg(feature = "bot-auth")]
         d.field("bot_auth", &self.bot_auth);
@@ -114,6 +118,15 @@ impl FetchOptions {
             && normalized_host(current_url) != normalized_host(next_url)
         {
             return Err(FetchError::BlockedUrl);
+        }
+
+        if let Some(origin) = &self.redirect_origin {
+            let same_origin = origin.scheme() == next_url.scheme()
+                && normalized_host(origin) == normalized_host(next_url)
+                && origin.port_or_known_default() == next_url.port_or_known_default();
+            if !same_origin {
+                return Err(FetchError::BlockedUrl);
+            }
         }
 
         Ok(())
