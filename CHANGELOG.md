@@ -7,14 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.5.0] - 2026-07-14
 
-- Optional `render-rakers` feature for explicit, per-request lightweight JS/DOM rendering before markdown/text conversion. The backend is disabled by default, exposed only when a host enables it, and denies rakers-initiated subresource network requests.
+### Highlights
 
-### Fixed
+- Added opt-in lightweight JavaScript/DOM rendering through the `render-rakers` feature, with subresource network requests denied.
+- Restored Stack Overflow question and answer extraction, including code snippets.
+- Hardened local file saving by rejecting invalid destinations before fetching or downloading content.
 
-- Stack Overflow question fetching now returns question and answer content again, including code snippets.
-- Invalid `save_to_file` destinations are rejected before any HTTP request or body download.
+### What's Changed
+
+* feat(render): add opt-in rakers backend ([#145](https://github.com/everruns/fetchkit/pull/145))
+* fix(fetchers): restore Stack Overflow extraction ([#144](https://github.com/everruns/fetchkit/pull/144))
+* fix(fetchkit): preflight local save destinations ([#143](https://github.com/everruns/fetchkit/pull/143))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.4.1...v0.5.0
 
 ## [0.4.1] - 2026-07-04
 
@@ -240,7 +247,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/everruns/fetchkit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/everruns/fetchkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/everruns/fetchkit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/everruns/fetchkit/compare/v0.2.0...v0.3.0
