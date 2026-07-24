@@ -83,6 +83,7 @@ impl Fetcher for JupyterNotebookFetcher {
         let page_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let (raw_url, host) = Self::raw_url(&page_url)
             .ok_or_else(|| FetchError::FetcherError("Not a supported notebook URL".into()))?;
+        options.validate_url(&raw_url)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -248,6 +249,35 @@ fn truncate(mut value: String, max: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::DnsPolicy;
+    use crate::transport::{HttpTransport, TransportError, TransportRequest, TransportResponse};
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use futures::stream;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Default)]
+    struct CountingTransport {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl HttpTransport for CountingTransport {
+        async fn execute(
+            &self,
+            req: TransportRequest,
+        ) -> Result<TransportResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let body = br#"{"metadata":{},"cells":[]}"#.to_vec();
+            Ok(TransportResponse {
+                status: 200,
+                url: req.url,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: Box::pin(stream::once(async move { Ok(Bytes::from(body)) })),
+            })
+        }
+    }
 
     #[test]
     fn maps_github_and_nested_gitlab_blob_urls_to_raw_sources() {
@@ -304,5 +334,47 @@ mod tests {
     fn chooses_safe_fence_and_utf8_truncation() {
         assert!(fenced("text", "``` inside").starts_with("````text"));
         assert_eq!(truncate("aéz".into(), 2), ("a".into(), true));
+    }
+
+    #[tokio::test]
+    async fn validates_rewritten_github_raw_host_before_transport() {
+        let transport = Arc::new(CountingTransport::default());
+        let options = FetchOptions {
+            blocked_hosts: vec!["raw.githubusercontent.com".into()],
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport.clone()),
+            ..Default::default()
+        };
+
+        let result = JupyterNotebookFetcher::new()
+            .fetch(
+                &FetchRequest::new("https://github.com/org/repo/blob/main/demo.ipynb"),
+                &options,
+            )
+            .await;
+
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
+        assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn validates_rewritten_github_raw_port_before_transport() {
+        let transport = Arc::new(CountingTransport::default());
+        let options = FetchOptions {
+            allowed_ports: vec![80],
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport.clone()),
+            ..Default::default()
+        };
+
+        let result = JupyterNotebookFetcher::new()
+            .fetch(
+                &FetchRequest::new("https://github.com:80/org/repo/blob/main/demo.ipynb"),
+                &options,
+            )
+            .await;
+
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
+        assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
     }
 }
