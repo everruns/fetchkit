@@ -64,6 +64,7 @@ Central dispatcher that:
 - Matches: `https://github.com/{owner}/{repo}/releases/tag/{tag}`
 - Behavior: Fetches tagged release metadata, notes, and assets through the public GitHub API
 - Enforces the configured maximum response body size
+- Applies configured host, port, allow-prefix, and block-prefix policy to the derived `api.github.com` request before transport
 - Response format field: `"github_release"`
 
 #### GitHubRepoFetcher

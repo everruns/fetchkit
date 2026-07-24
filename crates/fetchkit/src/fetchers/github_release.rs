@@ -5,7 +5,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -99,6 +99,7 @@ impl Fetcher for GitHubReleaseFetcher {
             "https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
         ))
         .map_err(|_| FetchError::InvalidUrlScheme)?;
+        validate_url_policy(&api_url, options)?;
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -204,6 +205,52 @@ fn truncate(mut value: String, max: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::DnsPolicy;
+    use crate::transport::{HttpTransport, TransportError, TransportRequest, TransportResponse};
+    use bytes::Bytes;
+    use std::sync::{Arc, Mutex};
+
+    struct RecordingTransport {
+        calls: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl HttpTransport for RecordingTransport {
+        async fn execute(
+            &self,
+            req: TransportRequest,
+        ) -> Result<TransportResponse, TransportError> {
+            self.calls.lock().unwrap().push(req.url.to_string());
+            let body = Bytes::from(
+                r#"{
+                    "name":"Fetchkit 1.0",
+                    "tag_name":"v1.0.0",
+                    "body":"Notable changes.",
+                    "html_url":"https://github.com/owner/repo/releases/tag/v1.0.0",
+                    "draft":false,
+                    "prerelease":false,
+                    "author":{"login":"octocat"},
+                    "created_at":"2026-01-01T00:00:00Z",
+                    "published_at":"2026-01-02T00:00:00Z",
+                    "assets":[]
+                }"#,
+            );
+            Ok(TransportResponse {
+                status: 200,
+                url: req.url,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: Box::pin(futures::stream::once(async move { Ok(body) })),
+            })
+        }
+    }
+
+    fn options_with_transport(transport: Arc<dyn HttpTransport>) -> FetchOptions {
+        FetchOptions {
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn parses_release_url_and_preserves_encoded_tag() {
@@ -223,6 +270,73 @@ mod tests {
         ] {
             assert!(!GitHubReleaseFetcher::new().matches(&Url::parse(value).unwrap()));
         }
+    }
+
+    #[test]
+    fn validates_secondary_api_url_against_host_port_and_prefix_policy() {
+        let api_url =
+            Url::parse("https://api.github.com/repos/owner/repo/releases/tags/v1.0.0").unwrap();
+
+        let options = FetchOptions {
+            blocked_hosts: vec!["api.github.com".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_url_policy(&api_url, &options),
+            Err(FetchError::BlockedUrl)
+        ));
+
+        let options = FetchOptions {
+            allowed_ports: vec![80],
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_url_policy(&api_url, &options),
+            Err(FetchError::BlockedUrl)
+        ));
+
+        let options = FetchOptions {
+            allow_prefixes: vec!["https://github.com/owner/repo/releases/tag/".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_url_policy(&api_url, &options),
+            Err(FetchError::BlockedUrl)
+        ));
+
+        let options = FetchOptions {
+            allow_prefixes: vec!["https://api.github.com/repos/owner/repo/releases/tags/".into()],
+            block_prefixes: vec![
+                "https://api.github.com/repos/owner/repo/releases/tags/v1.0.0".into(),
+            ],
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_url_policy(&api_url, &options),
+            Err(FetchError::BlockedUrl)
+        ));
+    }
+
+    #[tokio::test]
+    async fn blocks_disallowed_secondary_api_url_before_transport() {
+        let transport = Arc::new(RecordingTransport {
+            calls: Mutex::new(Vec::new()),
+        });
+        let mut options = options_with_transport(transport.clone());
+        options.allow_prefixes = vec!["https://github.com/owner/repo/releases/tag/".into()];
+
+        let result = GitHubReleaseFetcher::new()
+            .fetch(
+                &FetchRequest {
+                    url: "https://github.com/owner/repo/releases/tag/v1.0.0".into(),
+                    ..Default::default()
+                },
+                &options,
+            )
+            .await;
+
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
+        assert!(transport.calls.lock().unwrap().is_empty());
     }
 
     #[test]
