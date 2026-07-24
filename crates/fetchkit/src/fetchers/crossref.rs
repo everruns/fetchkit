@@ -67,6 +67,7 @@ impl Fetcher for CrossrefFetcher {
             .path_segments_mut()
             .map_err(|_| FetchError::InvalidUrlScheme)?
             .push(&doi);
+        options.validate_url(&api_url)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -264,6 +265,32 @@ mod tests {
         ] {
             assert!(CrossrefFetcher::doi(&Url::parse(input).unwrap()).is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn blocks_crossref_api_host_policy_before_transport() {
+        let fetcher = CrossrefFetcher::new();
+        let request = FetchRequest::new("https://doi.org/10.1000/test");
+        let options = FetchOptions {
+            blocked_hosts: vec!["api.crossref.org".to_string()],
+            ..Default::default()
+        };
+
+        let result = fetcher.fetch(&request, &options).await;
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
+    }
+
+    #[tokio::test]
+    async fn blocks_crossref_api_port_policy_before_transport() {
+        let fetcher = CrossrefFetcher::new();
+        let request = FetchRequest::new("http://doi.org/10.1000/test");
+        let options = FetchOptions {
+            allowed_ports: vec![80],
+            ..Default::default()
+        };
+
+        let result = fetcher.fetch(&request, &options).await;
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
     }
 
     #[test]
