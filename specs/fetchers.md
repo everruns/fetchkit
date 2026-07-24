@@ -23,7 +23,7 @@ Central dispatcher that:
 2. Iterates fetchers, uses first matching one
 3. Falls back to default fetcher if none match
 4. Provides `register()` for adding custom fetchers
-5. Validates URL scheme and allow/block lists before dispatching
+5. Validates URL scheme and host/port/allow/block URL policy before dispatching
 6. Provides shared URL-policy validation for fetchers that derive secondary API URLs; every outbound destination must satisfy the same host, port, allow-prefix, and block-prefix policy before transport execution
 7. Provides `fetch_to_file()` that dispatches to matched fetcher's `fetch_to_file()`
 
@@ -221,7 +221,10 @@ Central dispatcher that:
 ### HTTP Transport
 
 All fetchers perform their outbound HTTP exclusively through a pluggable
-`HttpTransport` (see `transport.rs`). The transport is a single-hop socket adapter:
+`HttpTransport` (see `transport.rs`). Specialized fetchers that rewrite a matched
+URL to a secondary API URL MUST apply the configured host, port, allow-prefix, and
+block-prefix policy to the rewritten URL before handing it to transport. The
+transport is a single-hop socket adapter:
 it never follows redirects and never performs DNS policy resolution. fetchkit owns
 URL validation, DNS policy (resolve-then-check, producing `TransportRequest.pinned_addrs`),
 manual per-hop redirect following, bot-auth signing, and body-size/timeout caps;
