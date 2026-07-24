@@ -616,6 +616,8 @@ pub(crate) async fn transport_request(
     pin_host: &str,
     pin_port: u16,
 ) -> Result<TransportResponse, FetchError> {
+    super::validate_policy_url(&url, options)?;
+
     let transport = options.transport();
     let transport_method = if method == reqwest::Method::HEAD {
         TransportMethod::Head
