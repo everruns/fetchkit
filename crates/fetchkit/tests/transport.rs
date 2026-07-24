@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use fetchkit::fetchers::GitLabFetcher;
 use fetchkit::{
     fetch_with_options, ArXivFetcher, DefaultFetcher, DnsPolicy, DocsSiteFetcher, FetchError,
     FetchOptions, FetchRequest, Fetcher, GitHubCodeFetcher, GitHubIssueFetcher, GitHubRepoFetcher,
@@ -100,6 +101,35 @@ fn options_with(transport: Arc<dyn HttpTransport>) -> FetchOptions {
         transport: Some(transport),
         ..Default::default()
     }
+}
+
+#[tokio::test]
+async fn gitlab_fetcher_enforces_policy_on_api_subrequest() {
+    let mock = Arc::new(MockTransport::new().route(
+        "gitlab.com/api/v4/projects/group%2Fproject",
+        200,
+        "application/json",
+        br#"{"name":"project"}"#,
+    ));
+    let options = FetchOptions {
+        allow_prefixes: vec!["http://gitlab.com/group/project".into()],
+        block_prefixes: vec!["https://gitlab.com/api/v4".into()],
+        allowed_ports: vec![80],
+        dns_policy: DnsPolicy::allow_all(),
+        transport: Some(mock.clone()),
+        ..Default::default()
+    };
+
+    let error = GitLabFetcher::new()
+        .fetch(
+            &FetchRequest::new("http://gitlab.com/group/project"),
+            &options,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, FetchError::BlockedUrl));
+    assert!(mock.calls().is_empty());
 }
 
 #[tokio::test]

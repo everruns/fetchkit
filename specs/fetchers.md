@@ -24,7 +24,7 @@ Central dispatcher that:
 3. Falls back to default fetcher if none match
 4. Provides `register()` for adding custom fetchers
 5. Validates URL scheme and host/port/allow/block URL policy before dispatching
-6. Provides shared URL-policy validation for fetchers that derive secondary API URLs; every outbound destination must satisfy the same host, port, allow-prefix, and block-prefix policy before transport execution
+6. Provides shared URL-policy validation for fetchers that derive secondary API URLs; every outbound destination must satisfy the same policy before transport execution
 7. Provides `fetch_to_file()` that dispatches to matched fetcher's `fetch_to_file()`
 
 ### Built-in Fetchers
@@ -227,8 +227,9 @@ block-prefix policy to the rewritten URL before handing it to transport. The
 transport is a single-hop socket adapter:
 it never follows redirects and never performs DNS policy resolution. fetchkit owns
 URL validation, DNS policy (resolve-then-check, producing `TransportRequest.pinned_addrs`),
-manual per-hop redirect following, bot-auth signing, and body-size/timeout caps;
-only the socket-level send is delegated.
+manual per-hop redirect following, specialized-fetcher API subrequest policy
+checks, bot-auth signing, and body-size/timeout caps; only the socket-level send
+is delegated.
 
 `FetchOptions.transport` selects the implementation (`None` => default
 `ReqwestTransport`). A host application can supply its own transport to route

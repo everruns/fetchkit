@@ -3,7 +3,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -112,6 +112,7 @@ impl Fetcher for GitLabFetcher {
         let resource = Self::parse_url(&page_url)
             .ok_or_else(|| FetchError::FetcherError("Not a supported GitLab URL".into()))?;
         let (api_url, format, raw) = api_url(&resource)?;
+        validate_url_policy(&api_url, options)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
