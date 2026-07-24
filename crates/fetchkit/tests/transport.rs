@@ -7,8 +7,8 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use fetchkit::{
-    ArXivFetcher, DefaultFetcher, DnsPolicy, DocsSiteFetcher, FetchError, FetchOptions,
-    FetchRequest, Fetcher, GitHubCodeFetcher, GitHubIssueFetcher, GitHubRepoFetcher,
+    fetch_with_options, ArXivFetcher, DefaultFetcher, DnsPolicy, DocsSiteFetcher, FetchError,
+    FetchOptions, FetchRequest, Fetcher, GitHubCodeFetcher, GitHubIssueFetcher, GitHubRepoFetcher,
     HackerNewsFetcher, HttpMethod, HttpTransport, PackageRegistryFetcher, RSSFeedFetcher,
     StackOverflowFetcher, TransportError, TransportMethod, TransportRequest, TransportResponse,
     TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
@@ -298,6 +298,22 @@ async fn default_fetcher_enforces_body_cap_on_transport_stream() {
     assert!(content.starts_with("aaaaaaaaaa"));
     assert!(content.contains("content truncated"));
     assert_eq!(response.size, Some(10));
+}
+
+#[tokio::test]
+async fn github_commit_fetcher_enforces_policy_on_api_subrequest() {
+    let mock = Arc::new(MockTransport::new());
+    let mut options = options_with(mock.clone());
+    options.allow_prefixes = vec!["http://github.com".to_string()];
+    options.block_prefixes = vec!["https://api.github.com".to_string()];
+    options.blocked_hosts = vec!["api.github.com".to_string()];
+    options.allowed_ports = vec![80];
+
+    let request = FetchRequest::new("http://github.com/everruns/fetchkit/commit/deadbeef");
+    let result = fetch_with_options(request, options).await;
+
+    assert!(matches!(result, Err(FetchError::BlockedUrl)));
+    assert!(mock.calls().is_empty());
 }
 
 #[tokio::test]
