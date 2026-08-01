@@ -347,6 +347,36 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn enforces_policy_on_api_requests_before_transport() {
+        let fetcher = GitHubActionsRunFetcher::new();
+        let request = FetchRequest::new("http://github.com/o/r/actions/runs/123");
+        let options = FetchOptions {
+            allow_prefixes: vec!["http://github.com/o/r/actions/runs".to_string()],
+            block_prefixes: vec!["https://api.github.com/".to_string()],
+            allowed_ports: vec![80],
+            blocked_hosts: vec!["api.github.com".to_string()],
+            dns_policy: crate::DnsPolicy::allow_all(),
+            transport: Some(std::sync::Arc::new(PanicTransport)),
+            ..Default::default()
+        };
+
+        let error = fetcher.fetch(&request, &options).await.unwrap_err();
+        assert!(matches!(error, FetchError::BlockedUrl));
+    }
+
+    struct PanicTransport;
+
+    #[async_trait::async_trait]
+    impl crate::transport::HttpTransport for PanicTransport {
+        async fn execute(
+            &self,
+            _req: crate::transport::TransportRequest,
+        ) -> Result<crate::transport::TransportResponse, crate::transport::TransportError> {
+            panic!("policy must block before transport execution");
+        }
+    }
+
     #[test]
     fn formats_run_jobs_and_failed_steps() {
         let run = WorkflowRun {

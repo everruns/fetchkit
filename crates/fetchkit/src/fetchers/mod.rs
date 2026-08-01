@@ -254,39 +254,6 @@ impl FetcherRegistry {
     }
 }
 
-/// Validate all operator URL policy for a request destination.
-///
-/// Specialized fetchers that derive secondary API URLs must call this before
-/// transport_request so allow/block/host/port policy applies to every egress hop.
-pub(crate) fn validate_url_policy(url: &Url, options: &FetchOptions) -> Result<(), FetchError> {
-    options.validate_url(url)?;
-
-    // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
-    // encoding-based bypasses (case, trailing dots, default ports)
-    // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks
-    if !options.allow_prefixes.is_empty() {
-        let allowed = options
-            .allow_prefixes
-            .iter()
-            .any(|prefix| url_matches_policy_prefix(url, prefix));
-        if !allowed {
-            debug!(url = %url, "URL not in allow list");
-            return Err(FetchError::BlockedUrl);
-        }
-    }
-
-    if options
-        .block_prefixes
-        .iter()
-        .any(|prefix| url_matches_policy_prefix(url, prefix))
-    {
-        debug!(url = %url, "URL matched block list");
-        return Err(FetchError::BlockedUrl);
-    }
-
-    Ok(())
-}
-
 // THREAT[TM-INPUT-010]: Invalid file destinations must fail before any outbound request.
 // Mitigation: reject blank paths and invoke the adapter's preflight validation first.
 async fn preflight_save_path<'a>(
@@ -314,6 +281,35 @@ async fn preflight_save_path<'a>(
 // before comparison, preventing bypasses via encoding, case, or trailing dots.
 // THREAT[TM-INPUT-007]: Compares parsed URL components (scheme, host, path) instead of
 // raw strings, so "http://internal.example.com" won't match "http://internal.example.com.evil.com".
+pub(crate) fn validate_url_policy(url: &Url, options: &FetchOptions) -> Result<(), FetchError> {
+    options.validate_url(url)?;
+
+    // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
+    // encoding-based bypasses (case, trailing dots, default ports).
+    // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks.
+    if !options.allow_prefixes.is_empty() {
+        let allowed = options
+            .allow_prefixes
+            .iter()
+            .any(|prefix| url_matches_policy_prefix(url, prefix));
+        if !allowed {
+            debug!(%url, "URL not in allow list");
+            return Err(FetchError::BlockedUrl);
+        }
+    }
+
+    if options
+        .block_prefixes
+        .iter()
+        .any(|prefix| url_matches_policy_prefix(url, prefix))
+    {
+        debug!(%url, "URL matched block list");
+        return Err(FetchError::BlockedUrl);
+    }
+
+    Ok(())
+}
+
 fn url_matches_policy_prefix(url: &Url, prefix: &str) -> bool {
     let Ok(prefix_url) = Url::parse(prefix) else {
         tracing::warn!(
