@@ -324,6 +324,28 @@ pub struct PageLink {
     pub href: String,
 }
 
+/// An agent-oriented resource advertised by a site or found at a conventional path.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct AgentResource {
+    /// Absolute resource URL.
+    pub url: String,
+    /// Stable resource kind, such as `llms-txt`, `auth`, or `mcp`.
+    pub kind: String,
+    /// Discovery source: `http-link`, `html-link`, `metadata`, or `probe`.
+    pub source: String,
+    /// Link relation when the site advertised one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation: Option<String>,
+    /// Advertised or returned media type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// Human-readable title when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Whether FetchKit confirmed the resource with a request.
+    pub verified: bool,
+}
+
 /// Structured metadata extracted from an HTML page.
 ///
 /// All fields are optional — only populated when the corresponding
@@ -362,6 +384,10 @@ pub struct PageMetadata {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub links: Vec<PageLink>,
 
+    /// Agent-oriented resources advertised by or discovered for the site.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub agent_resources: Vec<AgentResource>,
+
     /// Headings outline (e.g. `["# Title", "## Section 1", "## Section 2"]`)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub headings: Vec<String>,
@@ -382,6 +408,7 @@ impl PageMetadata {
             && self.published_date.is_none()
             && self.modified_date.is_none()
             && self.links.is_empty()
+            && self.agent_resources.is_empty()
             && self.headings.is_empty()
             && self.extraction_method.is_none()
     }

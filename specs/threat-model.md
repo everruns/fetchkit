@@ -458,3 +458,31 @@ None — all previously open threats have been mitigated.
 - `specs/fetchers.md` — Pluggable fetcher system
 - [OWASP SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
 - [CWE-918: Server-Side Request Forgery](https://cwe.mitre.org/data/definitions/918.html)
+
+### TM-DISC-001: Agent discovery request amplification
+
+**Threat**: A single fetch triggers unbounded secondary requests or recursive
+resource traversal.
+
+**Mitigations**:
+- Probe only a fixed, documented path set on the final response origin.
+- Never recursively follow discovered resources.
+- Bound concurrency, per-probe timeout, and emitted resource count.
+- Treat discovery failure as non-fatal.
+
+**Verification**: Tests assert fixed-path probing, deduplication, and bounded
+resource output.
+
+### TM-DISC-002: Discovery bypasses network policy
+
+**Threat**: Advertised or conventional resources reach private networks, abuse
+redirects, or receive credentials intended for another origin.
+
+**Mitigations**:
+- Route probes through the normal DNS, IP, redirect, proxy, and signing policy.
+- Probe fixed same-origin URLs only and reject redirected probes as verified.
+- Do not forward request-specific authorization headers.
+- Report arbitrary advertised links without fetching them.
+
+**Verification**: Discovery uses the shared request transport and tests use a
+private-address policy override explicitly.

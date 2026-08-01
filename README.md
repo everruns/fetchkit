@@ -328,6 +328,8 @@ HTML is automatically converted to markdown:
 - Code: Fenced blocks and inline backticks
 - Links: `[text](url)` format
 - Strips: scripts, styles, iframes, SVGs
+- Adds a bounded [Agent resources](docs/agent-discoverability.md) navigation appendix
+  when discoverable resources are available
 
 ## License
 
