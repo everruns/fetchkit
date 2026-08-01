@@ -24,7 +24,8 @@ Central dispatcher that:
 3. Falls back to default fetcher if none match
 4. Provides `register()` for adding custom fetchers
 5. Validates URL scheme and allow/block lists before dispatching
-6. Provides `fetch_to_file()` that dispatches to matched fetcher's `fetch_to_file()`
+6. Provides shared URL-policy validation for fetchers that derive secondary API URLs; every outbound destination must satisfy the same host, port, allow-prefix, and block-prefix policy before transport execution
+7. Provides `fetch_to_file()` that dispatches to matched fetcher's `fetch_to_file()`
 
 ### Built-in Fetchers
 
@@ -47,6 +48,7 @@ Central dispatcher that:
 - Uses GitHub's REST API for commit metadata, authorship, signature verification, changed-file statistics, and patches
 - Comparison responses include ahead/behind counts, merge base, and included commits
 - Limits each patch excerpt to 2,000 Unicode characters and enforces the configured overall response limit
+- Enforces full URL policy on the derived `https://api.github.com` request before transport execution
 - Response format field: `"github_commit"` or `"github_compare"`
 
 #### GitHubActionsRunFetcher

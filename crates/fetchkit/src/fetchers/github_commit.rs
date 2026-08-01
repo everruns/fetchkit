@@ -3,7 +3,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -176,6 +176,7 @@ impl Fetcher for GitHubCommitFetcher {
             ),
         };
         let api_url = api_url(owner, repo, endpoint, &label)?;
+        validate_url_policy(&api_url, options)?;
         let response = transport_request(
             api_url,
             reqwest::Method::GET,

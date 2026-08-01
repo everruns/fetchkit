@@ -210,30 +210,7 @@ impl FetcherRegistry {
 
         let parsed_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
 
-        options.validate_url(&parsed_url)?;
-
-        // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
-        // encoding-based bypasses (case, trailing dots, default ports)
-        // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks
-        if !options.allow_prefixes.is_empty() {
-            let allowed = options
-                .allow_prefixes
-                .iter()
-                .any(|prefix| url_matches_policy_prefix(&parsed_url, prefix));
-            if !allowed {
-                debug!(url = %request.url, "URL not in allow list");
-                return Err(FetchError::BlockedUrl);
-            }
-        }
-
-        if options
-            .block_prefixes
-            .iter()
-            .any(|prefix| url_matches_policy_prefix(&parsed_url, prefix))
-        {
-            debug!(url = %request.url, "URL matched block list");
-            return Err(FetchError::BlockedUrl);
-        }
+        validate_url_policy(&parsed_url, options)?;
 
         for fetcher in &self.fetchers {
             if fetcher.matches(&parsed_url) {
@@ -275,6 +252,39 @@ impl FetcherRegistry {
         tracing::debug!(fetcher = fetcher.name(), url = %request.url, "Using fetcher (save to file)");
         fetcher.fetch_to_file(&request, &options, saver).await
     }
+}
+
+/// Validate all operator URL policy for a request destination.
+///
+/// Specialized fetchers that derive secondary API URLs must call this before
+/// transport_request so allow/block/host/port policy applies to every egress hop.
+pub(crate) fn validate_url_policy(url: &Url, options: &FetchOptions) -> Result<(), FetchError> {
+    options.validate_url(url)?;
+
+    // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
+    // encoding-based bypasses (case, trailing dots, default ports)
+    // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks
+    if !options.allow_prefixes.is_empty() {
+        let allowed = options
+            .allow_prefixes
+            .iter()
+            .any(|prefix| url_matches_policy_prefix(url, prefix));
+        if !allowed {
+            debug!(url = %url, "URL not in allow list");
+            return Err(FetchError::BlockedUrl);
+        }
+    }
+
+    if options
+        .block_prefixes
+        .iter()
+        .any(|prefix| url_matches_policy_prefix(url, prefix))
+    {
+        debug!(url = %url, "URL matched block list");
+        return Err(FetchError::BlockedUrl);
+    }
+
+    Ok(())
 }
 
 // THREAT[TM-INPUT-010]: Invalid file destinations must fail before any outbound request.
