@@ -3,7 +3,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -83,7 +83,7 @@ impl Fetcher for JupyterNotebookFetcher {
         let page_url = Url::parse(&request.url).map_err(|_| FetchError::InvalidUrlScheme)?;
         let (raw_url, host) = Self::raw_url(&page_url)
             .ok_or_else(|| FetchError::FetcherError("Not a supported notebook URL".into()))?;
-        options.validate_url(&raw_url)?;
+        validate_url_policy(&raw_url, options)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
