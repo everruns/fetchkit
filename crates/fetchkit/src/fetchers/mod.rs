@@ -277,35 +277,6 @@ async fn preflight_save_path<'a>(
     Ok(Some(path))
 }
 
-pub(crate) fn validate_url_policy(url: &Url, options: &FetchOptions) -> Result<(), FetchError> {
-    options.validate_url(url)?;
-
-    // THREAT[TM-INPUT-002]: Normalize URL before prefix matching to prevent
-    // encoding-based bypasses (case, trailing dots, default ports)
-    // THREAT[TM-INPUT-007]: URL-aware prefix matching prevents subdomain tricks
-    if !options.allow_prefixes.is_empty() {
-        let allowed = options
-            .allow_prefixes
-            .iter()
-            .any(|prefix| url_matches_policy_prefix(url, prefix));
-        if !allowed {
-            debug!(%url, "URL not in allow list");
-            return Err(FetchError::BlockedUrl);
-        }
-    }
-
-    if options
-        .block_prefixes
-        .iter()
-        .any(|prefix| url_matches_policy_prefix(url, prefix))
-    {
-        debug!(%url, "URL matched block list");
-        return Err(FetchError::BlockedUrl);
-    }
-
-    Ok(())
-}
-
 // THREAT[TM-INPUT-002]: URL-aware prefix matching normalizes both the URL and the prefix
 // before comparison, preventing bypasses via encoding, case, or trailing dots.
 // THREAT[TM-INPUT-007]: Compares parsed URL components (scheme, host, path) instead of
