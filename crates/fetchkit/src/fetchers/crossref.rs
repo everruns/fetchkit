@@ -4,7 +4,7 @@ use crate::client::FetchOptions;
 use crate::convert::html_to_markdown;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -67,7 +67,7 @@ impl Fetcher for CrossrefFetcher {
             .path_segments_mut()
             .map_err(|_| FetchError::InvalidUrlScheme)?
             .push(&doi);
-        options.validate_url(&api_url)?;
+        validate_url_policy(&api_url, options)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
