@@ -3,7 +3,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -77,6 +77,7 @@ impl Fetcher for PubMedFetcher {
         let article = Self::parse_url(&page_url)
             .ok_or_else(|| FetchError::FetcherError("Not a supported PubMed URL".into()))?;
         let (api_url, host, format) = api_url(&article)?;
+        validate_url_policy(&api_url, options)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -287,6 +288,30 @@ fn truncate(mut value: String, max: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::DnsPolicy;
+    use crate::transport::{HttpTransport, TransportError, TransportRequest, TransportResponse};
+    use async_trait::async_trait;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct CountingTransport {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl HttpTransport for CountingTransport {
+        async fn execute(
+            &self,
+            _req: TransportRequest,
+        ) -> Result<TransportResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Other(
+                "transport should not be called".into(),
+            ))
+        }
+    }
 
     #[test]
     fn parses_pubmed_and_pmc_urls() {
@@ -317,6 +342,33 @@ mod tests {
         ] {
             assert!(PubMedFetcher::parse_url(&Url::parse(input).unwrap()).is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn blocks_pubmed_api_url_when_outbound_policy_disallows_it() {
+        let transport = Arc::new(CountingTransport {
+            calls: AtomicUsize::new(0),
+        });
+        let options = FetchOptions {
+            allow_prefixes: vec!["http://pubmed.ncbi.nlm.nih.gov".into()],
+            block_prefixes: vec!["https://www.ebi.ac.uk".into()],
+            blocked_hosts: vec!["www.ebi.ac.uk".into()],
+            allowed_ports: vec![80],
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport.clone()),
+            ..Default::default()
+        };
+
+        let error = PubMedFetcher::new()
+            .fetch(
+                &FetchRequest::new("https://pubmed.ncbi.nlm.nih.gov/12345/"),
+                &options,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, FetchError::BlockedUrl));
+        assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
