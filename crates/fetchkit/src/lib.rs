@@ -108,8 +108,8 @@ pub use transport::{
     TransportResponse,
 };
 pub use types::{
-    CrawlPage, CrawlResult, FetchRequest, FetchResponse, HttpMethod, PageLink, PageMetadata,
-    PageQuality,
+    AgentResource, CrawlPage, CrawlResult, FetchRequest, FetchResponse, HttpMethod, PageLink,
+    PageMetadata, PageQuality,
 };
 
 #[cfg(feature = "bot-auth")]

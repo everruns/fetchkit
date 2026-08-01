@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Discover agent-facing resources from HTTP and HTML declarations plus bounded
+  conventional probes, including `llms.txt`, `auth.md`, OAuth metadata, MCP
+  server cards, A2A agent cards, and Agent Skills indexes. Markdown responses
+  include a compact navigation appendix.
+
 ## [0.5.0] - 2026-07-14
 
 ### Highlights

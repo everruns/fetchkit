@@ -1,6 +1,6 @@
 //! HTML conversion utilities
 
-use crate::types::{PageLink, PageMetadata};
+use crate::types::{AgentResource, PageLink, PageMetadata};
 use url::Url;
 
 /// Check if content-type indicates markdown (e.g. `text/markdown`).
@@ -734,10 +734,33 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
                 }
                 "link" if !is_closing => {
                     if let Some(rel) = extract_attribute(&tag, "rel") {
-                        if rel == "canonical" {
+                        if rel
+                            .split_ascii_whitespace()
+                            .any(|value| value == "canonical")
+                        {
                             if let Some(href) = extract_attribute(&tag, "href") {
                                 if meta.canonical_url.is_none() && !href.is_empty() {
                                     meta.canonical_url = Some(href);
+                                }
+                            }
+                        }
+                        if is_agent_link_relation(&rel) {
+                            if let Some(href) = extract_attribute(&tag, "href") {
+                                if !href.is_empty() && meta.agent_resources.len() < 20 {
+                                    let media_type = extract_attribute(&tag, "type");
+                                    meta.agent_resources.push(AgentResource {
+                                        kind: classify_agent_resource(
+                                            &href,
+                                            &rel,
+                                            media_type.as_deref(),
+                                        ),
+                                        url: href,
+                                        source: "html-link".to_string(),
+                                        relation: Some(rel),
+                                        media_type,
+                                        title: extract_attribute(&tag, "title"),
+                                        verified: false,
+                                    });
                                 }
                             }
                         }
@@ -870,6 +893,65 @@ fn heading_level(tag_name: &str) -> Option<u8> {
 }
 
 /// Extract metadata from a `<meta>` tag.
+fn is_agent_link_relation(rel: &str) -> bool {
+    rel.split_ascii_whitespace().any(|value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "alternate"
+                | "service-desc"
+                | "describedby"
+                | "authorization_endpoint"
+                | "mcp"
+                | "a2a"
+                | "agent-card"
+                | "skill"
+        )
+    })
+}
+
+fn is_agent_metadata_name(name: &str) -> bool {
+    matches!(
+        name,
+        "llms"
+            | "llms-full"
+            | "auth"
+            | "service-desc"
+            | "api-catalog"
+            | "mcp"
+            | "a2a"
+            | "agent-card"
+            | "agent-skills"
+    )
+}
+
+pub(crate) fn classify_agent_resource(href: &str, rel: &str, media_type: Option<&str>) -> String {
+    let lower = href.to_ascii_lowercase();
+    let rel = rel.to_ascii_lowercase();
+    let media_type = media_type.unwrap_or_default().to_ascii_lowercase();
+    if lower.ends_with("/llms-full.txt") {
+        "llms-full-txt"
+    } else if lower.ends_with("/llms.txt") {
+        "llms-txt"
+    } else if lower.ends_with("/auth.md") {
+        "auth"
+    } else if lower.contains("oauth") || rel.contains("authorization") {
+        "oauth"
+    } else if lower.contains("mcp") || rel.contains("mcp") {
+        "mcp"
+    } else if lower.contains("agent") || rel.contains("a2a") || rel.contains("agent") {
+        "agent-card"
+    } else if lower.contains("skill") || rel.contains("skill") {
+        "agent-skills"
+    } else if rel.contains("service-desc") || media_type.contains("openapi") {
+        "api-description"
+    } else if media_type.contains("markdown") {
+        "markdown"
+    } else {
+        "linked-resource"
+    }
+    .to_string()
+}
+
 fn extract_meta_tag(tag: &str, meta: &mut PageMetadata) {
     // <meta name="..." content="...">
     if let Some(content) = extract_attribute(tag, "content") {
@@ -878,7 +960,24 @@ fn extract_meta_tag(tag: &str, meta: &mut PageMetadata) {
         }
         // Check name attribute
         if let Some(name) = extract_attribute(tag, "name") {
-            match name.to_lowercase().as_str() {
+            let name_lower = name.to_ascii_lowercase();
+            if is_agent_metadata_name(&name_lower)
+                && meta.agent_resources.len() < 20
+                && (content.starts_with('/')
+                    || content.starts_with("http://")
+                    || content.starts_with("https://"))
+            {
+                meta.agent_resources.push(AgentResource {
+                    kind: classify_agent_resource(&content, &name_lower, None),
+                    url: content.clone(),
+                    source: "metadata".to_string(),
+                    relation: Some(name_lower.clone()),
+                    media_type: None,
+                    title: None,
+                    verified: false,
+                });
+            }
+            match name_lower.as_str() {
                 "description" if meta.description.is_none() => {
                     meta.description = Some(content.clone());
                 }
@@ -1651,6 +1750,25 @@ mod tests {
             meta.canonical_url.as_deref(),
             Some("https://example.com/page")
         );
+    }
+
+    #[test]
+    fn test_extract_metadata_agent_links() {
+        let html = r#"<html><head>
+            <link rel="alternate" type="text/markdown" href="/page.md" title="Markdown">
+            <link rel="service-desc" type="application/openapi+json" href="/openapi.json">
+            <link rel="stylesheet" href="/style.css">
+            <meta name="mcp" content="/.well-known/mcp.json">
+        </head></html>"#;
+        let meta = extract_metadata(html);
+
+        assert_eq!(meta.agent_resources.len(), 3);
+        assert_eq!(meta.agent_resources[0].kind, "markdown");
+        assert_eq!(meta.agent_resources[0].url, "/page.md");
+        assert_eq!(meta.agent_resources[0].title.as_deref(), Some("Markdown"));
+        assert_eq!(meta.agent_resources[1].kind, "api-description");
+        assert_eq!(meta.agent_resources[2].kind, "mcp");
+        assert_eq!(meta.agent_resources[2].source, "metadata");
     }
 
     #[test]

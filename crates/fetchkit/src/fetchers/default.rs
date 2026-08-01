@@ -9,20 +9,21 @@
 
 use crate::client::FetchOptions;
 use crate::convert::{
-    extract_headings, extract_metadata, extract_readable_content, filter_excessive_newlines,
-    html_to_markdown_with_base_url, html_to_text, is_html, is_markdown_content_type,
-    is_plain_text_content_type, strip_boilerplate,
+    classify_agent_resource, extract_headings, extract_metadata, extract_readable_content,
+    filter_excessive_newlines, html_to_markdown_with_base_url, html_to_text, is_html,
+    is_markdown_content_type, is_plain_text_content_type, strip_boilerplate,
 };
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
 use crate::file_saver::FileSaver;
 use crate::transport::{BodyStream, TransportMethod, TransportRequest, TransportResponse};
-use crate::types::{FetchRequest, FetchResponse, HttpMethod, PageQuality};
+use crate::types::{AgentResource, FetchRequest, FetchResponse, HttpMethod, PageQuality};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_DISPOSITION, LOCATION, USER_AGENT};
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::{debug, error, warn};
 use url::Url;
@@ -95,6 +96,24 @@ pub(crate) const TRUNCATION_MESSAGE: &str = "\n\n[..content truncated...]";
 
 // THREAT[TM-SSRF-010]: Maximum redirects to follow with IP validation at each hop
 const MAX_REDIRECTS: usize = 10;
+
+// Agent discovery is deliberately shallow: fixed same-origin paths, no recursion.
+const AGENT_RESOURCE_PROBES: &[(&str, &str)] = &[
+    ("/llms.txt", "llms-txt"),
+    ("/llms-full.txt", "llms-full-txt"),
+    ("/auth.md", "auth"),
+    ("/.well-known/oauth-authorization-server", "oauth"),
+    ("/.well-known/openid-configuration", "openid"),
+    (
+        "/.well-known/oauth-protected-resource",
+        "oauth-protected-resource",
+    ),
+    ("/.well-known/api-catalog", "api-catalog"),
+    ("/.well-known/mcp/server-card.json", "mcp"),
+    ("/.well-known/agent-card.json", "agent-card"),
+    ("/.well-known/agent-skills/index.json", "agent-skills"),
+];
+const AGENT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 // THREAT[TM-DOS-001]: Default max body size (10 MB) to prevent memory exhaustion
 // THREAT[TM-DOS-003]: Also protects against compressed content bombs (gzip bombs)
@@ -215,6 +234,189 @@ fn extract_response_meta(headers: &[(String, String)], url: &str) -> ResponseMet
     }
 }
 
+fn resources_from_link_headers(values: &[String], base_url: &str) -> Vec<AgentResource> {
+    let Ok(base_url) = Url::parse(base_url) else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .flat_map(|value| split_link_header(value))
+        .filter_map(|part| {
+            let (target, params) = part.split_once('>')?;
+            let target = target.trim().strip_prefix('<')?;
+            let relation = link_parameter(params, "rel");
+            let media_type = link_parameter(params, "type");
+            if !is_agent_link(relation.as_deref(), media_type.as_deref(), target) {
+                return None;
+            }
+            let url = base_url.join(target).ok()?;
+            Some(AgentResource {
+                kind: classify_agent_resource(
+                    url.as_str(),
+                    relation.as_deref().unwrap_or_default(),
+                    media_type.as_deref(),
+                ),
+                url: url.to_string(),
+                source: "http-link".to_string(),
+                relation,
+                media_type,
+                title: link_parameter(params, "title"),
+                verified: false,
+            })
+        })
+        .collect()
+}
+
+fn split_link_header(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '"' => quoted = !quoted,
+            ',' if !quoted => {
+                parts.push(value[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(value[start..].trim());
+    parts
+}
+
+fn link_parameter(params: &str, name: &str) -> Option<String> {
+    params.split(';').skip(1).find_map(|part| {
+        let (key, value) = part.trim().split_once('=')?;
+        key.eq_ignore_ascii_case(name)
+            .then(|| value.trim().trim_matches('"').to_string())
+    })
+}
+
+fn is_agent_link(relation: Option<&str>, media_type: Option<&str>, target: &str) -> bool {
+    let relation = relation.unwrap_or_default().to_ascii_lowercase();
+    let media_type = media_type.unwrap_or_default().to_ascii_lowercase();
+    let target = target.to_ascii_lowercase();
+    let relevant_relation = relation.split_ascii_whitespace().any(|value| {
+        matches!(
+            value,
+            "alternate"
+                | "service-desc"
+                | "describedby"
+                | "authorization_endpoint"
+                | "mcp"
+                | "a2a"
+                | "agent-card"
+                | "skill"
+        )
+    });
+    relevant_relation
+        && (media_type.contains("markdown")
+            || media_type.contains("json")
+            || target.contains("llms")
+            || target.contains("auth.md")
+            || target.contains("well-known")
+            || relation != "alternate")
+}
+
+fn normalize_html_resources(resources: &mut Vec<AgentResource>, base_url: &str) {
+    let Ok(base_url) = Url::parse(base_url) else {
+        resources.clear();
+        return;
+    };
+    resources.retain_mut(|resource| match base_url.join(&resource.url) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => {
+            resource.url = url.to_string();
+            true
+        }
+        _ => false,
+    });
+}
+
+fn deduplicate_resources(resources: &mut Vec<AgentResource>) {
+    let mut seen = HashSet::new();
+    resources.retain(|resource| seen.insert(resource.url.clone()));
+    resources.truncate(20);
+}
+
+fn append_agent_resources(content: &mut String, resources: &[AgentResource]) {
+    content.push_str("\n\n---\n\n## Agent resources\n\n");
+    for resource in resources {
+        let label = resource.title.as_deref().unwrap_or(&resource.kind);
+        let status = if resource.verified {
+            "verified"
+        } else {
+            "advertised"
+        };
+        content.push_str(&format!(
+            "- [{label}]({}) — `{}`; {status} via {}\n",
+            resource.url, resource.kind, resource.source
+        ));
+    }
+}
+
+fn probe_content_type_matches(kind: &str, content_type: Option<&str>) -> bool {
+    let Some(content_type) = content_type else {
+        return true;
+    };
+    let content_type = content_type.to_ascii_lowercase();
+    match kind {
+        "llms-txt" | "llms-full-txt" | "auth" => {
+            content_type.starts_with("text/plain") || content_type.contains("markdown")
+        }
+        _ => content_type.contains("json"),
+    }
+}
+
+async fn probe_agent_resources(base_url: &str, options: &FetchOptions) -> Vec<AgentResource> {
+    let Ok(base_url) = Url::parse(base_url) else {
+        return Vec::new();
+    };
+    let origin = base_url.origin().ascii_serialization();
+    let probes = AGENT_RESOURCE_PROBES
+        .iter()
+        .map(|(path, kind)| ((*path).to_string(), (*kind).to_string()))
+        .collect::<Vec<_>>();
+    futures::stream::iter(probes)
+        .map(|(path, kind)| {
+            let url = Url::parse(&format!("{origin}{path}"));
+            async move {
+                let url = url.ok()?;
+                let mut headers = HeaderMap::new();
+                headers.insert(USER_AGENT, HeaderValue::from_static(DEFAULT_USER_AGENT));
+                let (response, redirects) = send_request_following_redirects(
+                    url.clone(),
+                    reqwest::Method::HEAD,
+                    headers,
+                    options,
+                    AGENT_PROBE_TIMEOUT,
+                )
+                .await
+                .ok()?;
+                if !(200..300).contains(&response.status) || !redirects.is_empty() {
+                    return None;
+                }
+                let meta = extract_response_meta(&response.headers, url.as_str());
+                if !probe_content_type_matches(&kind, meta.content_type.as_deref()) {
+                    return None;
+                }
+                Some(AgentResource {
+                    url: url.to_string(),
+                    kind,
+                    source: "probe".to_string(),
+                    relation: None,
+                    media_type: meta.content_type,
+                    title: None,
+                    verified: true,
+                })
+            }
+        })
+        .buffer_unordered(4)
+        .filter_map(|resource| async move { resource })
+        .collect()
+        .await
+}
+
 #[async_trait]
 impl Fetcher for DefaultFetcher {
     fn name(&self) -> &'static str {
@@ -270,6 +472,12 @@ impl Fetcher for DefaultFetcher {
 
         let status_code = response.status;
         let final_url = response.url.to_string();
+        let link_headers = response
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("link"))
+            .map(|(_, value)| value.clone())
+            .collect::<Vec<_>>();
         let meta = extract_response_meta(&response.headers, &final_url);
 
         // Handle 304 Not Modified (conditional request response)
@@ -411,6 +619,24 @@ impl Fetcher for DefaultFetcher {
         // Add truncation messages
         if truncated {
             final_content.push_str(TRUNCATION_MESSAGE);
+        }
+
+        let mut resources = resources_from_link_headers(&link_headers, &final_url);
+        if let Some(metadata) = &mut page_metadata {
+            normalize_html_resources(&mut metadata.agent_resources, &final_url);
+            resources.append(&mut metadata.agent_resources);
+        }
+        if wants_markdown {
+            resources.extend(probe_agent_resources(&final_url, options).await);
+        }
+        deduplicate_resources(&mut resources);
+        if !resources.is_empty() {
+            if wants_markdown {
+                append_agent_resources(&mut final_content, &resources);
+            }
+            page_metadata
+                .get_or_insert_with(Default::default)
+                .agent_resources = resources;
         }
 
         // Compute quality signals
@@ -1734,6 +1960,74 @@ mod tests {
         let response = fetcher.fetch(&request, &options).await.unwrap();
 
         assert!(response.redirect_chain.is_empty());
+    }
+
+    #[test]
+    fn test_parse_agent_resources_from_link_headers() {
+        let resources = resources_from_link_headers(
+            &[r#"</llms.txt>; rel="alternate"; type="text/markdown"; title="LLM index", </style.css>; rel="stylesheet""#.to_string()],
+            "https://example.com/docs/page",
+        );
+
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].url, "https://example.com/llms.txt");
+        assert_eq!(resources[0].kind, "llms-txt");
+        assert_eq!(resources[0].source, "http-link");
+        assert_eq!(resources[0].title.as_deref(), Some("LLM index"));
+        assert!(!resources[0].verified);
+    }
+
+    #[tokio::test]
+    async fn test_agent_resources_are_probed_and_appended_to_markdown() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/page"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"<html><head><link rel="service-desc" href="/openapi.json" type="application/openapi+json"></head><body><p>Page</p></body></html>"#)
+                    .insert_header("content-type", "text/html")
+                    .insert_header("link", r#"</llms.txt>; rel="alternate"; type="text/markdown""#),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("HEAD"))
+            .and(path("/llms.txt"))
+            .respond_with(ResponseTemplate::new(200).insert_header("content-type", "text/markdown"))
+            .mount(&server)
+            .await;
+        Mock::given(method("HEAD"))
+            .and(path("/auth.md"))
+            .respond_with(ResponseTemplate::new(200).insert_header("content-type", "text/markdown"))
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/page", server.uri())).as_markdown();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+        let resources = &response.metadata.as_ref().unwrap().agent_resources;
+
+        assert_eq!(
+            resources
+                .iter()
+                .filter(|resource| resource.kind == "llms-txt")
+                .count(),
+            1
+        );
+        assert!(resources
+            .iter()
+            .any(|resource| resource.kind == "auth" && resource.verified));
+        assert!(resources
+            .iter()
+            .any(|resource| resource.kind == "api-description"));
+        let content = response.content.unwrap();
+        assert!(content.contains("## Agent resources"));
+        assert!(content.contains("/auth.md"));
+        assert!(content.contains("/openapi.json"));
     }
 
     #[tokio::test]
