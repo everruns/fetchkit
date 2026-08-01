@@ -289,6 +289,10 @@ Fetchers receive `FetchOptions` for:
 - `respect_proxy_env` - Whether to honor `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
   from the process environment (default: disabled)
 
+Fetchers that derive secondary outbound URLs from a matched page URL must apply
+the same configured URL policy (`allow_prefixes`, `block_prefixes`,
+`blocked_hosts`, and `allowed_ports`) to each derived URL before sending it.
+
 ### Extensibility
 
 Design supports hundreds of fetchers by:

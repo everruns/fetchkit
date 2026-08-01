@@ -3,7 +3,7 @@
 use crate::client::FetchOptions;
 use crate::error::FetchError;
 use crate::fetchers::default::{read_full_body, transport_request};
-use crate::fetchers::Fetcher;
+use crate::fetchers::{validate_url_policy, Fetcher};
 use crate::types::{FetchRequest, FetchResponse};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
@@ -77,6 +77,7 @@ impl Fetcher for IetfRfcFetcher {
             .ok_or_else(|| FetchError::FetcherError("Not a supported RFC URL".into()))?;
         let source_url = Url::parse(&format!("https://www.rfc-editor.org/rfc/rfc{number}.txt"))
             .map_err(|_| FetchError::InvalidUrlScheme)?;
+        validate_url_policy(&source_url, options)?;
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -160,6 +161,11 @@ fn truncate(mut value: String, max: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::DnsPolicy;
+    use crate::transport::{HttpTransport, TransportError, TransportRequest, TransportResponse};
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn parses_supported_rfc_urls() {
@@ -199,5 +205,94 @@ mod tests {
     fn normalizes_line_endings_and_truncates_utf8_safely() {
         assert_eq!(normalize_text("one\r\ntwo\rthree"), "one\ntwo\nthree");
         assert_eq!(truncate("aéz".into(), 2), ("a".into(), true));
+    }
+
+    struct RecordingTransport {
+        calls: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl HttpTransport for RecordingTransport {
+        async fn execute(
+            &self,
+            req: TransportRequest,
+        ) -> Result<TransportResponse, TransportError> {
+            self.calls.lock().unwrap().push(req.url.to_string());
+            let stream = futures::stream::once(async { Ok(Bytes::from_static(b"RFC text")) });
+            Ok(TransportResponse {
+                status: 200,
+                url: req.url,
+                headers: vec![("content-type".to_string(), "text/plain".to_string())],
+                body: Box::pin(stream),
+            })
+        }
+    }
+
+    impl RecordingTransport {
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn canonical_source_url_must_pass_configured_policy() {
+        let transport = Arc::new(RecordingTransport {
+            calls: Mutex::new(Vec::new()),
+        });
+        let fetcher = IetfRfcFetcher::new();
+        let options = FetchOptions {
+            allow_prefixes: vec!["https://datatracker.ietf.org/doc".to_string()],
+            block_prefixes: vec!["https://www.rfc-editor.org/rfc".to_string()],
+            blocked_hosts: vec!["www.rfc-editor.org".to_string()],
+            allowed_ports: vec![443],
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport.clone()),
+            ..Default::default()
+        };
+
+        let err = fetcher
+            .fetch(
+                &FetchRequest {
+                    url: "https://datatracker.ietf.org/doc/html/rfc9110".to_string(),
+                    ..Default::default()
+                },
+                &options,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FetchError::BlockedUrl));
+        assert_eq!(transport.calls(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn canonical_source_url_fetches_when_policy_allows_it() {
+        let transport = Arc::new(RecordingTransport {
+            calls: Mutex::new(Vec::new()),
+        });
+        let fetcher = IetfRfcFetcher::new();
+        let options = FetchOptions {
+            allow_prefixes: vec!["https://www.rfc-editor.org/rfc".to_string()],
+            dns_policy: DnsPolicy::allow_all(),
+            transport: Some(transport.clone()),
+            ..Default::default()
+        };
+
+        let response = fetcher
+            .fetch(
+                &FetchRequest {
+                    url: "https://datatracker.ietf.org/doc/html/rfc9110".to_string(),
+                    ..Default::default()
+                },
+                &options,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.format.as_deref(), Some("ietf_rfc"));
+        assert_eq!(
+            transport.calls(),
+            vec!["https://www.rfc-editor.org/rfc/rfc9110.txt".to_string()]
+        );
     }
 }
