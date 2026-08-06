@@ -114,7 +114,8 @@ gh pr view --json url 2>/dev/null
 If no PR exists, create one:
 
 - Title: conventional commit style from the branch changes
-- Body: use What / Why / How / Risk / Checklist
+- Body: use `.github/pull_request_template.md` (What changed / Why / Before / After / Risk / Checklist); center it on functional change and impact, not a code-location walkthrough
+- Evidence: in the Before / After, attach proof — CLI/API output or logs (fetch results, MCP responses). Say so when there is no observable behavior change
 - Never add AI attribution or session links
 
 If a PR exists, update it if needed and report its URL.
