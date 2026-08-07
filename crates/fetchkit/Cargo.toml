@@ -30,6 +30,7 @@ futures = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
+pdf-inspector = { workspace = true }
 libc = { workspace = true }
 rakers = { workspace = true, optional = true }
 

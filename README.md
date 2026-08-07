@@ -10,7 +10,8 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **Agent content focus** - Optional low-noise extraction mode for AI agents
 - **Crawl discovery** - Optional bounded same-origin page discovery for AI agents
 - **HTML-to-Text** - Plain text extraction with clean formatting
-- **Binary detection** - Returns metadata only for images, PDFs, etc.
+- **Content processors** - Post-download extraction for text PDFs, with an extensible registry
+- **Binary detection** - Returns metadata only for unsupported binary formats
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
 - **Safety limits** - 10 MB default decompressed body cap with truncation
 - **URL filtering** - URL-aware allow/block lists for controlled access
@@ -35,6 +36,21 @@ fetchers match first; the default fetcher handles everything else.
 - `RSSFeedFetcher` - RSS and Atom feed URLs
 - `DocsSiteFetcher` - docs sites with `llms.txt`/`llms-full.txt` support
 - `DefaultFetcher` - all remaining HTTP/HTTPS URLs with HTML conversion, streaming, timeout handling, and binary detection
+
+## Built-in Content Processors
+
+Content processors run after a fetcher retrieves a bounded response body. They
+select by final URL and response media type, then turn non-text formats into
+LLM-friendly content without performing their own network requests.
+
+- `PdfProcessor` - text-based PDF classification and Markdown extraction via
+  [`pdf-inspector`](https://github.com/firecrawl/pdf-inspector); scanned or
+  image-only pages are reported as requiring OCR
+
+Custom processors implement `ContentProcessor` and can be registered in a
+`ContentProcessorRegistry`. Pass that registry to
+`FetcherRegistry::with_content_processors` to retain the built-in fetchers while
+customizing post-download processing.
 
 ## Installation
 
@@ -278,7 +294,7 @@ Errors are returned in the `error` field:
 - `Timeout` - Request timed out
 - `HttpError` - 4xx/5xx response
 - `ContentError` - Failed to read body
-- `BinaryContent` - Binary content not supported
+- `BinaryContent` - Binary content has no registered processor
 
 ## Security
 
@@ -313,11 +329,16 @@ See [`docs/hardening.md`](docs/hardening.md) for deployment guidance.
 
 Partial content is returned on body timeout or body-size limit with `truncated: true`.
 
-### Binary Content
+### PDF And Binary Content
 
-Automatically detected and returns metadata only for:
+When Markdown is requested, text-based PDFs are downloaded within the configured
+body limit and converted to Markdown. PDF parsing runs locally; no OCR service or
+additional network request is used. Scanned/image-only PDFs report `use_ocr` as the
+suggested next action.
+
+Other binary content returns metadata only:
 - Images, audio, video, fonts
-- PDFs, archives (zip, tar, rar, 7z)
+- Archives (zip, tar, rar, 7z)
 - Office documents
 
 ### HTML Conversion

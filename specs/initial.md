@@ -9,9 +9,9 @@
 ## Abstract
 
 Define a standalone Rust crate named `fetchkit` that implements the existing Fetchkit tool
-behavior: fetch URL content, optional HTML conversion, strict timeouts, and metadata-only
-responses for binary content. The crate also ships a CLI, an MCP server, and Python bindings
-that expose the same tool contract.
+behavior: fetch URL content, optional HTML and document conversion, strict timeouts, and
+metadata-only responses for unsupported binary content. The crate also ships a CLI, an MCP
+server, and Python bindings that expose the same tool contract.
 
 ## Requirements
 
@@ -206,7 +206,7 @@ Provide a builder to configure tool options, including:
 - Expose a single `web_fetch` tool over MCP.
 - Input schema: derived from `FetchRequest` via tool builder (disabled options omitted).
 - Output: Markdown with YAML frontmatter (same format as CLI `--output md`).
-- Tool description: "Fetch URL content as text or markdown; return metadata for binary responses or save bytes to file."
+- Tool description: "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses or save bytes to file."
 
 ### Python Bindings
 
@@ -304,10 +304,21 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
 #### Binary Content
 
 - Detect binary by Content-Type prefix:
-  - `image/`, `audio/`, `video/`, `application/octet-stream`, `application/pdf`,
+  - `image/`, `audio/`, `video/`, `application/octet-stream`, `application/pdf`, `application/x-pdf`,
     `application/zip`, `application/gzip`, `application/x-tar`, `application/x-rar`,
     `application/x-7z`, `application/vnd.ms-`, `application/vnd.openxmlformats`, `font/`.
-- For binary:
+- When `as_markdown` is requested, a matching registered content processor runs
+  on the bounded response body before the generic binary response is returned.
+- The built-in PDF processor:
+  - Matches `application/pdf`, `application/x-pdf`, or a `.pdf` URL served as
+    `application/octet-stream`/without Content-Type.
+  - Uses `pdf-inspector` on in-memory bytes and returns `format: "markdown"` for
+    PDFs with an extractable text layer.
+  - Performs no network requests and no OCR. Scanned/image-only pages produce
+    `pdf_requires_ocr` quality warnings and suggest `use_ocr`.
+  - Runs on a bounded blocking pool path, and both PDF input and extracted output
+    honor `max_body_size`. Partial PDF inputs are not parsed.
+- For binary without a matching processor:
   - Return metadata (`content_type`, `size`, `filename`, `last_modified`)
   - Include `error: "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."`
   - Omit `content`, `format`, `truncated`
@@ -420,7 +431,7 @@ Content is HTML if:
 
 Unit:
 - URL validation, method parsing.
-- Binary content detection.
+- Binary content detection and content-processor dispatch.
 - HTML conversion, entity decoding.
 - Newline filtering behavior.
 - DNS policy IP range blocking (IPv4, IPv6, mapped addresses).
@@ -428,7 +439,7 @@ Unit:
 Integration (mock HTTP server):
 - GET/HEAD with expected fields.
 - HTML -> markdown/text conversion.
-- Binary content metadata response.
+- PDF-to-Markdown response and unsupported binary metadata response.
 - 4xx/5xx status handling.
 - Last-Modified extraction.
 - Size correctness for text and binary.

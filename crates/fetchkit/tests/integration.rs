@@ -1,8 +1,9 @@
 //! Integration tests for Fetchkit using wiremock
 
 use fetchkit::{
-    fetch_with_options, DnsPolicy, FetchError, FetchOptions, FetchRequest, FetcherRegistry,
-    FileSaveError, FileSaver, HttpMethod, LocalFileSaver, SaveResult, Tool,
+    fetch_with_options, ContentProcessorRegistry, DnsPolicy, FetchError, FetchOptions,
+    FetchRequest, FetcherRegistry, FileSaveError, FileSaver, HttpMethod, LocalFileSaver,
+    SaveResult, Tool,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -32,6 +33,42 @@ fn test_tool_with_save() -> Tool {
         .block_private_ips(false)
         .enable_save_to_file(true)
         .build()
+}
+
+fn text_pdf(text: &str) -> Vec<u8> {
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('(', "\\(")
+        .replace(')', "\\)");
+    let stream = format!("BT /F1 24 Tf 72 720 Td ({escaped}) Tj ET");
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()),
+    ];
+
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+    }
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+    pdf.extend_from_slice(b"0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
 }
 
 struct RejectingFileSaver;
@@ -397,6 +434,57 @@ async fn test_binary_content() {
         quality.suggested_next_action.as_deref(),
         Some("use_save_to_file")
     );
+}
+
+#[tokio::test]
+async fn test_pdf_content_processor_returns_markdown() {
+    let mock_server = MockServer::start().await;
+    let body = text_pdf("Hello from fetched PDF");
+
+    Mock::given(method("GET"))
+        .and(path("/download"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(body.clone())
+                .insert_header("content-type", "application/pdf"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/download", mock_server.uri())).as_markdown();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
+
+    assert_eq!(resp.content_type.as_deref(), Some("application/pdf"));
+    assert_eq!(resp.size, Some(body.len() as u64));
+    assert_eq!(resp.format.as_deref(), Some("markdown"));
+    assert!(resp.content.unwrap().contains("Hello from fetched PDF"));
+    assert_eq!(
+        resp.metadata.unwrap().extraction_method.as_deref(),
+        Some("pdf_inspector")
+    );
+    assert!(resp.error.is_none());
+}
+
+#[tokio::test]
+async fn test_custom_content_processor_registry_can_disable_pdf_processing() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/document.pdf"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/pdf")
+                .insert_header("content-length", "4"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let registry = FetcherRegistry::with_content_processors(ContentProcessorRegistry::new());
+    let req = FetchRequest::new(format!("{}/document.pdf", mock_server.uri())).as_markdown();
+    let resp = registry.fetch(req, test_options()).await.unwrap();
+
+    assert!(resp.content.is_none());
+    assert!(resp.error.unwrap().contains("Binary content"));
 }
 
 #[tokio::test]

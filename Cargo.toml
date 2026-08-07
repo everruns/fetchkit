@@ -53,6 +53,9 @@ async-trait = "0.1"
 # Service trait
 tower = { version = "0.5", features = ["util"] }
 
+# Binary document extraction
+pdf-inspector = "0.1.7"
+
 # Platform filesystem flags
 libc = "0.2"
 

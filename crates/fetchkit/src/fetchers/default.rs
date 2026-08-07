@@ -8,6 +8,7 @@
 //! specialized fetchers.
 
 use crate::client::FetchOptions;
+use crate::content::{ContentProcessorInput, ContentProcessorRegistry};
 use crate::convert::{
     classify_agent_resource, extract_headings, extract_metadata, extract_readable_content,
     filter_excessive_newlines, html_to_markdown_with_base_url, html_to_text, is_html,
@@ -72,6 +73,7 @@ const BINARY_PREFIXES: &[&str] = &[
     "video/",
     "application/octet-stream",
     "application/pdf",
+    "application/x-pdf",
     "application/zip",
     "application/gzip",
     "application/x-tar",
@@ -126,12 +128,19 @@ pub(crate) const DEFAULT_MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 /// - HTML to markdown/text conversion
 /// - Binary content detection
 /// - Timeout handling with partial content
-pub struct DefaultFetcher;
+pub struct DefaultFetcher {
+    content_processors: ContentProcessorRegistry,
+}
 
 impl DefaultFetcher {
     /// Create a new default fetcher
     pub fn new() -> Self {
-        Self
+        Self::with_content_processors(ContentProcessorRegistry::with_defaults())
+    }
+
+    /// Create a default fetcher with a custom content processor registry.
+    pub fn with_content_processors(content_processors: ContentProcessorRegistry) -> Self {
+        Self { content_processors }
     }
 }
 
@@ -508,7 +517,107 @@ impl Fetcher for DefaultFetcher {
             });
         }
 
-        // Check for binary content
+        let parsed_final_url = Url::parse(&final_url).map_err(|_| FetchError::InvalidUrlScheme)?;
+        let content_processor = wants_markdown
+            .then(|| {
+                self.content_processors
+                    .find(&parsed_final_url, meta.content_type.as_deref())
+            })
+            .flatten();
+
+        // Content processors receive bytes only after the network path applies its
+        // timeout and decompressed-size limits.
+        if let Some(processor) = content_processor {
+            let processor_name = processor.name();
+            let (body, input_truncated) =
+                read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+            let size = body.len() as u64;
+
+            if input_truncated {
+                let mut quality = binary_quality_signal();
+                quality.warnings.push("truncated".to_string());
+                return Ok(FetchResponse {
+                    url: final_url,
+                    status_code,
+                    content_type: meta.content_type,
+                    size: Some(size),
+                    last_modified: meta.last_modified,
+                    etag: meta.etag,
+                    filename: meta.filename,
+                    truncated: Some(true),
+                    redirect_chain,
+                    error: Some(format!(
+                        "Content processor {processor_name} cannot process a partial response body"
+                    )),
+                    quality: Some(quality),
+                    ..Default::default()
+                });
+            }
+
+            debug!(processor = processor_name, "Processing response content");
+            let processed = processor
+                .process(ContentProcessorInput {
+                    url: parsed_final_url,
+                    content_type: meta.content_type.clone(),
+                    body,
+                })
+                .await;
+
+            return match processed {
+                Ok(mut processed) => {
+                    let output_truncated = processed
+                        .content
+                        .as_mut()
+                        .map(|content| truncate_string_to_max_bytes(content, max_body_size))
+                        .unwrap_or(false);
+                    if output_truncated {
+                        if let Some(content) = &mut processed.content {
+                            content.push_str(TRUNCATION_MESSAGE);
+                        }
+                        if let Some(quality) = &mut processed.quality {
+                            push_warning(&mut quality.warnings, "truncated");
+                            quality.score = (quality.score - 0.2).max(0.0);
+                        }
+                    }
+                    let word_count = processed.content.as_deref().map(count_words);
+                    Ok(FetchResponse {
+                        url: final_url,
+                        status_code,
+                        content_type: meta.content_type,
+                        size: Some(size),
+                        last_modified: meta.last_modified,
+                        etag: meta.etag,
+                        filename: meta.filename,
+                        format: processed.format,
+                        content: processed.content,
+                        truncated: output_truncated.then_some(true),
+                        metadata: processed.metadata,
+                        quality: processed.quality,
+                        word_count,
+                        redirect_chain,
+                        error: processed.error,
+                        ..Default::default()
+                    })
+                }
+                Err(error) => Ok(FetchResponse {
+                    url: final_url,
+                    status_code,
+                    content_type: meta.content_type,
+                    size: Some(size),
+                    last_modified: meta.last_modified,
+                    etag: meta.etag,
+                    filename: meta.filename,
+                    redirect_chain,
+                    error: Some(format!(
+                        "Content processor {processor_name} failed: {error}"
+                    )),
+                    quality: Some(binary_quality_signal()),
+                    ..Default::default()
+                }),
+            };
+        }
+
+        // Check for unsupported binary content
         if let Some(ref ct) = meta.content_type {
             if is_binary_content_type(ct) {
                 return Ok(FetchResponse {
@@ -1354,6 +1463,7 @@ mod tests {
         assert!(is_binary_content_type("audio/mp3"));
         assert!(is_binary_content_type("video/mp4"));
         assert!(is_binary_content_type("application/pdf"));
+        assert!(is_binary_content_type("application/x-pdf"));
         assert!(is_binary_content_type("application/octet-stream"));
         assert!(is_binary_content_type("application/zip"));
         assert!(is_binary_content_type("application/vnd.ms-excel"));

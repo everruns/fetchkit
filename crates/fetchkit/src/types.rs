@@ -346,10 +346,9 @@ pub struct AgentResource {
     pub verified: bool,
 }
 
-/// Structured metadata extracted from an HTML page.
+/// Structured metadata extracted from page or document content.
 ///
-/// All fields are optional — only populated when the corresponding
-/// HTML elements or meta tags are present.
+/// All fields are optional and populated only when available for the source type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct PageMetadata {
     /// Page title from `<title>` or `og:title`
@@ -571,7 +570,7 @@ pub struct FetchResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_written: Option<u64>,
 
-    /// Structured page metadata extracted from HTML
+    /// Structured page or document metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<PageMetadata>,
 
