@@ -2,7 +2,10 @@
 
 ## Abstract
 
-Fetcher system enables specialized content fetching based on URL patterns. Each fetcher handles specific URL types (e.g., GitHub repos, binary files) with custom logic, returning structured responses optimized for LLM consumption.
+Fetcher system enables specialized content retrieval based on URL patterns. A sibling content
+processor system transforms already-retrieved response bytes based on media type. This keeps
+network policy in fetchers while allowing formats such as PDF to produce structured responses
+optimized for LLM consumption.
 
 ## Requirements
 
@@ -27,6 +30,34 @@ Central dispatcher that:
 6. Provides shared URL-policy validation for fetchers that derive secondary API URLs; every outbound destination must satisfy the same policy before transport execution
 7. Provides `fetch_to_file()` that dispatches to matched fetcher's `fetch_to_file()`
 
+### Content Processor Trait And Registry
+
+Each content processor must implement:
+
+1. **`name()`** - Unique identifier for logging/debugging.
+2. **`matches(url, content_type)`** - Returns true when response metadata identifies
+   a supported format. Matching occurs before a body that would otherwise be rejected
+   as binary is downloaded.
+3. **`process(input)`** - Async processing of final URL, Content-Type, and body bytes.
+   Input bytes have already passed fetchkit's timeout and decompressed-size limits.
+
+`ContentProcessorRegistry` is ordered and uses the first matching processor. It provides
+`new()`, `with_defaults()`, `register()`, and `find()`. Processors do not perform network
+requests. `FetcherRegistry::with_content_processors()` retains the built-in fetchers while
+allowing callers to replace the default content processor registry.
+
+#### PdfProcessor
+
+- Matches PDF response media types, including extensionless download URLs. A `.pdf`
+  suffix is a fallback only for missing Content-Type or `application/octet-stream`.
+- Uses `pdf-inspector` to classify and extract Markdown from bounded in-memory bytes.
+- Runs CPU work through `spawn_blocking`, with at most two PDF documents processed
+  concurrently per process.
+- Does not perform OCR. Responses identify OCR-required or encoding-problem pages
+  through quality warnings and `suggested_next_action: "use_ocr"`.
+- Extracted output is capped by the same configured `max_body_size`; partial PDF input
+  is not passed to the parser.
+
 ### Built-in Fetchers
 
 #### DefaultFetcher (lowest priority)
@@ -36,7 +67,8 @@ Central dispatcher that:
 - Features:
   - GET and HEAD methods
   - HTML to markdown/text conversion (when enabled)
-  - Binary content detection (returns metadata only)
+  - Content processor dispatch before unsupported binary detection
+  - Binary content detection (returns metadata only when no processor matches)
   - Timeout handling with partial content support
   - Binary-aware file saving via `fetch_to_file()` override (accepts binary content when saving)
   - Decompressed body size cap with partial content truncation
@@ -328,6 +360,7 @@ Both built-in fetchers integrate resolve-then-check DNS validation:
 
 ```
 crates/fetchkit/src/
+├── content.rs           # ContentProcessor trait, registry, PDF processor
 ├── dns.rs               # DnsPolicy - SSRF prevention via resolve-then-check
 ├── file_saver.rs        # FileSaver trait, LocalFileSaver, SaveResult, FileSaveError
 ├── fetchers/

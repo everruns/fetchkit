@@ -56,6 +56,8 @@
 //! Fetchkit uses a pluggable fetcher system where specialized fetchers
 //! handle specific URL patterns. The [`FetcherRegistry`] dispatches
 //! requests to the appropriate fetcher based on URL matching.
+//! After retrieval, the [`ContentProcessorRegistry`] can transform bounded
+//! non-text response bytes based on media type.
 //!
 //! Built-in fetchers:
 //! - [`ArXivFetcher`] - arXiv paper metadata and abstract
@@ -76,6 +78,7 @@
 pub mod bot_auth;
 
 pub mod client;
+pub mod content;
 mod convert;
 mod crawl;
 mod dns;
@@ -87,6 +90,10 @@ pub mod transport;
 mod types;
 
 pub use client::{batch_fetch, batch_fetch_with_options, fetch, fetch_with_options, FetchOptions};
+pub use content::{
+    ContentProcessor, ContentProcessorError, ContentProcessorInput, ContentProcessorRegistry,
+    PdfProcessor, ProcessedContent,
+};
 pub use convert::{
     extract_headings, extract_metadata, extract_readable_content, html_to_markdown,
     html_to_markdown_with_base_url, html_to_text, strip_boilerplate,
@@ -120,7 +127,7 @@ pub const DEFAULT_USER_AGENT: &str = "Everruns Fetchkit/1.0";
 
 /// Backward-compatible full description string with file-saving enabled.
 pub const TOOL_DESCRIPTION: &str =
-    "Fetch URL content as text or markdown; return metadata for binary responses or save bytes to file.";
+    "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses or save bytes to file.";
 
 /// Backward-compatible help document with file-saving enabled.
 pub static TOOL_LLMTXT: std::sync::LazyLock<String> =

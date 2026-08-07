@@ -48,6 +48,7 @@ pub use wikipedia::WikipediaFetcher;
 pub use youtube::YouTubeFetcher;
 
 use crate::client::FetchOptions;
+use crate::content::ContentProcessorRegistry;
 use crate::error::FetchError;
 use crate::file_saver::FileSaver;
 use crate::types::{FetchRequest, FetchResponse};
@@ -159,6 +160,11 @@ impl FetcherRegistry {
     /// 9. DocsSiteFetcher - handles docs sites and llms.txt URLs
     /// 10. DefaultFetcher - handles all remaining HTTP/HTTPS URLs
     pub fn with_defaults() -> Self {
+        Self::with_content_processors(ContentProcessorRegistry::with_defaults())
+    }
+
+    /// Create the default fetcher registry with a custom content processor registry.
+    pub fn with_content_processors(content_processors: ContentProcessorRegistry) -> Self {
         let mut registry = Self::new();
         // Register specialized fetchers first (higher priority)
         // Notebooks precede the generic GitHub and GitLab blob fetchers.
@@ -185,7 +191,9 @@ impl FetcherRegistry {
         // DocsSiteFetcher for docs sites and llms.txt
         registry.register(Box::new(DocsSiteFetcher::new()));
         // Default fetcher last (catches all remaining URLs)
-        registry.register(Box::new(DefaultFetcher::new()));
+        registry.register(Box::new(DefaultFetcher::with_content_processors(
+            content_processors,
+        )));
         registry
     }
 

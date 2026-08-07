@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add a pluggable post-download `ContentProcessor` registry and built-in
+  `PdfProcessor` that extracts Markdown from text-based PDFs with local
+  `pdf-inspector` processing and explicit OCR guidance for unsupported pages.
 - Discover agent-facing resources from HTTP and HTML declarations plus bounded
   conventional probes, including `llms.txt`, `auth.md`, OAuth metadata, MCP
   server cards, A2A agent cards, and Agent Skills indexes. Markdown responses

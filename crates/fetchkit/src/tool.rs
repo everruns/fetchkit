@@ -969,24 +969,24 @@ fn display_name(locale: &str) -> &'static str {
 fn description(locale: &str, enable_save_to_file: bool) -> String {
     if is_ukrainian(locale) {
         if enable_save_to_file {
-            "Завантажити URL як текст або markdown; повернути метадані для бінарного вмісту або зберегти байти через save_to_file.".to_string()
+            "Завантажити URL як текст або markdown, включно з текстовими PDF; повернути метадані для непідтримуваного бінарного вмісту або зберегти байти через save_to_file.".to_string()
         } else {
-            "Завантажити URL як текст або markdown; повернути метадані для бінарного вмісту."
+            "Завантажити URL як текст або markdown, включно з текстовими PDF; повернути метадані для непідтримуваного бінарного вмісту."
                 .to_string()
         }
     } else if enable_save_to_file {
-        "Fetch URL content as text or markdown; return metadata for binary responses or save bytes with save_to_file.".to_string()
+        "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses or save bytes with save_to_file.".to_string()
     } else {
-        "Fetch URL content as text or markdown; return metadata for binary responses.".to_string()
+        "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses.".to_string()
     }
 }
 
 fn system_prompt(locale: &str, enable_save_to_file: bool, block_private_ips: bool) -> String {
     if is_ukrainian(locale) {
         let binary_rule = if enable_save_to_file {
-            "Бінарні відповіді повертають метадані; використовуйте save_to_file, щоб зберегти байти."
+            "Непідтримувані бінарні відповіді повертають метадані; використовуйте save_to_file, щоб зберегти байти."
         } else {
-            "Бінарні відповіді повертають лише метадані."
+            "Непідтримувані бінарні відповіді повертають лише метадані."
         };
         let network_rule = if block_private_ips {
             "Приватні IP-адреси заблоковані."
@@ -999,9 +999,9 @@ fn system_prompt(locale: &str, enable_save_to_file: bool, block_private_ips: boo
         )
     } else {
         let binary_rule = if enable_save_to_file {
-            "Binary responses return metadata; use save_to_file to persist bytes."
+            "Unsupported binary responses return metadata; use save_to_file to persist bytes."
         } else {
-            "Binary responses return metadata only."
+            "Unsupported binary responses return metadata only."
         };
         let network_rule = if block_private_ips {
             "Private IPs are blocked."
