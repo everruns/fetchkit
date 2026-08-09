@@ -35,19 +35,19 @@ Key capabilities:
 - URL filtering via allow/block lists
 - MCP server for AI tool integration
 
-### Specs
+### Knowledge
 
-`specs/` folder contains feature specifications outlining requirements for specific features and components. New code should comply with these specifications or propose changes to them.
+`knowledge/` is the canonical OKF v0.2 bundle and persistent project memory. Read relevant knowledge before changing behavior. Update it in the same change when decisions, behavior, constraints, threats, tests, or operations change. See `knowledge/knowledge-contract.md` for maintenance rules and run `python3 scripts/check_okf.py knowledge` after edits.
 
-Available specs:
-- `specs/initial.md` - WebFetch tool specification (types, behavior, conversions, error handling)
-- `specs/fetchers.md` - Pluggable fetcher system for URL-specific handling
-- `specs/release-process.md` - Agent-driven release and publish workflow
-- `specs/maintenance.md` - Periodic maintenance checklist (deps, docs, spec-code alignment)
-- `specs/threat-model.md` - Security threat model (SSRF, network, input validation, DoS)
-- `specs/bot-auth.md` - Web Bot Authentication (draft-meunier-web-bot-auth-architecture)
-
-Specification format: Abstract and Requirements sections.
+Available knowledge:
+- `knowledge/knowledge-contract.md` - Knowledge maintenance and OKF conformance rules
+- `knowledge/foundations/tool-contract.md` - Library, CLI, MCP, and Python behavior
+- `knowledge/foundations/fetchers.md` - Pluggable fetcher and content processor system
+- `knowledge/integrations/agent-discovery.md` - Bounded agent resource discovery
+- `knowledge/security/threat-model.md` - Security threats and mitigations
+- `knowledge/security/bot-auth.md` - Web Bot Authentication design
+- `knowledge/operations/maintenance.md` - Periodic maintenance checklist
+- `knowledge/operations/release-process.md` - Agent-driven release and publish workflow
 
 ### Shipping
 
@@ -104,7 +104,7 @@ crates/
 ├── fetchkit/           # Core library - types, fetch logic, HTML conversion
 ├── fetchkit-cli/       # CLI binary and MCP server
 └── fetchkit-python/    # Python bindings (PyO3)
-specs/                  # Feature specifications
+knowledge/              # Canonical OKF v0.2 engineering knowledge
 ```
 
 ### Naming
@@ -126,7 +126,7 @@ specs/                  # Feature specifications
 
 ### Releasing
 
-See `specs/release-process.md` for the release contract.
+See `knowledge/operations/release-process.md` for the release contract.
 
 Quick summary:
 1. Human asks agent: "Create release v0.2.0"
@@ -212,7 +212,7 @@ Before creating a pull request, ensure:
 
 8. **PR comments resolved**: No unaddressed review comments in PR
 
-9. **Specs**: If changes affect system behavior, update specs in `specs/`
+9. **Knowledge**: If changes affect durable engineering knowledge, update `knowledge/` and run its OKF checks
 
 10. **Docs**: If changes affect usage or configuration, update public docs in `docs/`
 
@@ -290,7 +290,7 @@ when possible). For changes with no observable behavior (pure refactor, docs), s
 - [ ] Unit tests are passed
 - [ ] Smoke tests are passed
 - [ ] Documentation is updated
-- [ ] Specs are up to date and not in conflict
+- [ ] Knowledge is up to date and not in conflict
 ```
 
 ### Testing the system
@@ -312,4 +312,4 @@ cargo run -p webfetch-cli -- --url https://example.com --as-markdown
 cargo run -p webfetch-cli -- mcp
 ```
 
-Tests use `wiremock` for HTTP mocking (no real external network calls). See `specs/initial.md` for test requirements.
+Tests use `wiremock` for HTTP mocking (no real external network calls). See `knowledge/foundations/tool-contract.md` for test requirements.

@@ -2,7 +2,7 @@
 //!
 //! Tests that validate the resolve-then-check DNS policy prevents
 //! server-side request forgery attacks. These tests verify the threat
-//! mitigations documented in specs/threat-model.md.
+//! mitigations documented in knowledge/security/threat-model.md.
 //!
 //! Safe-by-default: Tool::default() and fetch() block private IPs.
 //! Tests that need loopback (wiremock) must explicitly opt out.

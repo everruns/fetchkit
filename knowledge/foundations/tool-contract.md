@@ -1,10 +1,20 @@
+---
+type: Interface Contract
+title: Fetchkit Tool Contract
+description: Public library, CLI, MCP, and Python behavior for fetching and converting web content.
+tags:
+  - fetchkit
+  - api
+  - fetching
+---
+
 # Decisions:
-# - Spec mirrors current Fetchkit tool behavior (no new features) unless noted below.
+# - Contract mirrors current Fetchkit tool behavior (no new features) unless noted below.
 # - Rust is the source of truth: library + CLI + MCP server + Python bindings.
 # - HTML conversion is built-in (no external HTML conversion deps).
 # - `FetchRequest` and `FetchResponse` are defined in this crate (no external dependency).
 
-# Fetchkit Specification
+# Fetchkit Tool Contract
 
 ## Abstract
 
@@ -251,7 +261,7 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
 - Handles IPv6-mapped IPv4 addresses via canonicalization.
 - Pins validated IP via `reqwest::ClientBuilder::resolve()` to prevent DNS rebinding.
 - Blocked by default; opt out via `ToolBuilder::block_private_ips(false)`.
-- See `specs/threat-model.md` for full threat analysis.
+- See the [Threat Model](../security/threat-model.md) for full threat analysis.
 
 ### HTTP Behavior
 
@@ -453,3 +463,8 @@ SSRF security:
 - Default-blocks-loopback verification.
 - Explicit opt-out verification.
 - Script stripping in converted content.
+
+## See also
+
+- [Fetcher System](fetchers.md) — URL-specific retrieval and content processing architecture
+- [Threat Model](../security/threat-model.md) — security boundaries and mitigation requirements

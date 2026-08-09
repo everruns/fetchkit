@@ -42,8 +42,8 @@ For each qualifying issue (ordered by issue number), achieve ALL of these before
 
 - Minimal, focused changes
 - Positive and negative tests pass
-- Security tests added if change touches URL parsing, fetchers, HTML conversion, network, or user input (per `specs/threat-model.md`)
-- Threat model updated if new attack surface (per `specs/threat-model.md`)
+- Security tests added if change touches URL parsing, fetchers, HTML conversion, network, or user input (per `knowledge/security/threat-model.md`)
+- Threat model updated if new attack surface (per `knowledge/security/threat-model.md`)
 
 ### 4. Ship via `/ship`
 

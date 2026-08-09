@@ -1,4 +1,14 @@
-# Fetcher System Specification
+---
+type: Subsystem Design
+title: Fetcher System
+description: URL-specific fetchers, content processors, transport policy, extension points, and tests.
+tags:
+  - fetchkit
+  - fetching
+  - architecture
+---
+
+# Fetcher System
 
 ## Abstract
 
@@ -354,7 +364,7 @@ Both built-in fetchers integrate resolve-then-check DNS validation:
 - Enabled by default via `DnsPolicy::default()` (blocks private IPs)
 - Ignore ambient proxy env by default so shared runtimes do not silently route
   traffic through operator-provided proxies unless explicitly enabled
-- See `specs/threat-model.md` for threat IDs: TM-SSRF-001 through TM-SSRF-010
+- See the [Threat Model](../security/threat-model.md) for threat IDs: TM-SSRF-001 through TM-SSRF-010.
 
 ## Module Structure
 
@@ -448,3 +458,8 @@ Tests real URLs:
 3. Add `mod {name};` and `pub use {name}::*;` to `mod.rs`
 4. Register in `FetcherRegistry::with_defaults()` (before DefaultFetcher)
 5. Add test cases to `examples/fetch_urls.rs`
+
+## See also
+
+- [Fetchkit Tool Contract](tool-contract.md) — shared request, response, and policy behavior
+- [Threat Model](../security/threat-model.md) — network and SSRF requirements applied to every fetcher

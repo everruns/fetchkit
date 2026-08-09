@@ -31,7 +31,7 @@ let tool = ToolBuilder::new()
     .build();
 ```
 
-See [`specs/threat-model.md`](../specs/threat-model.md) for the full threat inventory.
+See [`knowledge/security/threat-model.md`](../knowledge/security/threat-model.md) for the full threat inventory.
 
 ## Web Bot Authentication
 
@@ -59,4 +59,4 @@ CLI usage:
 fetchkit fetch https://example.com --bot-auth-key <base64url-seed> --bot-auth-agent bot.example.com
 ```
 
-See [`specs/bot-auth.md`](../specs/bot-auth.md) for the full specification.
+See [`knowledge/security/bot-auth.md`](../knowledge/security/bot-auth.md) for the full protocol design.
