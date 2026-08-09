@@ -19,4 +19,4 @@ when possible). For changes with no observable behavior (pure refactor, docs), s
 - [ ] Unit tests are passed
 - [ ] Smoke tests are passed
 - [ ] Documentation is updated
-- [ ] Specs are up to date and not in conflict
+- [ ] Knowledge is up to date and not in conflict

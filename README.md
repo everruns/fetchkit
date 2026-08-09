@@ -316,7 +316,7 @@ DNS pinning prevents DNS rebinding attacks. IPv6-mapped IPv4 addresses are canon
 Redirects are followed manually in the default fetcher so each hop is revalidated against scheme and DNS policy. Allow/block prefixes are matched against parsed URLs rather than raw strings, which prevents lookalike host overmatches such as `allowed.example.com.evil.test`.
 Proxy environment variables are ignored by default. Use the hardened profile for cluster-facing deployments and opt in with `ToolBuilder::respect_proxy_env(true)` only when it is part of an intentional egress design.
 
-See [`specs/threat-model.md`](specs/threat-model.md) for the full threat model.
+See the [`knowledge/security/threat-model.md`](knowledge/security/threat-model.md) concept for the full threat model.
 See [`docs/hardening.md`](docs/hardening.md) for deployment guidance.
 
 ## Configuration

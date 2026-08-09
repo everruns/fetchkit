@@ -33,6 +33,14 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Install okf-lint
+        run: cargo install okf-lint --version 0.1.1 --locked
+      - name: Check knowledge bundle
+        run: |
+          python3 scripts/check_okf.py knowledge
+          okf-lint knowledge --max-line-length 10000
+      - name: Test repository scripts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
   test:
     name: Test

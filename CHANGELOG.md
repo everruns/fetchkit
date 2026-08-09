@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Replace the specification directory with an indexed OKF v0.2 knowledge
+  bundle, maintenance contract, update log, and CI conformance checks.
 - Add a pluggable post-download `ContentProcessor` registry and built-in
   `PdfProcessor` that extracts Markdown from text-based PDFs with local
   `pdf-inspector` processing and explicit OCR guidance for unsupported pages.

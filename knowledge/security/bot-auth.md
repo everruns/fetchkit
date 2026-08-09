@@ -1,3 +1,13 @@
+---
+type: Protocol Design
+title: Web Bot Authentication
+description: Optional Ed25519 HTTP message signing for cryptographically verifiable bot identity.
+tags:
+  - fetchkit
+  - authentication
+  - security
+---
+
 # Web Bot Authentication
 
 ## Abstract
@@ -84,3 +94,8 @@ key directory if they want origins to discover keys via `Signature-Agent`.
   and `Signature-Agent` headers are present on outgoing requests.
 - All tests run under `#[cfg(feature = "bot-auth")]` or with the feature
   enabled in dev-dependencies.
+
+## See also
+
+- [Threat Model](threat-model.md) — signing-key, replay, identity, and failure-mode analysis
+- [Fetchkit Tool Contract](../foundations/tool-contract.md) — configuration and outbound request behavior

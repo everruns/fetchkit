@@ -1,3 +1,13 @@
+---
+type: Interface Contract
+title: Agent Resource Discovery
+description: Bounded discovery and reporting of same-origin resources intended for AI agents.
+tags:
+  - fetchkit
+  - agents
+  - discovery
+---
+
 # Agent Resource Discovery
 
 ## Abstract
@@ -27,3 +37,8 @@ navigation links to Markdown output.
     requested and validated that exact resource.
 11. Discovery MUST NOT invoke APIs, authorization flows, payment protocols, or
     agent capabilities.
+
+## See also
+
+- [Fetcher System](../foundations/fetchers.md) — transport and URL policy used by discovery probes
+- [Threat Model](../security/threat-model.md) — discovery amplification and network-policy threats

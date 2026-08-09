@@ -1,9 +1,19 @@
+---
+type: Playbook
+title: Release Process
+description: Agent-driven version preparation, validation, GitHub release creation, and crates.io publishing.
+tags:
+  - fetchkit
+  - release
+  - operations
+---
+
 # Decisions:
-# - Spec mirrors Bashkit's agent-driven release flow, adapted to Fetchkit's crates.
+# - Process mirrors Bashkit's agent-driven release flow, adapted to Fetchkit's crates.
 # - GitHub Release creation is the handoff point to publishing; publish retries use `workflow_dispatch`.
 # - `fetchkit-python` is explicitly out of the crates.io publish flow until PyPI packaging exists.
 
-# Release Process Specification
+# Release Process
 
 ## Abstract
 
@@ -137,3 +147,8 @@ cargo build --workspace --exclude fetchkit-python --release
 ### Alignment
 
 - `.claude/commands/ship.md` must remain compatible with this release workflow
+
+## See also
+
+- [Periodic Maintenance](maintenance.md) — pre-release health and alignment checks
+- [Knowledge Maintenance Contract](../knowledge-contract.md) — synchronized knowledge update requirements

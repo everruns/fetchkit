@@ -29,7 +29,7 @@ Review the changes on this branch (`git diff origin/main...HEAD` and
    - Positive tests: happy path, valid inputs, expected state transitions
    - Negative tests: invalid inputs, error conditions, boundary cases
    - Security tests: if network, URL parsing, filtering, or HTML conversion changed,
-     add or extend tests tied to `specs/threat-model.md`
+     add or extend tests tied to `knowledge/security/threat-model.md`
 4. Run all tests: `cargo test --workspace`
 5. If any test fails, fix the code or test until green
 
@@ -37,8 +37,8 @@ Review the changes on this branch (`git diff origin/main...HEAD` and
 
 Review the change and update affected artifacts. Skip items that are not touched.
 
-1. Specs in `specs/`
-2. Threat model in `specs/threat-model.md` for new attack surfaces or mitigations
+1. Relevant concepts in `knowledge/`
+2. Threat model in `knowledge/security/threat-model.md` for new attack surfaces or mitigations
 3. Release process docs/spec if shipping or release behavior changed
 4. `AGENTS.md` if workflow, commands, or repo guidance changed
 5. Public docs in `docs/` if user-facing behavior changed
@@ -68,7 +68,7 @@ Analyze all changed code for security vulnerabilities.
 6. Unsafe code usage
 
 If security issues are found, fix them, add regression tests, and update
-`specs/threat-model.md` if a new threat must be tracked.
+`knowledge/security/threat-model.md` if a new threat must be tracked.
 
 ### Phase 4: Smoke Testing
 

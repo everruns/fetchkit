@@ -1,8 +1,18 @@
-# Periodic Maintenance Specification
+---
+type: Playbook
+title: Periodic Maintenance
+description: Recurring dependency, documentation, security, compatibility, and release-alignment checks.
+tags:
+  - fetchkit
+  - maintenance
+  - operations
+---
+
+# Periodic Maintenance
 
 ## Abstract
 
-Define recurring maintenance tasks to keep the fetchkit repository healthy, up-to-date, and well-documented. This spec is intended to be executed periodically (e.g., monthly or before each release) by a human or coding agent.
+Define recurring maintenance tasks to keep the fetchkit repository healthy, up-to-date, and well-documented. This playbook is intended to be executed periodically (e.g., monthly or before each release) by a human or coding agent.
 
 ## Requirements
 
@@ -41,18 +51,18 @@ Ensure all public items have good documentation suitable for docs.rs rendering.
 4. **No doc warnings** - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass
 5. **README sync** - Root README.md code snippets should be consistent with actual API
 
-### 3. Spec-Code Alignment
+### 3. Knowledge-Code Alignment
 
-Ensure specifications in `specs/` accurately describe the current code, and code conforms to specs.
+Ensure the canonical knowledge accurately describes the current code, and code conforms to documented contracts.
 
-1. **Type definitions** - Verify struct/enum fields in code match spec definitions (field names, types, optionality)
-2. **Error variants** - Verify `FetchError` variants in code match spec
-3. **Behavior** - Verify timeouts, binary detection, HTML conversion rules match spec descriptions
-4. **Fetcher system** - Verify fetcher trait, registry, and built-in fetchers match `specs/fetchers.md`
-5. **CLI flags** - Verify CLI argument names and behavior match spec
-6. **MCP protocol** - Verify MCP method names and schemas match spec
-7. **Update stale specs** - If code intentionally diverges from spec, update the spec to match
-8. **Update stale code** - If spec describes required behavior not in code, flag for implementation
+1. **Type definitions** - Verify struct/enum fields in code match contract definitions (field names, types, optionality)
+2. **Error variants** - Verify `FetchError` variants in code match the tool contract
+3. **Behavior** - Verify timeouts, binary detection, HTML conversion rules match documented behavior
+4. **Fetcher system** - Verify fetcher trait, registry, and built-in fetchers match the [Fetcher System](../foundations/fetchers.md)
+5. **CLI flags** - Verify CLI argument names and behavior match the tool contract
+6. **MCP protocol** - Verify MCP method names and schemas match the tool contract
+7. **Update stale knowledge** - If code intentionally diverges from documented behavior, update the knowledge to match
+8. **Update stale code** - If knowledge describes required behavior not in code, flag for implementation
 
 ### 4. Example Verification
 
@@ -84,11 +94,11 @@ Verify CI pipeline and development tooling are current.
 1. **Unreleased section** - `CHANGELOG.md` has an `[Unreleased]` section for pending changes
 2. **Version consistency** - Workspace version in root `Cargo.toml` matches latest changelog entry
 3. **Inter-crate versions** - Internal dependency versions (e.g., `fetchkit-cli` depending on `fetchkit`) are consistent
-4. **Release format** - Released changelog sections follow `specs/release-process.md`
+4. **Release format** - Released changelog sections follow the [Release Process](release-process.md)
 
 ### 8. Release Automation Alignment
 
-1. **Release spec sync** - `.claude/commands/ship.md` still matches `specs/release-process.md`
+1. **Release process sync** - [`.claude/commands/ship.md`](../../.claude/commands/ship.md) still matches the [Release Process](release-process.md)
 2. **Workflow triggers** - `.github/workflows/release.yml` and `.github/workflows/publish.yml` still reflect the documented release handoff
 3. **Publish scope** - crates.io publishing still targets `fetchkit` and `fetchkit-cli` only
 4. **Manual retry path** - `workflow_dispatch` remains available for release/publish recovery
@@ -96,3 +106,8 @@ Verify CI pipeline and development tooling are current.
 ## Execution
 
 Run this checklist by working through sections 1-8 in order. Fix issues as encountered. Commit fixes in logical groups following conventional commits. After completion, all CI checks should pass.
+
+## See also
+
+- [Release Process](release-process.md) — release preparation, verification, and publication contract
+- [Knowledge Maintenance Contract](../knowledge-contract.md) — rules for keeping this bundle synchronized

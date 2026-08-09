@@ -1,3 +1,13 @@
+---
+type: Threat Model
+title: Fetchkit Threat Model
+description: Assets, trust boundaries, threats, mitigations, and stable security identifiers for Fetchkit.
+tags:
+  - fetchkit
+  - security
+  - threat-model
+---
+
 # Threat Model
 
 ## Abstract
@@ -464,8 +474,8 @@ None — all previously open threats have been mitigated.
 
 ## References
 
-- `specs/initial.md` — Fetchkit tool specification
-- `specs/fetchers.md` — Pluggable fetcher system
+- [Fetchkit Tool Contract](../foundations/tool-contract.md) — public tool behavior and security controls
+- [Fetcher System](../foundations/fetchers.md) — pluggable fetchers and transport architecture
 - [OWASP SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
 - [CWE-918: Server-Side Request Forgery](https://cwe.mitre.org/data/definitions/918.html)
 
@@ -496,3 +506,8 @@ redirects, or receive credentials intended for another origin.
 
 **Verification**: Discovery uses the shared request transport and tests use a
 private-address policy override explicitly.
+
+## See also
+
+- [Web Bot Authentication](bot-auth.md) — request-signing protocol design
+- [Agent Resource Discovery](../integrations/agent-discovery.md) — bounded discovery behavior
