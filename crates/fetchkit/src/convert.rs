@@ -1,7 +1,28 @@
+// Decisions:
+// - Rich HTML-to-Markdown behavior is ported and adapted from Defuddle
+//   (Copyright (c) 2025 Steph Ango, MIT): https://github.com/kepano/defuddle
+// - Fetchkit's established behavior wins on conflicts; keep the implementation native
+//   and dependency-light rather than embedding a JavaScript runtime.
 //! HTML conversion utilities
 
 use crate::types::{AgentResource, PageLink, PageMetadata};
 use url::Url;
+
+/// Converts HTML into Markdown independently of retrieval and content extraction.
+pub trait HtmlToMarkdownConverter: Send + Sync {
+    /// Convert HTML while resolving relative navigation against `base_url`.
+    fn convert(&self, html: &str, base_url: &Url) -> String;
+}
+
+/// Fetchkit's built-in native HTML-to-Markdown converter.
+#[derive(Debug, Default)]
+pub struct BuiltinHtmlToMarkdownConverter;
+
+impl HtmlToMarkdownConverter for BuiltinHtmlToMarkdownConverter {
+    fn convert(&self, html: &str, base_url: &Url) -> String {
+        html_to_markdown_inner(html, Some(base_url))
+    }
+}
 
 /// Check if content-type indicates markdown (e.g. `text/markdown`).
 pub fn is_markdown_content_type(content_type: &Option<String>) -> bool {
@@ -68,15 +89,32 @@ pub fn html_to_markdown_with_base_url(html: &str, base_url: &str) -> String {
 }
 
 fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
+    html_to_markdown_at_depth(html, base_url, 0)
+}
+
+const MAX_MARKDOWN_CONVERSION_DEPTH: usize = 8;
+
+fn html_to_markdown_at_depth(html: &str, base_url: Option<&Url>, depth: usize) -> String {
+    if depth >= MAX_MARKDOWN_CONVERSION_DEPTH {
+        return html_to_text(html);
+    }
     let mut output = String::new();
     let mut in_skip_element = 0;
     let mut skip_elements: Vec<String> = Vec::new();
     let mut in_pre = false;
+    let mut pre_buffer = String::new();
+    let mut pre_language = None;
+    let mut inline_code_buffer: Option<String> = None;
     let mut in_blockquote = false;
+    let mut footnote_reference = false;
+    let mut skip_backlink = false;
+    let mut math_capture: Option<MathCapture> = None;
+    let mut callout_capture: Option<CalloutCapture> = None;
 
     // Link tracking: when we see <a href="...">, save href and record the output
     // position. On </a>, wrap the text collected since then in [text](href).
     let mut link_href: Option<String> = None;
+    let mut link_title: Option<String> = None;
     let mut link_start: usize = 0;
 
     // List tracking: stack of list types (true=ordered, false=unordered) with item counter
@@ -88,7 +126,6 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
     let mut current_row: Vec<String> = Vec::new();
     let mut in_cell = false;
     let mut cell_buf = String::new();
-    let mut is_header_row = false;
 
     let mut chars = html.chars().peekable();
 
@@ -113,7 +150,9 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
             };
 
             // THREAT[TM-CONV-001]: Strip script/style/iframe/svg to prevent injection
-            let skip_tags = ["script", "style", "noscript", "iframe", "svg"];
+            let skip_tags = [
+                "head", "script", "style", "noscript", "iframe", "svg", "template",
+            ];
             if skip_tags.contains(&tag_name) {
                 if is_closing {
                     if let Some(pos) = skip_elements.iter().rposition(|t| t == tag_name) {
@@ -128,6 +167,134 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
             }
 
             if in_skip_element > 0 {
+                continue;
+            }
+
+            if let Some(capture) = &mut callout_capture {
+                if !is_closing && tag_name == capture.root_tag {
+                    capture.depth += 1;
+                } else if is_closing && tag_name == capture.root_tag {
+                    capture.depth = capture.depth.saturating_sub(1);
+                    if capture.depth == 0 {
+                        let capture = callout_capture.take().expect("callout capture exists");
+                        output.push_str(&render_callout(capture, base_url, depth));
+                        continue;
+                    }
+                }
+                capture.html.push('<');
+                capture.html.push_str(&tag);
+                capture.html.push('>');
+                continue;
+            }
+
+            if !is_closing {
+                let class = extract_attribute(&tag, "class").unwrap_or_default();
+                if class
+                    .split_ascii_whitespace()
+                    .any(|value| value == "callout")
+                {
+                    if let Some(kind) = extract_attribute(&tag, "data-callout") {
+                        callout_capture = Some(CalloutCapture {
+                            root_tag: tag_name.to_string(),
+                            depth: 1,
+                            kind,
+                            fold: extract_attribute(&tag, "data-callout-fold"),
+                            html: String::new(),
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            if let Some(capture) = &mut math_capture {
+                if !is_closing && tag_name == capture.root_tag {
+                    capture.depth += 1;
+                } else if is_closing && tag_name == capture.root_tag {
+                    capture.depth = capture.depth.saturating_sub(1);
+                }
+                if tag_name == "annotation" {
+                    if is_closing {
+                        capture.in_annotation = false;
+                    } else if extract_attribute(&tag, "encoding")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("application/x-tex"))
+                    {
+                        capture.in_annotation = true;
+                    }
+                }
+                if capture.depth == 0 {
+                    let capture = math_capture.take().expect("math capture exists");
+                    output.push_str(&render_math(capture));
+                }
+                continue;
+            }
+
+            let class = (!is_closing)
+                .then(|| extract_attribute(&tag, "class"))
+                .flatten()
+                .unwrap_or_default();
+            let is_katex = class
+                .split_ascii_whitespace()
+                .any(|value| value == "katex" || value == "math");
+            if !is_closing && (tag_name == "math" || is_katex) {
+                math_capture = Some(MathCapture {
+                    root_tag: tag_name.to_string(),
+                    depth: 1,
+                    latex: extract_attribute(&tag, "data-latex")
+                        .or_else(|| extract_attribute(&tag, "alttext"))
+                        .unwrap_or_default(),
+                    annotation: String::new(),
+                    text: String::new(),
+                    in_annotation: false,
+                    display: extract_attribute(&tag, "display")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("block"))
+                        || class.split_ascii_whitespace().any(|value| {
+                            matches!(value, "katex-display" | "math-display" | "display-math")
+                        }),
+                });
+                continue;
+            }
+
+            if in_pre {
+                if tag_name == "pre" && is_closing {
+                    output.push_str(&render_fenced_code(&pre_buffer, pre_language.as_deref()));
+                    pre_buffer.clear();
+                    pre_language = None;
+                    in_pre = false;
+                } else if tag_name == "code" && !is_closing {
+                    pre_language = extract_code_language(&tag).or(pre_language);
+                } else if tag_name == "br" {
+                    pre_buffer.push('\n');
+                }
+                continue;
+            }
+
+            if let Some(code) = &mut inline_code_buffer {
+                if tag_name == "code" && is_closing {
+                    let code = std::mem::take(code);
+                    inline_code_buffer = None;
+                    output.push_str(&render_inline_code(&code));
+                }
+                continue;
+            }
+
+            if footnote_reference {
+                if tag_name == "sup" && is_closing {
+                    footnote_reference = false;
+                }
+                continue;
+            }
+
+            if skip_backlink {
+                if tag_name == "a" && is_closing {
+                    skip_backlink = false;
+                }
+                continue;
+            }
+
+            if in_cell && !matches!(tag_name, "th" | "td") {
+                cell_buf.push('<');
+                cell_buf.push_str(&tag);
+                cell_buf.push('>');
                 continue;
             }
 
@@ -178,6 +345,12 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                 }
                 "li" if !is_closing => {
                     output.push('\n');
+                    if let Some(id) = extract_attribute(&tag, "id")
+                        .and_then(|id| id.strip_prefix("fn:").map(str::to_string))
+                    {
+                        output.push_str(&format!("[^{id}]: "));
+                        continue;
+                    }
                     let depth = list_stack.len().saturating_sub(1);
                     for _ in 0..depth {
                         output.push_str("  ");
@@ -199,20 +372,23 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                 "em" | "i" => {
                     output.push('*');
                 }
+                "del" | "s" | "strike" => {
+                    output.push_str("~~");
+                }
+                "mark" => {
+                    output.push_str("==");
+                }
                 "pre" => {
                     if !is_closing {
-                        let language = extract_code_language(&tag);
-                        output.push_str("\n```");
-                        output.push_str(language.as_deref().unwrap_or_default());
-                        output.push('\n');
+                        pre_buffer.clear();
+                        pre_language = extract_code_language(&tag);
                         in_pre = true;
-                    } else {
-                        output.push_str("\n```\n");
-                        in_pre = false;
                     }
                 }
-                "code" if !in_pre => {
-                    output.push('`');
+                "code" => {
+                    if !is_closing {
+                        inline_code_buffer = Some(String::new());
+                    }
                 }
                 "blockquote" => {
                     if !is_closing {
@@ -226,8 +402,11 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                 "a" => {
                     if !is_closing {
                         if let Some(href) = extract_attribute(&tag, "href") {
-                            if !href.is_empty() {
+                            if href.starts_with("#fnref") {
+                                skip_backlink = true;
+                            } else if !href.is_empty() {
                                 link_href = Some(resolve_url(base_url, &href));
+                                link_title = extract_attribute(&tag, "title");
                                 link_start = output.len();
                             }
                         }
@@ -237,14 +416,52 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                         if text.is_empty() {
                             output.push_str(&format!("<{}>", href));
                         } else {
-                            output.push_str(&format!("[{}]({})", text, href));
+                            output.push_str(&format_markdown_link(
+                                &text,
+                                &href,
+                                link_title.take().as_deref(),
+                            ));
                         }
                     }
                 }
                 "img" if !is_closing => {
                     let alt = extract_attribute(&tag, "alt").unwrap_or_default();
-                    if let Some(src) = extract_attribute(&tag, "src") {
-                        output.push_str(&format!("![{}]({})", alt, resolve_url(base_url, &src)));
+                    if let Some(src) = best_image_source(&tag) {
+                        output.push('!');
+                        output.push_str(&format_markdown_link(
+                            &alt,
+                            &resolve_url(base_url, &src),
+                            extract_attribute(&tag, "title").as_deref(),
+                        ));
+                    }
+                }
+                "input" if !is_closing => {
+                    if extract_attribute(&tag, "type")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("checkbox"))
+                    {
+                        let checked = extract_attribute(&tag, "checked").is_some()
+                            || tag
+                                .split_ascii_whitespace()
+                                .any(|value| value.eq_ignore_ascii_case("checked"));
+                        output.push_str(if checked { "[x] " } else { "[ ] " });
+                    }
+                }
+                "figure" | "figcaption" | "details" => {
+                    output.push_str("\n\n");
+                }
+                "summary" => {
+                    if is_closing {
+                        output.push_str("**\n\n");
+                    } else {
+                        output.push_str("\n**");
+                    }
+                }
+                "sup" if !is_closing => {
+                    if let Some(id) = extract_attribute(&tag, "id")
+                        .and_then(|id| id.strip_prefix("fnref:").map(str::to_string))
+                    {
+                        output.push_str(&format!("[^{id}]"));
+                        footnote_reference = true;
                     }
                 }
                 // Table handling
@@ -261,14 +478,8 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                 "tr" => {
                     if !is_closing {
                         current_row.clear();
-                        is_header_row = false;
                     } else if in_table {
                         table_rows.push(current_row.clone());
-                        if is_header_row && table_rows.len() == 1 {
-                            let sep: Vec<String> =
-                                current_row.iter().map(|_| "---".to_string()).collect();
-                            table_rows.push(sep);
-                        }
                         current_row.clear();
                     }
                 }
@@ -276,10 +487,9 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                     if !is_closing {
                         in_cell = true;
                         cell_buf.clear();
-                        is_header_row = true;
                     } else {
                         in_cell = false;
-                        current_row.push(cell_buf.trim().to_string());
+                        current_row.push(render_table_cell(&cell_buf, base_url, depth));
                         cell_buf.clear();
                     }
                 }
@@ -289,7 +499,7 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
                         cell_buf.clear();
                     } else {
                         in_cell = false;
-                        current_row.push(cell_buf.trim().to_string());
+                        current_row.push(render_table_cell(&cell_buf, base_url, depth));
                         cell_buf.clear();
                     }
                 }
@@ -317,7 +527,20 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
             // Text content
             let decoded = decode_entity(c, &mut chars);
 
-            if in_cell {
+            if let Some(capture) = &mut callout_capture {
+                capture.html.push(decoded);
+            } else if let Some(capture) = &mut math_capture {
+                capture.text.push(decoded);
+                if capture.in_annotation {
+                    capture.annotation.push(decoded);
+                }
+            } else if in_pre {
+                pre_buffer.push(decoded);
+            } else if let Some(code) = &mut inline_code_buffer {
+                code.push(decoded);
+            } else if footnote_reference || skip_backlink {
+                continue;
+            } else if in_cell {
                 cell_buf.push(decoded);
             } else if in_table {
                 // Ignore text outside cells but inside table
@@ -329,7 +552,249 @@ fn html_to_markdown_inner(html: &str, base_url: Option<&Url>) -> String {
         }
     }
 
-    clean_whitespace(&output)
+    if let Some(capture) = callout_capture {
+        output.push_str(&render_callout(capture, base_url, depth));
+    }
+    if let Some(capture) = math_capture {
+        output.push_str(&render_math(capture));
+    }
+    if in_pre {
+        output.push_str(&render_fenced_code(&pre_buffer, pre_language.as_deref()));
+    }
+    if let Some(code) = inline_code_buffer {
+        output.push_str(&render_inline_code(&code));
+    }
+
+    clean_markdown_whitespace(&output)
+}
+
+fn clean_markdown_whitespace(markdown: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut fence_length = None;
+
+    for line in markdown.lines() {
+        let trimmed = line.trim_start();
+        let backticks = trimmed
+            .chars()
+            .take_while(|character| *character == '`')
+            .count();
+        let opens_fence = fence_length.is_none() && backticks >= 3;
+        let closes_fence = fence_length
+            .is_some_and(|length| backticks >= length && trimmed[backticks..].trim().is_empty());
+        let preserve = fence_length.is_some() || opens_fence;
+        let line = if preserve {
+            line.trim_end().to_string()
+        } else {
+            collapse_markdown_line(line)
+        };
+
+        if preserve || !line.is_empty() || lines.last().is_some_and(|line| !line.is_empty()) {
+            lines.push(line);
+        }
+        if opens_fence {
+            fence_length = Some(backticks);
+        } else if closes_fence {
+            fence_length = None;
+        }
+    }
+
+    while lines.first().is_some_and(String::is_empty) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+fn collapse_markdown_line(line: &str) -> String {
+    let characters: Vec<char> = line.chars().collect();
+    let mut output = String::new();
+    let mut inline_delimiter = None;
+    let mut pending_space = false;
+    let mut seen_nonwhitespace = false;
+    let mut index = 0;
+
+    while index < characters.len() {
+        if characters[index] == '`' {
+            if pending_space {
+                output.push(' ');
+                pending_space = false;
+            }
+            let start = index;
+            while index < characters.len() && characters[index] == '`' {
+                output.push('`');
+                index += 1;
+            }
+            let run = index - start;
+            seen_nonwhitespace = true;
+            inline_delimiter = match inline_delimiter {
+                Some(length) if length == run => None,
+                Some(length) => Some(length),
+                None => Some(run),
+            };
+            continue;
+        }
+
+        let character = characters[index];
+        if character.is_whitespace() {
+            if inline_delimiter.is_some() || !seen_nonwhitespace {
+                output.push(character);
+            } else {
+                pending_space = true;
+            }
+        } else {
+            if pending_space {
+                output.push(' ');
+                pending_space = false;
+            }
+            output.push(character);
+            seen_nonwhitespace = true;
+        }
+        index += 1;
+    }
+
+    output.trim_end().to_string()
+}
+
+struct MathCapture {
+    root_tag: String,
+    depth: usize,
+    latex: String,
+    annotation: String,
+    text: String,
+    in_annotation: bool,
+    display: bool,
+}
+
+struct CalloutCapture {
+    root_tag: String,
+    depth: usize,
+    kind: String,
+    fold: Option<String>,
+    html: String,
+}
+
+fn render_callout(capture: CalloutCapture, base_url: Option<&Url>, depth: usize) -> String {
+    let content = html_to_markdown_at_depth(&capture.html, base_url, depth + 1);
+    let fold = capture
+        .fold
+        .filter(|value| matches!(value.as_str(), "+" | "-"))
+        .unwrap_or_default();
+    let mut output = format!("\n\n> [!{}]{fold}", capture.kind);
+    for line in content.lines() {
+        output.push('\n');
+        output.push_str("> ");
+        output.push_str(line);
+    }
+    output.push_str("\n\n");
+    output
+}
+
+fn render_math(capture: MathCapture) -> String {
+    let latex = if !capture.annotation.trim().is_empty() {
+        capture.annotation.trim()
+    } else if !capture.latex.trim().is_empty() {
+        capture.latex.trim()
+    } else {
+        capture.text.trim()
+    };
+    if latex.is_empty() {
+        return String::new();
+    }
+    if capture.display {
+        format!("\n\n$$\n{latex}\n$$\n\n")
+    } else {
+        format!("${latex}$")
+    }
+}
+
+fn render_fenced_code(code: &str, language: Option<&str>) -> String {
+    let code = code.trim_matches('\n');
+    let fence = "`".repeat(max_backtick_run(code).saturating_add(1).max(3));
+    format!(
+        "\n{fence}{}\n{code}\n{fence}\n",
+        language.unwrap_or_default()
+    )
+}
+
+fn render_inline_code(code: &str) -> String {
+    let delimiter = "`".repeat(max_backtick_run(code).saturating_add(1).max(1));
+    let needs_padding = code.starts_with(['`', ' ']) || code.ends_with(['`', ' ']);
+    if needs_padding {
+        format!("{delimiter} {code} {delimiter}")
+    } else {
+        format!("{delimiter}{code}{delimiter}")
+    }
+}
+
+fn max_backtick_run(value: &str) -> usize {
+    value
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0)
+}
+
+fn format_markdown_link(text: &str, destination: &str, title: Option<&str>) -> String {
+    let text = if text.contains("](") {
+        text.to_string()
+    } else {
+        text.replace('\\', "\\\\")
+            .replace('[', "\\[")
+            .replace(']', "\\]")
+    };
+    let destination = if destination.contains([' ', '(', ')']) {
+        format!("<{}>", destination.replace('>', "%3E"))
+    } else {
+        destination.to_string()
+    };
+    let title = title
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" \"{}\"", title.replace('"', "\\\"")))
+        .unwrap_or_default();
+    format!("[{text}]({destination}{title})")
+}
+
+fn best_image_source(tag: &str) -> Option<String> {
+    let fallback = extract_attribute(tag, "src");
+    let Some(srcset) = extract_attribute(tag, "srcset") else {
+        return fallback;
+    };
+    srcset
+        .split(',')
+        .filter_map(|candidate| {
+            let mut parts = candidate.split_whitespace();
+            let url = parts.next()?.to_string();
+            let score = parts
+                .next()
+                .and_then(|descriptor| {
+                    descriptor
+                        .strip_suffix('w')
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .or_else(|| {
+                            descriptor
+                                .strip_suffix('x')
+                                .and_then(|value| value.parse::<f64>().ok())
+                                .map(|density| density * 1_000.0)
+                        })
+                })
+                .unwrap_or_default();
+            Some((url, score))
+        })
+        .max_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(url, _)| url)
+        .or(fallback)
+}
+
+fn render_table_cell(html: &str, base_url: Option<&Url>, depth: usize) -> String {
+    html_to_markdown_at_depth(html, base_url, depth + 1)
+        .replace('|', "\\|")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("<br>")
 }
 
 fn resolve_url(base_url: Option<&Url>, candidate: &str) -> String {
@@ -372,11 +837,29 @@ fn render_table(rows: &[Vec<String>], output: &mut String) {
         return;
     }
 
+    let width = rows.iter().map(Vec::len).max().unwrap_or_default();
+    if width == 0 {
+        return;
+    }
+    let has_separator = rows.get(1).is_some_and(|row| {
+        row.len() == width && row.iter().all(|cell| cell.trim_matches(':') == "---")
+    });
+
     output.push('\n');
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         output.push_str("| ");
-        output.push_str(&row.join(" | "));
+        for column in 0..width {
+            if column > 0 {
+                output.push_str(" | ");
+            }
+            output.push_str(row.get(column).map(String::as_str).unwrap_or_default());
+        }
         output.push_str(" |\n");
+        if index == 0 && !has_separator {
+            output.push_str("| ");
+            output.push_str(&vec!["---"; width].join(" | "));
+            output.push_str(" |\n");
+        }
     }
 }
 
@@ -423,7 +906,9 @@ pub fn html_to_text(html: &str) -> String {
             };
 
             // THREAT[TM-CONV-001]: Strip script/style/iframe/svg to prevent injection
-            let skip_tags = ["script", "style", "noscript", "iframe", "svg"];
+            let skip_tags = [
+                "head", "script", "style", "noscript", "iframe", "svg", "template",
+            ];
             if skip_tags.contains(&tag_name) {
                 if is_closing {
                     if let Some(pos) = skip_elements.iter().rposition(|t| t == tag_name) {
@@ -1593,6 +2078,19 @@ mod tests {
     }
 
     #[test]
+    fn test_html_conversion_strips_head_but_metadata_keeps_title() {
+        let html = "<html><head><title>Metadata Title</title><template>Hidden</template></head><body><h1>Visible</h1></body></html>";
+        let markdown = html_to_markdown(html);
+        let text = html_to_text(html);
+        let metadata = extract_metadata(html);
+
+        assert!(!markdown.contains("Metadata Title"), "Got: {markdown}");
+        assert!(!markdown.contains("Hidden"), "Got: {markdown}");
+        assert!(!text.contains("Metadata Title"), "Got: {text}");
+        assert_eq!(metadata.title.as_deref(), Some("Metadata Title"));
+    }
+
+    #[test]
     fn test_html_to_text_simple() {
         let html = "<p>Hello</p><p>World</p>";
         let text = html_to_text(html);
@@ -2113,6 +2611,114 @@ mod tests {
     }
 
     #[test]
+    fn test_html_to_markdown_uses_collision_safe_code_fences() {
+        let html = r#"<pre><code class="language-js">const  fence = ```;
+  return fence;</code></pre>"#;
+        let md = html_to_markdown(html);
+        assert!(
+            md.contains("````js\nconst  fence = ```;\n  return fence;\n````"),
+            "Got: {md}"
+        );
+    }
+
+    #[test]
+    fn test_html_to_markdown_closes_truncated_code_fence() {
+        let md = html_to_markdown(r#"<pre class="language-rust">fn main() {"#);
+        assert!(md.contains("```rust\nfn main() {\n```"), "Got: {md}");
+    }
+
+    #[test]
+    fn test_html_to_markdown_uses_collision_safe_inline_code() {
+        let md = html_to_markdown("<p>Run <code>use  `tick`</code> now.</p>");
+        assert!(md.contains("`` use  `tick` ``"), "Got: {md}");
+    }
+
+    #[test]
+    fn test_html_to_markdown_preserves_link_and_image_titles() {
+        let html = r#"<a href="/guide" title="API guide">Read</a><img src="small.png" srcset="medium.png 600w, large.png 1200w" alt="Diagram" title="Architecture">"#;
+        let md = html_to_markdown_with_base_url(html, "https://example.com/docs/");
+        assert!(
+            md.contains(r#"[Read](https://example.com/guide "API guide")"#),
+            "Got: {md}"
+        );
+        assert!(
+            md.contains(r#"![Diagram](https://example.com/docs/large.png "Architecture")"#),
+            "Got: {md}"
+        );
+    }
+
+    #[test]
+    fn test_html_to_markdown_preserves_linked_images() {
+        let md = html_to_markdown(r#"<a href="full.png"><img src="thumb.png" alt="Preview"></a>"#);
+        assert_eq!(md, "[![Preview](thumb.png)](full.png)");
+    }
+
+    #[test]
+    fn test_html_to_markdown_preserves_rich_table_cells() {
+        let html = r#"<table><tr><th>Value</th></tr><tr><td><strong>A | B</strong><br><a href="/docs">Docs</a></td></tr></table>"#;
+        let md = html_to_markdown_with_base_url(html, "https://example.com/");
+        assert!(
+            md.contains(r#"| **A \| B**<br>[Docs](https://example.com/docs) |"#),
+            "Got: {md}"
+        );
+    }
+
+    #[test]
+    fn test_html_to_markdown_standardized_footnotes() {
+        let html = r##"<p>Claim<sup id="fnref:1"><a href="#fn:1">1</a></sup>.</p><div id="footnotes"><ol><li id="fn:1">Supporting note <a href="#fnref:1">↩</a></li></ol></div>"##;
+        let md = html_to_markdown(html);
+        assert!(md.contains("Claim[^1]."), "Got: {md}");
+        assert!(md.contains("[^1]: Supporting note"), "Got: {md}");
+        assert!(!md.contains('↩'), "Got: {md}");
+    }
+
+    #[test]
+    fn test_html_to_markdown_math_strikethrough_and_highlight() {
+        let html = r#"<p><del>old</del> <mark>important</mark> <math data-latex="a^2+b^2=c^2"></math></p><math display="block" alttext="E=mc^2"></math>"#;
+        let md = html_to_markdown(html);
+        assert!(
+            md.contains("~~old~~ ==important== $a^2+b^2=c^2$"),
+            "Got: {md}"
+        );
+        assert!(md.contains("$$\nE=mc^2\n$$"), "Got: {md}");
+    }
+
+    #[test]
+    fn test_html_to_markdown_math_uses_text_fallback() {
+        let md = html_to_markdown(r#"<span class="math">x + y</span>"#);
+        assert_eq!(md, "$x + y$");
+    }
+
+    #[test]
+    fn test_html_to_markdown_standardized_callout() {
+        let html = r#"<div class="callout" data-callout="warning" data-callout-fold="-"><div class="callout-title">Caution</div><div class="callout-content"><p>Check the input.</p></div></div>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("> [!warning]-"), "Got: {md}");
+        assert!(md.contains("> Caution"), "Got: {md}");
+        assert!(md.contains("> Check the input."), "Got: {md}");
+    }
+
+    #[test]
+    fn test_html_to_markdown_bounds_nested_rich_conversion() {
+        let mut html = r#"<div class="callout" data-callout="note">"#.repeat(40);
+        html.push_str("Bounded payload");
+        html.push_str(&"</div>".repeat(40));
+
+        let md = html_to_markdown(&html);
+        assert!(md.contains("Bounded payload"), "Got: {md}");
+    }
+
+    #[test]
+    fn test_html_to_markdown_figures_details_and_tasks() {
+        let html = r#"<figure><img src="diagram.png" alt="Flow"><figcaption>System flow</figcaption></figure><details><summary>More</summary><p><input type="checkbox" checked>Complete</p></details>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("![Flow](diagram.png)"), "Got: {md}");
+        assert!(md.contains("System flow"), "Got: {md}");
+        assert!(md.contains("**More**"), "Got: {md}");
+        assert!(md.contains("[x] Complete"), "Got: {md}");
+    }
+
+    #[test]
     fn test_html_to_markdown_image_no_alt() {
         let html = r#"<img src="photo.jpg">"#;
         let md = html_to_markdown(html);
@@ -2158,7 +2764,17 @@ mod tests {
         </table>"#;
         let md = html_to_markdown(html);
         assert!(md.contains("| A | B |"), "Got: {}", md);
+        assert!(md.contains("| --- | --- |"), "Got: {}", md);
         assert!(md.contains("| C | D |"), "Got: {}", md);
+    }
+
+    #[test]
+    fn test_html_to_markdown_pads_uneven_table_rows() {
+        let html = r#"<table><tr><th colspan="2">Name</th></tr><tr><td>Ada</td><td>Lovelace</td></tr></table>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("| Name | |"), "Got: {md}");
+        assert!(md.contains("| --- | --- |"), "Got: {md}");
+        assert!(md.contains("| Ada | Lovelace |"), "Got: {md}");
     }
 
     #[test]

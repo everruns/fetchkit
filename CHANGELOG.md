@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replace the specification directory with an indexed OKF v0.2 knowledge
   bundle, maintenance contract, update log, and CI conformance checks.
+- Route HTML extraction and Markdown/text conversion through the pluggable
+  `ContentProcessor` registry with a built-in `HtmlProcessor` and replaceable
+  `HtmlToMarkdownConverter`.
+- Preserve richer HTML semantics in Markdown, including collision-safe code
+  fences, footnotes, math, callouts, highlights, strikethrough, image sources,
+  figure captions, task checkboxes, and valid tables with formatted cells.
 - Add a pluggable post-download `ContentProcessor` registry and built-in
   `PdfProcessor` that extracts Markdown from text-based PDFs with local
   `pdf-inspector` processing and explicit OCR guidance for unsupported pages.
@@ -18,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conventional probes, including `llms.txt`, `auth.md`, OAuth metadata, MCP
   server cards, A2A agent cards, and Agent Skills indexes. Markdown responses
   include a compact navigation appendix.
+
+### Changed
+
+- `ContentProcessorInput` now includes the requested output format and HTML
+  content focus. Custom processors constructing this public input must populate
+  the new fields.
 
 ## [0.5.0] - 2026-07-14
 

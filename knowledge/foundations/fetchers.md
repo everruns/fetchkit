@@ -14,7 +14,7 @@ tags:
 
 Fetcher system enables specialized content retrieval based on URL patterns. A sibling content
 processor system transforms already-retrieved response bytes based on media type. This keeps
-network policy in fetchers while allowing formats such as PDF to produce structured responses
+network policy in fetchers while allowing formats such as HTML and PDF to produce structured responses
 optimized for LLM consumption.
 
 ## Requirements
@@ -48,13 +48,33 @@ Each content processor must implement:
 2. **`matches(url, content_type)`** - Returns true when response metadata identifies
    a supported format. Matching occurs before a body that would otherwise be rejected
    as binary is downloaded.
-3. **`process(input)`** - Async processing of final URL, Content-Type, and body bytes.
+3. **`supports_output(output_format)`** - Returns whether the processor supports
+   Markdown, text, or focused raw output. Markdown-only is the default.
+4. **`accepts_truncated_input()`** - Returns whether partial bounded input is useful.
+   False is the default.
+5. **`process(input)`** - Async processing of final URL, Content-Type, body bytes,
+   requested output, and content focus.
    Input bytes have already passed fetchkit's timeout and decompressed-size limits.
 
 `ContentProcessorRegistry` is ordered and uses the first matching processor. It provides
-`new()`, `with_defaults()`, `register()`, and `find()`. Processors do not perform network
+`new()`, `with_defaults()`, `register()`, `find()`, and `find_for_output()`. Processors do not perform network
 requests. `FetcherRegistry::with_content_processors()` retains the built-in fetchers while
 allowing callers to replace the default content processor registry.
+
+#### HtmlProcessor
+
+- Matches `text/html` and `application/xhtml+xml`; body sniffing can dispatch HTML
+  served without an accurate Content-Type after bounded download.
+- Extracts metadata before applying `full`, `main`, `readable`, or `agent` focus.
+- Produces Markdown through a replaceable `HtmlToMarkdownConverter`, plain text,
+  or focused raw HTML.
+- Uses `BuiltinHtmlToMarkdownConverter` by default.
+- `DefaultFetcher::with_content_processors()` appends the built-in HTML processor
+  when the supplied registry has no processor named `html`, preserving HTML
+  conversion for registries that only customize binary formats. Register an
+  `HtmlProcessor` with a custom converter to replace it.
+- Accepts truncated input and returns useful partial content with truncation signals.
+- Runs after optional rendering; it performs no rendering or network requests.
 
 #### PdfProcessor
 
@@ -76,7 +96,7 @@ allowing callers to replace the default content processor registry.
 - Behavior: Standard HTTP fetch with HTML conversion support
 - Features:
   - GET and HEAD methods
-  - HTML to markdown/text conversion (when enabled)
+  - HTML processor dispatch for markdown/text conversion (when enabled)
   - Content processor dispatch before unsupported binary detection
   - Binary content detection (returns metadata only when no processor matches)
   - Timeout handling with partial content support

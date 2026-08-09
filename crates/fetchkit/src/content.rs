@@ -10,6 +10,10 @@ use thiserror::Error;
 use tokio::sync::Semaphore;
 use url::Url;
 
+use crate::convert::{
+    extract_headings, extract_metadata, extract_readable_content, filter_excessive_newlines,
+    html_to_text, strip_boilerplate, BuiltinHtmlToMarkdownConverter, HtmlToMarkdownConverter,
+};
 use crate::{PageMetadata, PageQuality};
 
 // pdf-inspector uses Rayon internally; bound concurrent documents so batch fetches
@@ -24,6 +28,48 @@ pub struct ContentProcessorInput {
     pub content_type: Option<String>,
     /// Response body after fetchkit's timeout and size limits were applied.
     pub body: Bytes,
+    /// Requested textual representation.
+    pub output_format: ContentOutputFormat,
+    /// HTML content-selection strategy.
+    pub content_focus: ContentFocus,
+}
+
+/// Requested representation produced by a content processor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ContentOutputFormat {
+    /// LLM-oriented Markdown.
+    #[default]
+    Markdown,
+    /// Plain text.
+    Text,
+    /// Focused HTML without Markdown/text serialization.
+    Raw,
+}
+
+/// HTML content-selection strategy applied before conversion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ContentFocus {
+    /// Preserve the complete document body.
+    #[default]
+    Full,
+    /// Prefer semantic `<main>` or `<article>` content.
+    Main,
+    /// Select the densest readable content candidate.
+    Readable,
+    /// Select readable content with a semantic-main fallback for agents.
+    Agent,
+}
+
+impl ContentFocus {
+    /// Parse the public request spelling, treating unknown values as `full`.
+    pub fn from_request(value: Option<&str>) -> Self {
+        match value {
+            Some(value) if value.eq_ignore_ascii_case("main") => Self::Main,
+            Some(value) if value.eq_ignore_ascii_case("readable") => Self::Readable,
+            Some(value) if value.eq_ignore_ascii_case("agent") => Self::Agent,
+            _ => Self::Full,
+        }
+    }
 }
 
 /// Content extracted from a non-text response.
@@ -58,6 +104,16 @@ pub trait ContentProcessor: Send + Sync {
     /// rejected as binary, so implementations must not inspect body bytes here.
     fn matches(&self, url: &Url, content_type: Option<&str>) -> bool;
 
+    /// Whether this processor can produce the requested representation.
+    fn supports_output(&self, output_format: ContentOutputFormat) -> bool {
+        output_format == ContentOutputFormat::Markdown
+    }
+
+    /// Whether bounded partial input remains useful to this processor.
+    fn accepts_truncated_input(&self) -> bool {
+        false
+    }
+
     /// Process an already-downloaded, bounded response body.
     async fn process(
         &self,
@@ -88,6 +144,7 @@ impl ContentProcessorRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(PdfProcessor));
+        registry.register(Box::new(HtmlProcessor::default()));
         registry
     }
 
@@ -96,12 +153,115 @@ impl ContentProcessorRegistry {
         self.processors.push(processor);
     }
 
+    pub(crate) fn contains_named(&self, name: &str) -> bool {
+        self.processors
+            .iter()
+            .any(|processor| processor.name() == name)
+    }
+
     /// Find the first processor matching response metadata.
     pub fn find(&self, url: &Url, content_type: Option<&str>) -> Option<&dyn ContentProcessor> {
         self.processors
             .iter()
             .find(|processor| processor.matches(url, content_type))
             .map(Box::as_ref)
+    }
+
+    /// Find the first matching processor that supports the requested output.
+    pub fn find_for_output(
+        &self,
+        url: &Url,
+        content_type: Option<&str>,
+        output_format: ContentOutputFormat,
+    ) -> Option<&dyn ContentProcessor> {
+        self.processors
+            .iter()
+            .find(|processor| {
+                processor.matches(url, content_type) && processor.supports_output(output_format)
+            })
+            .map(Box::as_ref)
+    }
+}
+
+/// Extracts and converts bounded HTML documents.
+pub struct HtmlProcessor {
+    markdown_converter: Box<dyn HtmlToMarkdownConverter>,
+}
+
+impl Default for HtmlProcessor {
+    fn default() -> Self {
+        Self::new(Box::<BuiltinHtmlToMarkdownConverter>::default())
+    }
+}
+
+impl HtmlProcessor {
+    /// Create an HTML processor using a caller-supplied Markdown converter.
+    pub fn new(markdown_converter: Box<dyn HtmlToMarkdownConverter>) -> Self {
+        Self { markdown_converter }
+    }
+}
+
+#[async_trait]
+impl ContentProcessor for HtmlProcessor {
+    fn name(&self) -> &'static str {
+        "html"
+    }
+
+    fn matches(&self, _url: &Url, content_type: Option<&str>) -> bool {
+        content_type
+            .and_then(|value| value.split(';').next())
+            .map(str::trim)
+            .is_some_and(|media_type| {
+                media_type.eq_ignore_ascii_case("text/html")
+                    || media_type.eq_ignore_ascii_case("application/xhtml+xml")
+            })
+    }
+
+    fn supports_output(&self, _output_format: ContentOutputFormat) -> bool {
+        true
+    }
+
+    fn accepts_truncated_input(&self) -> bool {
+        true
+    }
+
+    async fn process(
+        &self,
+        input: ContentProcessorInput,
+    ) -> Result<ProcessedContent, ContentProcessorError> {
+        let html = String::from_utf8_lossy(&input.body).into_owned();
+        let mut metadata = extract_metadata(&html);
+        metadata.headings = extract_headings(&html);
+
+        let (focused_html, extraction_method) = match input.content_focus {
+            ContentFocus::Full => (html, "full"),
+            ContentFocus::Main => (strip_boilerplate(&html), "main"),
+            ContentFocus::Readable => match extract_readable_content(&html) {
+                Some(readable) => (readable, "readable"),
+                None => (strip_boilerplate(&html), "readable_fallback_main"),
+            },
+            ContentFocus::Agent => match extract_readable_content(&html) {
+                Some(readable) => (readable, "agent_readable"),
+                None => (strip_boilerplate(&html), "agent_main"),
+            },
+        };
+
+        let (format, content) = match input.output_format {
+            ContentOutputFormat::Markdown => (
+                "markdown",
+                self.markdown_converter.convert(&focused_html, &input.url),
+            ),
+            ContentOutputFormat::Text => ("text", html_to_text(&focused_html)),
+            ContentOutputFormat::Raw => ("raw", focused_html),
+        };
+        metadata.extraction_method = Some(extraction_method.to_string());
+
+        Ok(ProcessedContent {
+            format: Some(format.to_string()),
+            content: Some(filter_excessive_newlines(&content)),
+            metadata: (!metadata.is_empty()).then_some(metadata),
+            ..Default::default()
+        })
     }
 }
 
@@ -202,6 +362,14 @@ fn comma_separated_pages(pages: &[u32]) -> String {
 mod tests {
     use super::*;
 
+    struct StubMarkdownConverter;
+
+    impl HtmlToMarkdownConverter for StubMarkdownConverter {
+        fn convert(&self, _html: &str, base_url: &Url) -> String {
+            format!("converted by stub for {base_url}")
+        }
+    }
+
     fn text_pdf(text: &str) -> Bytes {
         let escaped = text
             .replace('\\', "\\\\")
@@ -261,7 +429,85 @@ mod tests {
                 .map(ContentProcessor::name),
             Some("pdf")
         );
+        assert_eq!(
+            registry
+                .find_for_output(
+                    &url,
+                    Some("text/html; charset=utf-8"),
+                    ContentOutputFormat::Text,
+                )
+                .map(ContentProcessor::name),
+            Some("html")
+        );
         assert!(registry.find(&url, Some("image/png")).is_none());
+    }
+
+    #[tokio::test]
+    async fn html_processor_extracts_focused_markdown() {
+        let processor = HtmlProcessor::default();
+        let result = processor
+            .process(ContentProcessorInput {
+                url: Url::parse("https://example.com/article").unwrap(),
+                content_type: Some("text/html".to_string()),
+                body: Bytes::from_static(
+                    br#"<html><head><title>Example</title></head><body><nav>Menu</nav><main><h1>Article</h1><p>Useful text.</p></main></body></html>"#,
+                ),
+                output_format: ContentOutputFormat::Markdown,
+                content_focus: ContentFocus::Main,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.format.as_deref(), Some("markdown"));
+        assert!(result.content.as_deref().unwrap().contains("# Article"));
+        assert!(!result.content.as_deref().unwrap().contains("Menu"));
+        assert_eq!(
+            result.metadata.unwrap().extraction_method.as_deref(),
+            Some("main")
+        );
+    }
+
+    #[tokio::test]
+    async fn html_processor_preserves_focused_raw_html() {
+        let processor = HtmlProcessor::default();
+        let result = processor
+            .process(ContentProcessorInput {
+                url: Url::parse("https://example.com/article").unwrap(),
+                content_type: Some("text/html".to_string()),
+                body: Bytes::from_static(
+                    br#"<nav>Menu</nav><main><p>Useful <strong>HTML</strong>.</p></main>"#,
+                ),
+                output_format: ContentOutputFormat::Raw,
+                content_focus: ContentFocus::Main,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.format.as_deref(), Some("raw"));
+        assert_eq!(
+            result.content.as_deref(),
+            Some("<p>Useful <strong>HTML</strong>.</p>")
+        );
+    }
+
+    #[tokio::test]
+    async fn html_processor_accepts_custom_markdown_converter() {
+        let processor = HtmlProcessor::new(Box::new(StubMarkdownConverter));
+        let result = processor
+            .process(ContentProcessorInput {
+                url: Url::parse("https://example.com/article").unwrap(),
+                content_type: Some("text/html".to_string()),
+                body: Bytes::from_static(b"<p>Ignored by stub</p>"),
+                output_format: ContentOutputFormat::Markdown,
+                content_focus: ContentFocus::Full,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.content.as_deref(),
+            Some("converted by stub for https://example.com/article")
+        );
     }
 
     #[tokio::test]
@@ -272,6 +518,8 @@ mod tests {
                 url: Url::parse("https://example.com/document").unwrap(),
                 content_type: Some("application/pdf".to_string()),
                 body: text_pdf("Hello from PDF"),
+                output_format: ContentOutputFormat::Markdown,
+                content_focus: ContentFocus::Full,
             })
             .await
             .unwrap();

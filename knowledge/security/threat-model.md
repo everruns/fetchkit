@@ -351,21 +351,21 @@ which could contain hostnames or URL details.
 | ID | Threat | Severity | Mitigation | Status |
 |----|--------|----------|------------|--------|
 | TM-CONV-001 | Script injection in converted markdown | Low | `<script>` tags stripped during HTML-to-markdown conversion | MITIGATED |
-| TM-CONV-002 | Excessive memory from deeply nested HTML | Medium | No recursion depth limit in HTML parser | **ACCEPTED** |
+| TM-CONV-002 | Excessive memory from deeply nested HTML | Medium | Bounded body plus an 8-level nested conversion limit | MITIGATED |
 | TM-CONV-003 | Markdown injection (crafted HTML producing executable markdown) | Low | Fetchkit produces markdown text; execution depends on downstream consumer | **BY DESIGN** |
 | TM-CONV-004 | Entity decoding producing unexpected characters | Low | Limited entity set decoded; no arbitrary numeric entity expansion | MITIGATED |
 
 ### Mitigation Details
 
 **TM-CONV-001 — Script stripping (MITIGATED):**
-The HTML converter skips content inside `script`, `style`, `noscript`, `iframe`,
-and `svg` tags, preventing script injection into the converted output.
+The HTML converter skips content inside `head`, `script`, `style`, `noscript`,
+`template`, `iframe`, and `svg` tags, preventing script injection into the
+converted output.
 
-**TM-CONV-002 — Deeply nested HTML (ACCEPTED):**
-The HTML parser is character-based and iterative (not recursive), so stack
-overflow from deep nesting is unlikely. However, deeply nested structures could
-produce large output. This is accepted as the body size limit (TM-DOS-001)
-provides upstream protection.
+**TM-CONV-002 — Deeply nested HTML (MITIGATED):**
+The main HTML parser is character-based and iterative. Rich table cells and
+callouts recursively reuse conversion, capped at 8 levels with plain-text
+fallback. The body size limit (TM-DOS-001) also bounds input and output growth.
 
 ## 7. Bot Authentication (TM-AUTH)
 
@@ -426,7 +426,6 @@ None — all previously open threats have been mitigated.
 | TM-DOS-005 | DNS delay | System resolver; typical behavior |
 | TM-LEAK-002 | DNS error detail | Hostname visible but not internal IPs |
 | TM-LEAK-005 | Timing channels | Low risk; timeout masks some signal |
-| TM-CONV-002 | Deep HTML nesting | Iterative parser; upstream size limits |
 | TM-AUTH-001 | Signing key in memory | Same as any in-process secret; OS protections apply |
 
 ### Caller Responsibilities
@@ -458,7 +457,7 @@ None — all previously open threats have been mitigated.
 | First-byte timeout | TM-DOS | 1-second connect+response timeout |
 | Body timeout | TM-DOS | 30-second streaming body timeout |
 | Body size limit | TM-DOS | Configurable `max_body_size` (default 10 MB) |
-| Script tag stripping | TM-CONV | Skip `script`/`style`/`noscript`/`iframe`/`svg` |
+| Script tag stripping | TM-CONV | Skip `head`/`script`/`style`/`noscript`/`template`/`iframe`/`svg` |
 | Binary detection | TM-CONV | Content-Type prefix matching |
 | New client per request | TM-NET | No connection pool state leakage |
 | Pluggable transport keeps policy in fetchkit | TM-SSRF, TM-NET | `HttpTransport` only performs the socket send; DNS policy (resolve-then-check), redirect following, and proxy suppression stay in fetchkit. `TransportRequest.pinned_addrs` (from `DnsPolicy`) constrains a custom transport to fetchkit-validated addresses; the default `ReqwestTransport` enforces this via `resolve_to_addrs()` |

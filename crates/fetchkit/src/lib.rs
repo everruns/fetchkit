@@ -57,7 +57,7 @@
 //! handle specific URL patterns. The [`FetcherRegistry`] dispatches
 //! requests to the appropriate fetcher based on URL matching.
 //! After retrieval, the [`ContentProcessorRegistry`] can transform bounded
-//! non-text response bytes based on media type.
+//! response bytes based on media type and requested output.
 //!
 //! Built-in fetchers:
 //! - [`ArXivFetcher`] - arXiv paper metadata and abstract
@@ -91,12 +91,13 @@ mod types;
 
 pub use client::{batch_fetch, batch_fetch_with_options, fetch, fetch_with_options, FetchOptions};
 pub use content::{
-    ContentProcessor, ContentProcessorError, ContentProcessorInput, ContentProcessorRegistry,
-    PdfProcessor, ProcessedContent,
+    ContentFocus, ContentOutputFormat, ContentProcessor, ContentProcessorError,
+    ContentProcessorInput, ContentProcessorRegistry, HtmlProcessor, PdfProcessor, ProcessedContent,
 };
 pub use convert::{
     extract_headings, extract_metadata, extract_readable_content, html_to_markdown,
     html_to_markdown_with_base_url, html_to_text, strip_boilerplate,
+    BuiltinHtmlToMarkdownConverter, HtmlToMarkdownConverter,
 };
 pub use dns::DnsPolicy;
 pub use error::{FetchError, ToolError};

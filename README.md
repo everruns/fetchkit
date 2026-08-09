@@ -40,9 +40,12 @@ fetchers match first; the default fetcher handles everything else.
 ## Built-in Content Processors
 
 Content processors run after a fetcher retrieves a bounded response body. They
-select by final URL and response media type, then turn non-text formats into
-LLM-friendly content without performing their own network requests.
+select by final URL, response media type, and requested output, then turn
+documents into LLM-friendly content without performing their own network
+requests.
 
+- `HtmlProcessor` - metadata and focused-content extraction followed by native
+  Markdown or text conversion; accepts a custom `HtmlToMarkdownConverter`
 - `PdfProcessor` - text-based PDF classification and Markdown extraction via
   [`pdf-inspector`](https://github.com/firecrawl/pdf-inspector); scanned or
   image-only pages are reported as requiring OCR
@@ -346,12 +349,15 @@ Other binary content returns metadata only:
 HTML is automatically converted to markdown:
 - Headers: `h1-h6` → `#` to `######`
 - Lists: Proper nesting with 2-space indent
-- Code: Fenced blocks and inline backticks
-- Links: `[text](url)` format
-- Strips: scripts, styles, iframes, SVGs
+- Code: Language-aware, collision-safe fences and inline backticks
+- Links/images: Titles, relative-URL resolution, and highest-resolution `srcset`
+- Tables: Valid Markdown with formatted cells and escaped pipes
+- Rich content: Footnotes, LaTeX math, callouts, figures, highlights,
+  strikethrough, details, and task checkboxes
+- Strips: document head, scripts, styles, templates, iframes, SVGs
 - Adds a bounded [Agent resources](docs/agent-discoverability.md) navigation appendix
   when discoverable resources are available
 
 ## License
 
-MIT
+MIT. See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for adapted components.
