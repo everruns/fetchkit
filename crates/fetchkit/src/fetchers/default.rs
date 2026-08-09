@@ -8,17 +8,21 @@
 //! specialized fetchers.
 
 use crate::client::FetchOptions;
-use crate::content::{ContentProcessorInput, ContentProcessorRegistry};
+use crate::content::{
+    ContentFocus, ContentOutputFormat, ContentProcessorInput, ContentProcessorRegistry,
+    HtmlProcessor,
+};
 use crate::convert::{
-    classify_agent_resource, extract_headings, extract_metadata, extract_readable_content,
-    filter_excessive_newlines, html_to_markdown_with_base_url, html_to_text, is_html,
-    is_markdown_content_type, is_plain_text_content_type, strip_boilerplate,
+    classify_agent_resource, filter_excessive_newlines, is_html, is_markdown_content_type,
+    is_plain_text_content_type,
 };
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
 use crate::file_saver::FileSaver;
 use crate::transport::{BodyStream, TransportMethod, TransportRequest, TransportResponse};
-use crate::types::{AgentResource, FetchRequest, FetchResponse, HttpMethod, PageQuality};
+use crate::types::{
+    AgentResource, FetchRequest, FetchResponse, HttpMethod, PageMetadata, PageQuality,
+};
 use crate::DEFAULT_USER_AGENT;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -139,7 +143,10 @@ impl DefaultFetcher {
     }
 
     /// Create a default fetcher with a custom content processor registry.
-    pub fn with_content_processors(content_processors: ContentProcessorRegistry) -> Self {
+    pub fn with_content_processors(mut content_processors: ContentProcessorRegistry) -> Self {
+        if !content_processors.contains_named("html") {
+            content_processors.register(Box::new(HtmlProcessor::default()));
+        }
         Self { content_processors }
     }
 }
@@ -518,108 +525,22 @@ impl Fetcher for DefaultFetcher {
         }
 
         let parsed_final_url = Url::parse(&final_url).map_err(|_| FetchError::InvalidUrlScheme)?;
-        let content_processor = wants_markdown
-            .then(|| {
-                self.content_processors
-                    .find(&parsed_final_url, meta.content_type.as_deref())
-            })
-            .flatten();
-
-        // Content processors receive bytes only after the network path applies its
-        // timeout and decompressed-size limits.
-        if let Some(processor) = content_processor {
-            let processor_name = processor.name();
-            let (body, input_truncated) =
-                read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
-            let size = body.len() as u64;
-
-            if input_truncated {
-                let mut quality = binary_quality_signal();
-                quality.warnings.push("truncated".to_string());
-                return Ok(FetchResponse {
-                    url: final_url,
-                    status_code,
-                    content_type: meta.content_type,
-                    size: Some(size),
-                    last_modified: meta.last_modified,
-                    etag: meta.etag,
-                    filename: meta.filename,
-                    truncated: Some(true),
-                    redirect_chain,
-                    error: Some(format!(
-                        "Content processor {processor_name} cannot process a partial response body"
-                    )),
-                    quality: Some(quality),
-                    ..Default::default()
-                });
-            }
-
-            debug!(processor = processor_name, "Processing response content");
-            let processed = processor
-                .process(ContentProcessorInput {
-                    url: parsed_final_url,
-                    content_type: meta.content_type.clone(),
-                    body,
-                })
-                .await;
-
-            return match processed {
-                Ok(mut processed) => {
-                    let output_truncated = processed
-                        .content
-                        .as_mut()
-                        .map(|content| truncate_string_to_max_bytes(content, max_body_size))
-                        .unwrap_or(false);
-                    if output_truncated {
-                        if let Some(content) = &mut processed.content {
-                            content.push_str(TRUNCATION_MESSAGE);
-                        }
-                        if let Some(quality) = &mut processed.quality {
-                            push_warning(&mut quality.warnings, "truncated");
-                            quality.score = (quality.score - 0.2).max(0.0);
-                        }
-                    }
-                    let word_count = processed.content.as_deref().map(count_words);
-                    Ok(FetchResponse {
-                        url: final_url,
-                        status_code,
-                        content_type: meta.content_type,
-                        size: Some(size),
-                        last_modified: meta.last_modified,
-                        etag: meta.etag,
-                        filename: meta.filename,
-                        format: processed.format,
-                        content: processed.content,
-                        truncated: output_truncated.then_some(true),
-                        metadata: processed.metadata,
-                        quality: processed.quality,
-                        word_count,
-                        redirect_chain,
-                        error: processed.error,
-                        ..Default::default()
-                    })
-                }
-                Err(error) => Ok(FetchResponse {
-                    url: final_url,
-                    status_code,
-                    content_type: meta.content_type,
-                    size: Some(size),
-                    last_modified: meta.last_modified,
-                    etag: meta.etag,
-                    filename: meta.filename,
-                    redirect_chain,
-                    error: Some(format!(
-                        "Content processor {processor_name} failed: {error}"
-                    )),
-                    quality: Some(binary_quality_signal()),
-                    ..Default::default()
-                }),
-            };
-        }
+        let output_format = if wants_markdown {
+            ContentOutputFormat::Markdown
+        } else if wants_text {
+            ContentOutputFormat::Text
+        } else {
+            ContentOutputFormat::Raw
+        };
+        let metadata_processor = self.content_processors.find_for_output(
+            &parsed_final_url,
+            meta.content_type.as_deref(),
+            output_format,
+        );
 
         // Check for unsupported binary content
         if let Some(ref ct) = meta.content_type {
-            if is_binary_content_type(ct) {
+            if metadata_processor.is_none() && is_binary_content_type(ct) {
                 return Ok(FetchResponse {
                     url: final_url,
                     status_code,
@@ -641,7 +562,7 @@ impl Fetcher for DefaultFetcher {
 
         // THREAT[TM-DOS-001]: Read body with timeout and size limit
         // THREAT[TM-DOS-003]: Size limit also protects against compressed content bombs
-        let (body, truncated) =
+        let (body, input_truncated) =
             read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
         let size = body.len() as u64;
 
@@ -661,24 +582,167 @@ impl Fetcher for DefaultFetcher {
         } else {
             None
         };
-        let truncated = truncated || rendered_truncated;
+        let truncated = input_truncated || rendered_truncated;
         let is_paywall = detect_paywall(&content);
-        let wants_main = request.wants_main_content();
-        let wants_readable = request.wants_readable_content();
-        let wants_agent = request.wants_agent_content();
 
-        // Extract structured metadata from HTML content (before boilerplate stripping)
-        let mut page_metadata = if is_html_content {
-            let mut pm = extract_metadata(&content);
-            pm.headings = extract_headings(&content);
-            if pm.is_empty() {
-                None
+        let content_processor = metadata_processor.or_else(|| {
+            if is_html_content {
+                self.content_processors.find_for_output(
+                    &parsed_final_url,
+                    Some("text/html"),
+                    output_format,
+                )
             } else {
-                Some(pm)
+                None
             }
-        } else {
-            None
-        };
+        });
+
+        if let Some(processor) = content_processor {
+            let processor_name = processor.name();
+            if truncated && !processor.accepts_truncated_input() {
+                let mut quality = binary_quality_signal();
+                quality.warnings.push("truncated".to_string());
+                return Ok(FetchResponse {
+                    url: final_url,
+                    status_code,
+                    content_type: meta.content_type,
+                    size: Some(size),
+                    last_modified: meta.last_modified,
+                    etag: meta.etag,
+                    filename: meta.filename,
+                    truncated: Some(true),
+                    redirect_chain,
+                    error: Some(format!(
+                        "Content processor {processor_name} cannot process a partial response body"
+                    )),
+                    quality: Some(quality),
+                    rendered_by,
+                    ..Default::default()
+                });
+            }
+
+            debug!(processor = processor_name, "Processing response content");
+            let processor_body = if rendered_by.is_some() {
+                Bytes::from(content.clone())
+            } else {
+                body.clone()
+            };
+            let processed = processor
+                .process(ContentProcessorInput {
+                    url: parsed_final_url,
+                    content_type: meta.content_type.clone(),
+                    body: processor_body,
+                    output_format,
+                    content_focus: ContentFocus::from_request(request.content_focus.as_deref()),
+                })
+                .await;
+
+            return match processed {
+                Ok(mut processed) => {
+                    let output_truncated = processed
+                        .content
+                        .as_mut()
+                        .map(|content| truncate_string_to_max_bytes(content, max_body_size))
+                        .unwrap_or(false);
+                    let truncated = truncated || output_truncated;
+                    let mut final_content = processed.content.take();
+
+                    let mut resources = resources_from_link_headers(&link_headers, &final_url);
+                    if is_html_content {
+                        if let Some(metadata) = &mut processed.metadata {
+                            normalize_html_resources(&mut metadata.agent_resources, &final_url);
+                            resources.append(&mut metadata.agent_resources);
+                        }
+                        if wants_markdown {
+                            resources.extend(probe_agent_resources(&final_url, options).await);
+                        }
+                    }
+                    deduplicate_resources(&mut resources);
+                    if !resources.is_empty() {
+                        if wants_markdown {
+                            if let Some(content) = &mut final_content {
+                                append_agent_resources(content, &resources);
+                            }
+                        }
+                        processed
+                            .metadata
+                            .get_or_insert_with(Default::default)
+                            .agent_resources = resources;
+                    }
+
+                    if truncated {
+                        if let Some(content) = &mut final_content {
+                            content.push_str(TRUNCATION_MESSAGE);
+                        }
+                    }
+                    let word_count = final_content.as_deref().map(count_words);
+                    let extraction_method = processed
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.extraction_method.as_deref());
+                    let had_processor_quality = processed.quality.is_some();
+                    let mut quality = processed.quality.unwrap_or_else(|| {
+                        final_content
+                            .as_deref()
+                            .map_or_else(binary_quality_signal, |content| {
+                                compute_quality_signal(
+                                    content,
+                                    status_code,
+                                    truncated,
+                                    is_paywall,
+                                    extraction_method,
+                                    word_count.unwrap_or_default(),
+                                )
+                            })
+                    });
+                    if truncated {
+                        push_warning(&mut quality.warnings, "truncated");
+                        if had_processor_quality {
+                            quality.score = (quality.score - 0.2).max(0.0);
+                        }
+                    }
+
+                    Ok(FetchResponse {
+                        url: final_url,
+                        status_code,
+                        content_type: meta.content_type,
+                        size: Some(size),
+                        last_modified: meta.last_modified,
+                        etag: meta.etag,
+                        filename: meta.filename,
+                        format: processed.format,
+                        content: final_content,
+                        truncated: truncated.then_some(true),
+                        metadata: processed.metadata,
+                        quality: Some(quality),
+                        word_count,
+                        redirect_chain,
+                        error: processed.error,
+                        is_paywall: is_paywall.then_some(true),
+                        rendered_by,
+                        ..Default::default()
+                    })
+                }
+                Err(error) => Ok(FetchResponse {
+                    url: final_url,
+                    status_code,
+                    content_type: meta.content_type,
+                    size: Some(size),
+                    last_modified: meta.last_modified,
+                    etag: meta.etag,
+                    filename: meta.filename,
+                    redirect_chain,
+                    error: Some(format!(
+                        "Content processor {processor_name} failed: {error}"
+                    )),
+                    quality: Some(binary_quality_signal()),
+                    rendered_by,
+                    ..Default::default()
+                }),
+            };
+        }
+
+        let mut page_metadata: Option<PageMetadata> = None;
 
         let (format, final_content, extraction_method) =
             if is_markdown_content_type(&meta.content_type) && wants_markdown {
@@ -690,34 +754,7 @@ impl Fetcher for DefaultFetcher {
                 debug!("Content-type is plain text; skipping HTML conversion");
                 ("text".to_string(), content, Some("native_text"))
             } else if is_html_content {
-                let (html, method) = if wants_agent {
-                    if let Some(readable) = extract_readable_content(&content) {
-                        (readable, "agent_readable")
-                    } else {
-                        (strip_boilerplate(&content), "agent_main")
-                    }
-                } else if wants_readable {
-                    if let Some(readable) = extract_readable_content(&content) {
-                        (readable, "readable")
-                    } else {
-                        (strip_boilerplate(&content), "readable_fallback_main")
-                    }
-                } else if wants_main {
-                    (strip_boilerplate(&content), "main")
-                } else {
-                    (content, "full")
-                };
-                if wants_markdown {
-                    (
-                        "markdown".to_string(),
-                        html_to_markdown_with_base_url(&html, &final_url),
-                        Some(method),
-                    )
-                } else if wants_text {
-                    ("text".to_string(), html_to_text(&html), Some(method))
-                } else {
-                    ("raw".to_string(), html, Some(method))
-                }
+                ("raw".to_string(), content, Some("full"))
             } else {
                 ("raw".to_string(), content, Some("raw"))
             };
@@ -1451,10 +1488,38 @@ fn detect_paywall(html: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::content::{ContentProcessor, ContentProcessorError, ProcessedContent};
     use crate::dns::DnsPolicy;
     use crate::types::FetchRequest;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    struct BinaryIntegrityProcessor;
+
+    #[async_trait::async_trait]
+    impl ContentProcessor for BinaryIntegrityProcessor {
+        fn name(&self) -> &'static str {
+            "binary-integrity"
+        }
+
+        fn matches(&self, _url: &Url, content_type: Option<&str>) -> bool {
+            content_type == Some("application/pdf")
+        }
+
+        async fn process(
+            &self,
+            input: ContentProcessorInput,
+        ) -> Result<ProcessedContent, ContentProcessorError> {
+            if input.body.as_ref() != b"%PDF-\xff\0binary" {
+                return Err(ContentProcessorError("binary bytes changed".to_string()));
+            }
+            Ok(ProcessedContent {
+                format: Some("markdown".to_string()),
+                content: Some("binary bytes intact".to_string()),
+                ..Default::default()
+            })
+        }
+    }
 
     #[test]
     fn test_is_binary_content_type() {
@@ -1476,6 +1541,62 @@ mod tests {
         assert!(!is_binary_content_type("text/plain"));
         assert!(!is_binary_content_type("application/json"));
         assert!(!is_binary_content_type("application/javascript"));
+    }
+
+    #[tokio::test]
+    async fn content_processors_receive_original_binary_bytes() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/document"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(b"%PDF-\xff\0binary".to_vec())
+                    .insert_header("content-type", "application/pdf"),
+            )
+            .mount(&server)
+            .await;
+
+        let mut processors = ContentProcessorRegistry::new();
+        processors.register(Box::new(BinaryIntegrityProcessor));
+        let fetcher = DefaultFetcher::with_content_processors(processors);
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/document", server.uri())).as_markdown();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("binary bytes intact"));
+        assert!(response.error.is_none(), "{:?}", response.error);
+    }
+
+    #[tokio::test]
+    async fn custom_binary_registry_retains_html_processing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/article"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><body><h1>Article</h1></body></html>")
+                    .insert_header("content-type", "text/html"),
+            )
+            .mount(&server)
+            .await;
+
+        let mut processors = ContentProcessorRegistry::new();
+        processors.register(Box::new(BinaryIntegrityProcessor));
+        let fetcher = DefaultFetcher::with_content_processors(processors);
+        let options = FetchOptions {
+            enable_markdown: true,
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/article", server.uri())).as_markdown();
+        let response = fetcher.fetch(&request, &options).await.unwrap();
+
+        assert_eq!(response.format.as_deref(), Some("markdown"));
+        assert!(response.content.as_deref().unwrap().contains("# Article"));
     }
 
     #[test]

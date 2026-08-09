@@ -304,6 +304,10 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
 
 #### HTML-to-Markdown
 
+- HTML extraction and conversion runs through the built-in `HtmlProcessor` after
+  retrieval limits and optional rendering. The processor accepts `full`, `main`,
+  `readable`, and `agent` content focus and delegates Markdown serialization to
+  `BuiltinHtmlToMarkdownConverter` by default.
 - Fetched HTML converted to markdown resolves relative anchor `href` and image `src`
   values against the final response URL after redirects.
 - Fragment-only links (`#section`) and non-HTTP navigation schemes such as `mailto:`,
@@ -383,7 +387,7 @@ Content is HTML if:
 
 ### HTML to Markdown
 
-- Strip content inside: `script`, `style`, `noscript`, `iframe`, `svg`.
+- Strip content inside: `head`, `script`, `style`, `noscript`, `template`, `iframe`, `svg`.
 - `h1`..`h6` -> `#`..`######`.
 - Block elements (`p`, `div`, `section`, `article`, `main`, `header`, `footer`):
   - On close, add blank line.
@@ -392,15 +396,26 @@ Content is HTML if:
   - Track depth for `ul`/`ol`.
   - `li` adds newline and `- ` with two-space indentation per depth.
 - `strong`/`b` -> `**`, `em`/`i` -> `*`.
-- `pre` -> fenced code block, inline `code` -> backticks (not inside pre).
+- `del`/`s`/`strike` -> `~~`, `mark` -> `==`.
+- `pre` -> collision-safe fenced code block; inline `code` uses a delimiter longer
+  than any contained backtick run.
 - `blockquote` -> `> ` prefix.
-- `a href="..."` uses naive inline format: `](href)` on open tag (no link text tracking).
+- Links and images preserve optional titles. Destinations containing spaces or
+  parentheses use angle-bracket Markdown destinations.
+- Images prefer the highest-resolution `srcset` candidate and resolve it against
+  the final response URL.
+- Tables always include a delimiter row, pad uneven rows, preserve inline cell
+  formatting, and escape literal pipes.
+- Standardized footnote references/definitions use `[^id]` syntax and omit backlinks.
+- Math with `data-latex`, `alttext`, or TeX annotations uses `$...$`/`$$...$$`.
+- Standardized callouts use `> [!type]`, including fold markers.
+- Figures, captions, details/summary, and checkbox inputs retain readable structure.
 - Decode entities: `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&#39;`, `&nbsp;`,
   `&mdash;`, `&ndash;`, `&copy;`, `&reg;`.
 
 ### HTML to Text
 
-- Strip content inside: `script`, `style`, `noscript`, `iframe`, `svg`.
+- Strip content inside: `head`, `script`, `style`, `noscript`, `template`, `iframe`, `svg`.
 - Newline on: `p`, `div`, `br`, `h1`..`h6`, `li`, `tr`.
 - Same entity decoding as markdown.
 - Normalize whitespace via `clean_whitespace` (collapse runs, trim, keep max 2 newlines).
