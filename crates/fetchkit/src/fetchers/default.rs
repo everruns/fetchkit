@@ -932,6 +932,9 @@ pub(crate) async fn send_request_following_redirects(
     let mut redirect_chain = Vec::new();
 
     for redirect_count in 0..=MAX_REDIRECTS {
+        // Every outbound request, including generated probes and redirect hops, must
+        // honor the caller's allow/block prefix policy.
+        super::validate_url_policy(&current_url, options)?;
         // THREAT[TM-AUTH]: re-sign bot-auth headers per hop so each authority is covered.
         let request_headers = apply_bot_auth_if_enabled(headers.clone(), options, &current_url);
         // THREAT[TM-SSRF-001]/[TM-SSRF-005]: resolve-then-check produces the pinned addrs
@@ -2259,6 +2262,35 @@ mod tests {
         assert!(content.contains("## Agent resources"));
         assert!(content.contains("/auth.md"));
         assert!(content.contains("/openapi.json"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_resource_probes_honor_url_prefix_policy() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/docs/page"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><body><p>Page</p></body></html>")
+                    .insert_header("content-type", "text/html"),
+            )
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            enable_markdown: true,
+            allow_prefixes: vec![format!("{}/docs", server.uri())],
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/docs/page", server.uri())).as_markdown();
+        fetcher.fetch(&request, &options).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, reqwest::Method::GET);
+        assert_eq!(requests[0].url.path(), "/docs/page");
     }
 
     #[tokio::test]
