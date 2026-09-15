@@ -1448,6 +1448,40 @@ mod tests {
         assert_eq!(response.status_code, 200);
         assert_eq!(response.content.as_deref(), Some("redirected"));
     }
+    #[tokio::test]
+    async fn test_redirect_hop_honors_url_prefix_policy() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/docs/start"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", format!("{}/private", server.uri())),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/private"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let fetcher = DefaultFetcher::new();
+        let options = FetchOptions {
+            allow_prefixes: vec![format!("{}/docs", server.uri())],
+            dns_policy: DnsPolicy::allow_all(),
+            ..Default::default()
+        };
+        let request = FetchRequest::new(format!("{}/docs/start", server.uri()));
+        let result = fetcher.fetch(&request, &options).await;
+
+        assert!(matches!(result, Err(FetchError::BlockedUrl)));
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.path(), "/docs/start");
+        assert!(!requests
+            .iter()
+            .any(|request| request.url.path() == "/private"));
+    }
 
     /// Build a synthetic redirect [`TransportResponse`] for redirect_target tests.
     fn redirect_response(status: u16, location: &str) -> TransportResponse {
