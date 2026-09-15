@@ -3,6 +3,8 @@
 //! Fetchers own retrieval and network policy. Content processors operate only on
 //! bounded response bytes, so format-specific extraction cannot bypass egress controls.
 
+use std::sync::{Arc, LazyLock};
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use pdf_inspector::process_pdf_mem;
@@ -18,7 +20,8 @@ use crate::{PageMetadata, PageQuality};
 
 // pdf-inspector uses Rayon internally; bound concurrent documents so batch fetches
 // cannot multiply parser thread pools without limit.
-static PDF_PROCESSING_LIMIT: Semaphore = Semaphore::const_new(2);
+static PDF_PROCESSING_LIMIT: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(2)));
 
 /// Bounded response bytes and metadata passed to a [`ContentProcessor`].
 pub struct ContentProcessorInput {
@@ -268,6 +271,25 @@ impl ContentProcessor for HtmlProcessor {
 /// Extracts native text PDFs as Markdown using `pdf-inspector`.
 pub struct PdfProcessor;
 
+async fn run_pdf_task<T, F>(limit: Arc<Semaphore>, task: F) -> Result<T, ContentProcessorError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let permit = limit
+        .acquire_owned()
+        .await
+        .map_err(|error| ContentProcessorError(format!("PDF processing unavailable: {error}")))?;
+    tokio::task::spawn_blocking(move || {
+        // Keep the permit in the blocking task: cancelling its async caller must not
+        // admit another parse while this non-cancellable work is still running.
+        let _permit = permit;
+        task()
+    })
+    .await
+    .map_err(|error| ContentProcessorError(format!("PDF processor task failed: {error}")))
+}
+
 #[async_trait]
 impl ContentProcessor for PdfProcessor {
     fn name(&self) -> &'static str {
@@ -293,13 +315,11 @@ impl ContentProcessor for PdfProcessor {
         &self,
         input: ContentProcessorInput,
     ) -> Result<ProcessedContent, ContentProcessorError> {
-        let _permit = PDF_PROCESSING_LIMIT.acquire().await.map_err(|error| {
-            ContentProcessorError(format!("PDF processing unavailable: {error}"))
-        })?;
-        let result = tokio::task::spawn_blocking(move || process_pdf_mem(&input.body))
-            .await
-            .map_err(|error| ContentProcessorError(format!("PDF processor task failed: {error}")))?
-            .map_err(|error| ContentProcessorError(error.to_string()))?;
+        let result = run_pdf_task(Arc::clone(&PDF_PROCESSING_LIMIT), move || {
+            process_pdf_mem(&input.body)
+        })
+        .await?
+        .map_err(|error| ContentProcessorError(error.to_string()))?;
 
         let needs_ocr = !result.pages_needing_ocr.is_empty();
         let mut warnings = Vec::new();
@@ -360,6 +380,8 @@ fn comma_separated_pages(pages: &[u32]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use super::*;
 
     struct StubMarkdownConverter;
@@ -416,6 +438,30 @@ mod tests {
         assert!(processor.matches(&pdf_path, Some("application/octet-stream")));
         assert!(!processor.matches(&pdf_path, Some("text/html")));
         assert!(!processor.matches(&extensionless, Some("application/octet-stream")));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_pdf_caller_does_not_release_running_task_permit() {
+        let limit = Arc::new(Semaphore::new(1));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let handle = tokio::spawn(run_pdf_task(Arc::clone(&limit), move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        }));
+
+        started_rx.recv().unwrap();
+        handle.abort();
+        assert_eq!(limit.available_permits(), 0);
+
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while limit.available_permits() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[test]

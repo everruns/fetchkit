@@ -297,7 +297,7 @@ to protect against changes between validation and write.
 | TM-DOS-004 | Rapid request flooding via tool | Low | No rate limiting in Fetchkit; caller responsibility | **CALLER RISK** |
 | TM-DOS-005 | DNS resolution delay | Low | DNS resolution uses system resolver; no explicit timeout on DNS lookup | **ACCEPTED** |
 | TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
-| TM-DOS-007 | CPU/memory exhaustion from adversarial PDF parsing | Medium | Bounded input/output, blocking-task isolation, and two-document concurrency cap; parser-internal expansion remains possible | **ACCEPTED** |
+| TM-DOS-007 | CPU/memory exhaustion from adversarial PDF parsing | Medium | Bounded input/output, blocking-task isolation, and a cancellation-safe two-document concurrency cap; parser-internal expansion remains possible | **ACCEPTED** |
 
 ### Mitigation Details
 
@@ -321,8 +321,10 @@ against unbounded responses (TM-DOS-001).
 **TM-DOS-007 — Adversarial PDF parsing (ACCEPTED):**
 PDF content processors receive only bodies bounded by `max_body_size`; partial bodies
 are rejected before parsing, extracted output is capped again, and synchronous parsing
-runs off the async runtime with at most two documents active per process. A crafted PDF
-may still cause expensive parser-internal object-stream expansion or prolonged CPU work.
+runs off the async runtime with at most two documents active per process. The blocking
+task owns its concurrency permit, preventing cancelled callers from starting replacement
+parses while non-cancellable work continues. A crafted PDF may still cause expensive
+parser-internal object-stream expansion or prolonged CPU work.
 Operators handling hostile, high-volume PDFs should isolate the process and apply outer
 request CPU/memory limits. Accepted because the in-process Rust parser has no reliable
 cancellation boundary once a blocking parse begins.

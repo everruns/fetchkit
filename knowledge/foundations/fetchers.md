@@ -82,7 +82,8 @@ allowing callers to replace the default content processor registry.
   suffix is a fallback only for missing Content-Type or `application/octet-stream`.
 - Uses `pdf-inspector` to classify and extract Markdown from bounded in-memory bytes.
 - Runs CPU work through `spawn_blocking`, with at most two PDF documents processed
-  concurrently per process.
+  concurrently per process. The blocking task owns its concurrency permit, so caller
+  cancellation cannot admit replacement work while parsing continues.
 - Does not perform OCR. Responses identify OCR-required or encoding-problem pages
   through quality warnings and `suggested_next_action: "use_ocr"`.
 - Extracted output is capped by the same configured `max_body_size`; partial PDF input
