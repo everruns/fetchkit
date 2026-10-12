@@ -10,7 +10,7 @@ AI-friendly web content fetching tool designed for LLM consumption. Rust library
 - **Agent content focus** - Optional low-noise extraction mode for AI agents
 - **Crawl discovery** - Optional bounded same-origin page discovery for AI agents
 - **HTML-to-Text** - Plain text extraction with clean formatting
-- **Content processors** - Post-download extraction for text PDFs, with an extensible registry
+- **Content processors** - Post-download extraction for text PDFs and Office documents, with an extensible registry
 - **Binary detection** - Returns metadata only for unsupported binary formats
 - **Timeout handling** - 1s first-byte, 30s body with partial content on timeout
 - **Safety limits** - 10 MB default decompressed body cap with truncation
@@ -49,6 +49,8 @@ requests.
 - `PdfProcessor` - text-based PDF classification and Markdown extraction via
   [`pdf-inspector`](https://github.com/firecrawl/pdf-inspector); scanned or
   image-only pages are reported as requiring OCR
+- `OfficeProcessor` - Word (DOCX), PowerPoint (PPTX) and spreadsheet (XLSX, XLS,
+  ODS) documents to Markdown, parsed locally with zip-bomb limits
 
 Custom processors implement `ContentProcessor` and can be registered in a
 `ContentProcessorRegistry`. Pass that registry to
@@ -339,10 +341,14 @@ body limit and converted to Markdown. PDF parsing runs locally; no OCR service o
 additional network request is used. Scanned/image-only PDFs report `use_ocr` as the
 suggested next action.
 
+Office documents are converted the same way, locally: Word headings, lists and
+tables, one section per PowerPoint slide, and one Markdown table per spreadsheet
+sheet (DOCX, PPTX, XLSX, XLS, ODS). Legacy DOC and PPT files are not supported.
+
 Other binary content returns metadata only:
 - Images, audio, video, fonts
 - Archives (zip, tar, rar, 7z)
-- Office documents
+- Legacy Word and PowerPoint files (DOC, PPT)
 
 ### HTML Conversion
 

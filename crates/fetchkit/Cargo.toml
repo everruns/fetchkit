@@ -31,6 +31,9 @@ bytes = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
 pdf-inspector = { workspace = true }
+calamine = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
 libc = { workspace = true }
 rakers = { workspace = true, optional = true }
 

@@ -85,6 +85,7 @@ const BINARY_PREFIXES: &[&str] = &[
     "application/x-7z",
     "application/vnd.ms-",
     "application/vnd.openxmlformats",
+    "application/vnd.oasis.opendocument",
     "font/",
 ];
 
@@ -461,7 +462,9 @@ impl Fetcher for DefaultFetcher {
         let max_body_size = options.max_body_size.unwrap_or(DEFAULT_MAX_BODY_SIZE);
 
         let accept = if wants_markdown {
-            "text/html, text/markdown, text/plain, */*;q=0.8"
+            // Markdown first: sites that serve it on request (Markdown for Agents) skip
+            // HTML conversion entirely.
+            "text/markdown, text/html;q=0.9, text/plain;q=0.8, */*;q=0.7"
         } else if wants_text {
             "text/html, text/plain, */*;q=0.8"
         } else {

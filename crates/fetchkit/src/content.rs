@@ -16,11 +16,13 @@ use crate::convert::{
     extract_headings, extract_metadata, extract_readable_content, filter_excessive_newlines,
     html_to_text, strip_boilerplate, BuiltinHtmlToMarkdownConverter, HtmlToMarkdownConverter,
 };
+use crate::office::OfficeProcessor;
 use crate::{PageMetadata, PageQuality};
 
-// pdf-inspector uses Rayon internally; bound concurrent documents so batch fetches
-// cannot multiply parser thread pools without limit.
-static PDF_PROCESSING_LIMIT: LazyLock<Arc<Semaphore>> =
+// pdf-inspector uses Rayon internally, and every document parser is CPU-bound; bound
+// concurrent documents (PDF and Office alike) so batch fetches cannot multiply parser
+// work without limit.
+pub(crate) static DOCUMENT_PROCESSING_LIMIT: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(2)));
 
 /// Bounded response bytes and metadata passed to a [`ContentProcessor`].
@@ -147,6 +149,7 @@ impl ContentProcessorRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(PdfProcessor));
+        registry.register(Box::new(OfficeProcessor));
         registry.register(Box::new(HtmlProcessor::default()));
         registry
     }
@@ -271,15 +274,17 @@ impl ContentProcessor for HtmlProcessor {
 /// Extracts native text PDFs as Markdown using `pdf-inspector`.
 pub struct PdfProcessor;
 
-async fn run_pdf_task<T, F>(limit: Arc<Semaphore>, task: F) -> Result<T, ContentProcessorError>
+pub(crate) async fn run_document_task<T, F>(
+    limit: Arc<Semaphore>,
+    task: F,
+) -> Result<T, ContentProcessorError>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    let permit = limit
-        .acquire_owned()
-        .await
-        .map_err(|error| ContentProcessorError(format!("PDF processing unavailable: {error}")))?;
+    let permit = limit.acquire_owned().await.map_err(|error| {
+        ContentProcessorError(format!("document processing unavailable: {error}"))
+    })?;
     tokio::task::spawn_blocking(move || {
         // Keep the permit in the blocking task: cancelling its async caller must not
         // admit another parse while this non-cancellable work is still running.
@@ -287,7 +292,7 @@ where
         task()
     })
     .await
-    .map_err(|error| ContentProcessorError(format!("PDF processor task failed: {error}")))
+    .map_err(|error| ContentProcessorError(format!("document processor task failed: {error}")))
 }
 
 #[async_trait]
@@ -315,7 +320,7 @@ impl ContentProcessor for PdfProcessor {
         &self,
         input: ContentProcessorInput,
     ) -> Result<ProcessedContent, ContentProcessorError> {
-        let result = run_pdf_task(Arc::clone(&PDF_PROCESSING_LIMIT), move || {
+        let result = run_document_task(Arc::clone(&DOCUMENT_PROCESSING_LIMIT), move || {
             process_pdf_mem(&input.body)
         })
         .await?
@@ -445,7 +450,7 @@ mod tests {
         let limit = Arc::new(Semaphore::new(1));
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let handle = tokio::spawn(run_pdf_task(Arc::clone(&limit), move || {
+        let handle = tokio::spawn(run_document_task(Arc::clone(&limit), move || {
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         }));

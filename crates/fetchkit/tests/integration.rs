@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tower::Service;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header_regex, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Helper: create FetchOptions that permit loopback (for wiremock tests)
@@ -463,6 +463,78 @@ async fn test_pdf_content_processor_returns_markdown() {
         Some("pdf_inspector")
     );
     assert!(resp.error.is_none());
+}
+
+fn docx_with_paragraph(text: &str) -> Vec<u8> {
+    use std::io::Write;
+
+    let document = format!(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Minutes</w:t></w:r></w:p><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>"#
+    );
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    let mut writer = zip::ZipWriter::new(&mut buffer);
+    writer
+        .start_file(
+            "word/document.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+    writer.write_all(document.as_bytes()).unwrap();
+    writer.finish().unwrap();
+    buffer.into_inner()
+}
+
+#[tokio::test]
+async fn test_docx_content_processor_returns_markdown() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/files/minutes"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(docx_with_paragraph("Ship the release on Friday."))
+                .insert_header(
+                    "content-type",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/files/minutes", mock_server.uri())).as_markdown();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
+
+    assert_eq!(resp.format.as_deref(), Some("markdown"));
+    assert_eq!(
+        resp.content.as_deref(),
+        Some("## Minutes\n\nShip the release on Friday.")
+    );
+    assert_eq!(
+        resp.metadata.unwrap().extraction_method.as_deref(),
+        Some("office_docx")
+    );
+    assert!(resp.error.is_none());
+}
+
+#[tokio::test]
+async fn test_markdown_request_prefers_markdown_representation() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .and(header_regex("accept", r"^text/markdown(,|$)"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw("# Served as markdown", "text/markdown; charset=utf-8"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let req = FetchRequest::new(format!("{}/page", mock_server.uri())).as_markdown();
+    let resp = fetch_with_options(req, test_options()).await.unwrap();
+
+    assert_eq!(resp.status_code, 200);
+    assert!(resp.content.unwrap().contains("# Served as markdown"));
 }
 
 #[tokio::test]
