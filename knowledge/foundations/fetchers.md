@@ -116,14 +116,32 @@ Built-in converters (Cargo features):
 | Converter | Feature | Default | Locality | Formats |
 | --- | --- | --- | --- | --- |
 | `pdf-inspector` (`PdfInspectorConverter`) | `docs-pdf` | on | local | PDF |
-| `office` (`OfficeConverter`) | `docs-office` | on | local | DOCX, PPTX, XLSX/XLSM, XLSB, XLS, ODS |
+| `markkit` (`MarkkitConverter`) | `docs-markkit` | on | local | DOCX, XLSX/XLSM, XLS, ODS |
+| `office` (`OfficeConverter`, deprecated) | `docs-office` | off | local | DOCX, PPTX, XLSX/XLSM, XLSB, XLS, ODS |
 | `cloudflare` (`CloudflareConverter`) | `docs-cloudflare` | off | remote | PDF, DOCX, XLSX, XLSB, XLS, ODT, ODS |
 | any name (`HttpConverter`) | `docs-http` | off | remote unless set local | configured |
 
 - `pdf-inspector`: classifies and extracts Markdown from bounded in-memory bytes; no
   OCR. OCR-required pages produce `pdf_requires_ocr` and `suggested_next_action: "use_ocr"`
   unless a later converter returns usable text.
-- `office`: DOCX and PPTX XML parts via `quick-xml`, spreadsheets via `calamine`. Zip
+- Default registration order: `pdf-inspector`, `markkit`, then `office` when the
+  deprecated `docs-office` feature is enabled, so markkit converts Office formats
+  first and `office` is the fallback and the only PPTX/XLSB backend. `docs-all`
+  excludes `docs-office`.
+- `markkit`: the [markkit](https://crates.io/crates/markkit) crate (features `docx`,
+  `spreadsheet`; no `http_client`, so no reqwest of its own) parses the bounded bytes
+  with `extract_document_sync` on the shared blocking path. The confirmed format's
+  canonical media type and the sanitised file name are the hint. `extraction_method`
+  is `markkit_<format>` (`markkit_docx`, `markkit_xlsx`, `markkit_xls`,
+  `markkit_ods`). markkit warnings (`code: detail`) surface as their stable code only
+  (`truncated_sheet`, `hidden_sheet_skipped`, `sheet_error`), since details carry
+  document-controlled text. `UnsupportedFormat` maps to `Unsupported` (chain falls
+  through), `ResourceLimit` and parse errors to `Failed`. `max_input_bytes` is
+  markkit's `max_input_size`. Limits (archive entries and sizes, rows/columns per
+  sheet, cell grid, hidden sheets) are markkit's defaults, tunable with
+  `MarkkitConverter::with_markkit` (`fetchkit::documents::{Markkit, MarkkitBuilder}`).
+  Spreadsheet titles are not reported (markkit returns none).
+- `office` (deprecated, "not necessarily correct"; kept one release): DOCX and PPTX XML parts via `quick-xml`, spreadsheets via `calamine`. Zip
   containers are checked against an entry-count and total uncompressed-size budget
   before any part is inflated, and each part is read through a size cap (TM-DOS-008).
   Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet.
@@ -446,7 +464,8 @@ crates/fetchkit/src/
 │   ├── mod.rs           # formats, detection, chain, DocumentConversion
 │   ├── settings.rs      # string settings for CLI, MCP, Python
 │   ├── pdf_inspector.rs # local PDF converter (docs-pdf)
-│   ├── office.rs        # local DOCX/PPTX/spreadsheet converter (docs-office)
+│   ├── markkit.rs       # local DOCX/spreadsheet converter via markkit (docs-markkit)
+│   ├── office.rs        # deprecated DOCX/PPTX/spreadsheet converter (docs-office)
 │   ├── remote.rs        # ConverterClient, multipart, SecretString
 │   ├── cloudflare.rs    # Cloudflare toMarkdown converter (docs-cloudflare)
 │   └── http.rs          # generic HTTP converter (docs-http)

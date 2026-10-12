@@ -99,9 +99,10 @@ If you must fetch nonstandard ports or internal-looking public domains, start fr
 ## Document conversion
 
 PDF and Office documents are converted by a chain of document converters. The
-default converters (`pdf-inspector`, `office`) run in-process and make no network
-requests. Remote converters (`CloudflareConverter`, `HttpConverter`) upload the
-downloaded document to another service:
+default converters (`pdf-inspector`, `markkit`) run in-process and make no network
+requests; markkit is built without its HTTP client. Remote converters
+(`CloudflareConverter`, `HttpConverter`) upload the downloaded document to
+another service:
 
 - They run only when `DocumentConversion::allow_remote(true)` (CLI:
   `--allow-remote-conversion`) is set, and never under `ToolBuilder::hardened()`.

@@ -26,15 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Built-in converters behind Cargo features: `pdf-inspector` for text-based PDFs
   (`docs-pdf`, default) and `office` for Word (DOCX), PowerPoint (PPTX) and
   spreadsheets (XLSX, XLSM, XLSB, XLS, ODS) with zip-bomb limits (`docs-office`,
-  default), plus opt-in remote `CloudflareConverter` (Workers AI `toMarkdown`,
+  now deprecated and off by default; see Deprecated), plus opt-in remote `CloudflareConverter` (Workers AI `toMarkdown`,
   `docs-cloudflare`) and generic `HttpConverter` (`docs-http`). Remote converters
   run only when explicitly allowed and never under `ToolBuilder::hardened()`.
+- Add `MarkkitConverter` (`markkit`, `docs-markkit` feature, default): local
+  DOCX, XLSX/XLSM, XLS and ODS conversion through the
+  [markkit](https://crates.io/crates/markkit) crate, with configurable limits via
+  `MarkkitConverter::with_markkit` (`fetchkit::documents::Markkit`). It is the
+  default Office backend; `extraction_method` is `markkit_docx`, `markkit_xlsx`,
+  `markkit_xls` or `markkit_ods`.
 - `ToolBuilder::content_processor` adds custom processors ahead of the built-ins,
   and `FetchOptions` carries `document_conversion` and `content_processors`.
 - Discover agent-facing resources from HTTP and HTML declarations plus bounded
   conventional probes, including `llms.txt`, `auth.md`, OAuth metadata, MCP
   server cards, A2A agent cards, and Agent Skills indexes. Markdown responses
   include a compact navigation appendix.
+
+### Deprecated
+
+- `OfficeConverter` (`office`, `docs-office` feature) is deprecated in favour of
+  `MarkkitConverter` and no longer a default feature or part of `docs-all`. It
+  still works when `docs-office` is enabled explicitly and remains the only
+  built-in PPTX and XLSB converter for this release; PPTX and XLSB responses are
+  rejected as unconverted binaries under default features.
 
 ### Changed
 
