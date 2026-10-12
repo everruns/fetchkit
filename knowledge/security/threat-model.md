@@ -320,7 +320,7 @@ decompresses to a large size is caught by the same size limit that protects
 against unbounded responses (TM-DOS-001).
 
 **TM-DOS-007 — Adversarial PDF parsing (ACCEPTED):**
-PDF content processors receive only bodies bounded by `max_body_size`; partial bodies
+Document converters receive only bodies bounded by `max_document_bytes` (25 MB default); partial bodies
 are rejected before parsing, extracted output is capped again, and synchronous parsing
 runs off the async runtime with at most two documents active per process. The blocking
 task owns its concurrency permit, preventing cancelled callers from starting replacement
@@ -331,12 +331,12 @@ request CPU/memory limits. Accepted because the in-process Rust parser has no re
 cancellation boundary once a blocking parse begins.
 
 **TM-DOS-008 — Zip bomb or adversarial Office document (MITIGATED):**
-Office documents are zip archives (except legacy XLS), so a body within `max_body_size`
+Office documents are zip archives (except legacy XLS), so a body within `max_document_bytes`
 can declare gigabytes of content. Before any part is inflated, the Office processor
-rejects archives with more than 10,000 entries or more than 200 MB of declared
+(`office` converter) rejects archives with more than 10,000 entries or more than 200 MB of declared
 uncompressed content, and every XML part it reads itself is read through a 64 MB cap,
 since declared sizes can lie. Spreadsheet output is capped at 1,000 rows and 50 columns
-per sheet before the `max_body_size` output cap. Parsing shares the PDF processor's
+per sheet before the `max_body_size` output cap. Parsing shares the local converters'
 blocking path and two-document concurrency cap. `calamine` inflates sheet parts itself;
 the declared-size budget bounds those as well.
 
@@ -349,8 +349,24 @@ the declared-size budget bounds those as well.
 | TM-LEAK-003 | Response content leaks internal data | Low | Fetchkit returns content as-is; caller must filter sensitive data | **CALLER RISK** |
 | TM-LEAK-004 | User-Agent reveals software version | Info | Default UA `Everruns Fetchkit/1.0` reveals stack; configurable | **BY DESIGN** |
 | TM-LEAK-005 | Timing side-channels (connect time reveals network proximity) | Low | 1-second timeout masks some timing; not fully mitigated | **ACCEPTED** |
+| TM-LEAK-006 | Fetched documents disclosed to a remote converter | Medium | Remote converters off by default, explicit `allow_remote(true)`, forced off by `hardened()`, backend named in `extraction_method` | MITIGATED |
+| TM-LEAK-007 | Remote converter credentials exposed | Medium | Tokens held in `SecretString`, redacted from `Debug`, never echoed in errors or responses | MITIGATED |
 
 ### Mitigation Details
+
+**TM-LEAK-006 — Document disclosure to remote converters (MITIGATED):**
+Remote `DocumentConverter`s (Cloudflare `toMarkdown`, `HttpConverter`) upload the
+downloaded document to another service. They never run unless the operator sets
+`DocumentConversion::allow_remote(true)`; `ToolBuilder::hardened()` forces remote
+conversion off at build time regardless of order. Converter endpoints come only from
+operator configuration, never from fetched content, and the response's
+`extraction_method` names the backend that produced it. Uploads go through
+`ConverterClient`, so a host can route them through its own egress boundary.
+
+**TM-LEAK-007 — Converter credential exposure (MITIGATED):**
+API tokens and configured header values are stored as `SecretString`, which redacts
+itself from `Debug`; authentication failures are reported by status, without the
+token or request headers.
 
 **TM-LEAK-001 — Error message detail (MITIGATED):**
 Fetchkit's error types (`FetchError`) use generic messages that don't include

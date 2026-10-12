@@ -3,27 +3,19 @@
 //! Fetchers own retrieval and network policy. Content processors operate only on
 //! bounded response bytes, so format-specific extraction cannot bypass egress controls.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use pdf_inspector::process_pdf_mem;
 use thiserror::Error;
-use tokio::sync::Semaphore;
 use url::Url;
 
 use crate::convert::{
     extract_headings, extract_metadata, extract_readable_content, filter_excessive_newlines,
     html_to_text, strip_boilerplate, BuiltinHtmlToMarkdownConverter, HtmlToMarkdownConverter,
 };
-use crate::office::OfficeProcessor;
+use crate::documents::{DocumentConversion, DocumentProcessor};
 use crate::{PageMetadata, PageQuality};
-
-// pdf-inspector uses Rayon internally, and every document parser is CPU-bound; bound
-// concurrent documents (PDF and Office alike) so batch fetches cannot multiply parser
-// work without limit.
-pub(crate) static DOCUMENT_PROCESSING_LIMIT: LazyLock<Arc<Semaphore>> =
-    LazyLock::new(|| Arc::new(Semaphore::new(2)));
 
 /// Bounded response bytes and metadata passed to a [`ContentProcessor`].
 pub struct ContentProcessorInput {
@@ -119,11 +111,47 @@ pub trait ContentProcessor: Send + Sync {
         false
     }
 
+    /// Download cap for responses this processor handles, overriding
+    /// `max_body_size`. Output is still capped by `max_body_size`.
+    fn max_input_bytes(&self) -> Option<usize> {
+        None
+    }
+
     /// Process an already-downloaded, bounded response body.
     async fn process(
         &self,
         input: ContentProcessorInput,
     ) -> Result<ProcessedContent, ContentProcessorError>;
+}
+
+#[async_trait]
+impl ContentProcessor for Arc<dyn ContentProcessor> {
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn matches(&self, url: &Url, content_type: Option<&str>) -> bool {
+        (**self).matches(url, content_type)
+    }
+
+    fn supports_output(&self, output_format: ContentOutputFormat) -> bool {
+        (**self).supports_output(output_format)
+    }
+
+    fn accepts_truncated_input(&self) -> bool {
+        (**self).accepts_truncated_input()
+    }
+
+    fn max_input_bytes(&self) -> Option<usize> {
+        (**self).max_input_bytes()
+    }
+
+    async fn process(
+        &self,
+        input: ContentProcessorInput,
+    ) -> Result<ProcessedContent, ContentProcessorError> {
+        (**self).process(input).await
+    }
 }
 
 /// Ordered registry of response content processors.
@@ -145,12 +173,33 @@ impl ContentProcessorRegistry {
         }
     }
 
-    /// Create a registry containing fetchkit's built-in processors.
+    /// Create a registry containing fetchkit's built-in processors: document
+    /// conversion with [`DocumentConversion::default`], then HTML.
     pub fn with_defaults() -> Self {
+        Self::with_document_conversion(DocumentConversion::default())
+    }
+
+    /// Create the built-in registry with a custom document conversion config.
+    pub fn with_document_conversion(conversion: DocumentConversion) -> Self {
         let mut registry = Self::new();
-        registry.register(Box::new(PdfProcessor));
-        registry.register(Box::new(OfficeProcessor));
+        registry.register(Box::new(DocumentProcessor::new(conversion)));
         registry.register(Box::new(HtmlProcessor::default()));
+        registry
+    }
+
+    /// Build the registry described by fetch options: custom processors first
+    /// (first match wins), then document conversion, then HTML.
+    pub fn for_options(options: &crate::FetchOptions) -> Self {
+        let mut registry = Self::new();
+        for processor in &options.content_processors {
+            registry.register(Box::new(Arc::clone(processor)));
+        }
+        registry.register(Box::new(DocumentProcessor::new(
+            options.document_conversion.clone().unwrap_or_default(),
+        )));
+        if !registry.contains_named("html") {
+            registry.register(Box::new(HtmlProcessor::default()));
+        }
         registry
     }
 
@@ -271,122 +320,8 @@ impl ContentProcessor for HtmlProcessor {
     }
 }
 
-/// Extracts native text PDFs as Markdown using `pdf-inspector`.
-pub struct PdfProcessor;
-
-pub(crate) async fn run_document_task<T, F>(
-    limit: Arc<Semaphore>,
-    task: F,
-) -> Result<T, ContentProcessorError>
-where
-    T: Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
-{
-    let permit = limit.acquire_owned().await.map_err(|error| {
-        ContentProcessorError(format!("document processing unavailable: {error}"))
-    })?;
-    tokio::task::spawn_blocking(move || {
-        // Keep the permit in the blocking task: cancelling its async caller must not
-        // admit another parse while this non-cancellable work is still running.
-        let _permit = permit;
-        task()
-    })
-    .await
-    .map_err(|error| ContentProcessorError(format!("document processor task failed: {error}")))
-}
-
-#[async_trait]
-impl ContentProcessor for PdfProcessor {
-    fn name(&self) -> &'static str {
-        "pdf"
-    }
-
-    fn matches(&self, url: &Url, content_type: Option<&str>) -> bool {
-        let media_type = content_type
-            .and_then(|value| value.split(';').next())
-            .map(str::trim)
-            .unwrap_or_default();
-        if media_type.eq_ignore_ascii_case("application/pdf")
-            || media_type.eq_ignore_ascii_case("application/x-pdf")
-        {
-            return true;
-        }
-
-        (media_type.is_empty() || media_type.eq_ignore_ascii_case("application/octet-stream"))
-            && url.path().to_ascii_lowercase().ends_with(".pdf")
-    }
-
-    async fn process(
-        &self,
-        input: ContentProcessorInput,
-    ) -> Result<ProcessedContent, ContentProcessorError> {
-        let result = run_document_task(Arc::clone(&DOCUMENT_PROCESSING_LIMIT), move || {
-            process_pdf_mem(&input.body)
-        })
-        .await?
-        .map_err(|error| ContentProcessorError(error.to_string()))?;
-
-        let needs_ocr = !result.pages_needing_ocr.is_empty();
-        let mut warnings = Vec::new();
-        if needs_ocr {
-            warnings.push("pdf_requires_ocr".to_string());
-        }
-        if result.has_encoding_issues {
-            warnings.push("pdf_encoding_issues".to_string());
-        }
-
-        let content = result.markdown.filter(|value| !value.trim().is_empty());
-        let error = content.is_none().then(|| {
-            if needs_ocr {
-                format!(
-                    "PDF requires OCR for pages: {}",
-                    comma_separated_pages(&result.pages_needing_ocr)
-                )
-            } else {
-                "PDF contains no extractable text".to_string()
-            }
-        });
-        let metadata = PageMetadata {
-            title: result.title,
-            extraction_method: Some("pdf_inspector".to_string()),
-            ..Default::default()
-        };
-        let quality = PageQuality {
-            score: if content.is_none() {
-                0.0
-            } else if warnings.is_empty() {
-                1.0
-            } else {
-                0.6
-            },
-            warnings,
-            extraction_method: Some("pdf_inspector".to_string()),
-            suggested_next_action: needs_ocr.then(|| "use_ocr".to_string()),
-            ..Default::default()
-        };
-
-        Ok(ProcessedContent {
-            format: content.as_ref().map(|_| "markdown".to_string()),
-            content,
-            metadata: Some(metadata),
-            quality: Some(quality),
-            error,
-        })
-    }
-}
-
-fn comma_separated_pages(pages: &[u32]) -> String {
-    pages
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
     use super::*;
 
     struct StubMarkdownConverter;
@@ -397,6 +332,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "docs-pdf")]
     fn text_pdf(text: &str) -> Bytes {
         let escaped = text
             .replace('\\', "\\\\")
@@ -434,52 +370,19 @@ mod tests {
     }
 
     #[test]
-    fn pdf_processor_matches_media_type_or_binary_pdf_path() {
-        let processor = PdfProcessor;
-        let extensionless = Url::parse("https://example.com/download?id=1").unwrap();
-        let pdf_path = Url::parse("https://example.com/report.PDF").unwrap();
-
-        assert!(processor.matches(&extensionless, Some("application/pdf; charset=binary")));
-        assert!(processor.matches(&pdf_path, Some("application/octet-stream")));
-        assert!(!processor.matches(&pdf_path, Some("text/html")));
-        assert!(!processor.matches(&extensionless, Some("application/octet-stream")));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cancelled_pdf_caller_does_not_release_running_task_permit() {
-        let limit = Arc::new(Semaphore::new(1));
-        let (started_tx, started_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let handle = tokio::spawn(run_document_task(Arc::clone(&limit), move || {
-            started_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-        }));
-
-        started_rx.recv().unwrap();
-        handle.abort();
-        assert_eq!(limit.available_permits(), 0);
-
-        release_tx.send(()).unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while limit.available_permits() == 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-    }
-
-    #[test]
     fn registry_uses_first_matching_processor() {
         let registry = ContentProcessorRegistry::with_defaults();
         let url = Url::parse("https://example.com/document").unwrap();
 
+        #[cfg(feature = "docs-pdf")]
         assert_eq!(
             registry
                 .find(&url, Some("application/pdf"))
                 .map(ContentProcessor::name),
-            Some("pdf")
+            Some("document")
         );
+        #[cfg(not(feature = "docs-pdf"))]
+        assert!(registry.find(&url, Some("application/pdf")).is_none());
         assert_eq!(
             registry
                 .find_for_output(
@@ -562,8 +465,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pdf_processor_extracts_markdown_from_memory() {
-        let processor = PdfProcessor;
+    #[cfg(feature = "docs-pdf")]
+    async fn default_document_processor_extracts_pdf_markdown() {
+        let processor = DocumentProcessor::default();
         let result = processor
             .process(ContentProcessorInput {
                 url: Url::parse("https://example.com/document").unwrap(),

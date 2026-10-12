@@ -24,13 +24,12 @@ use async_trait::async_trait;
 use calamine::{open_workbook_auto_from_rs, Data, Reader};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
-use url::Url;
 
-use crate::content::{
-    run_document_task, ContentProcessor, ContentProcessorError, ContentProcessorInput,
-    ProcessedContent, DOCUMENT_PROCESSING_LIMIT,
+use super::{
+    run_document_task, ConvertError, ConvertedDocument, DocumentConverter, DocumentFormat,
+    DocumentInput, Locality,
 };
-use crate::{PageMetadata, PageQuality};
+use crate::content::ContentProcessorError;
 
 /// Maximum number of entries in an Office zip archive.
 const MAX_ARCHIVE_ENTRIES: usize = 10_000;
@@ -45,7 +44,7 @@ const MAX_SHEET_ROWS: usize = 1_000;
 /// Maximum columns rendered per spreadsheet sheet.
 const MAX_SHEET_COLUMNS: usize = 50;
 
-/// Supported Office document kinds.
+/// Office document kinds with distinct extraction paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OfficeKind {
     Docx,
@@ -54,51 +53,15 @@ enum OfficeKind {
 }
 
 impl OfficeKind {
-    fn from_media_type(media_type: &str) -> Option<Self> {
-        let media_type = media_type.to_ascii_lowercase();
-        match media_type.as_str() {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
-                Some(Self::Docx)
-            }
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
-                Some(Self::Pptx)
-            }
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            | "application/vnd.ms-excel"
-            | "application/vnd.ms-excel.sheet.macroenabled.12"
-            | "application/vnd.oasis.opendocument.spreadsheet" => Some(Self::Spreadsheet),
+    fn from_format(format: DocumentFormat) -> Option<Self> {
+        match format {
+            DocumentFormat::Docx => Some(Self::Docx),
+            DocumentFormat::Pptx => Some(Self::Pptx),
+            DocumentFormat::Xlsx
+            | DocumentFormat::Xlsb
+            | DocumentFormat::Xls
+            | DocumentFormat::Ods => Some(Self::Spreadsheet),
             _ => None,
-        }
-    }
-
-    fn from_path(path: &str) -> Option<Self> {
-        let path = path.to_ascii_lowercase();
-        let extension = path.rsplit_once('.')?.1;
-        match extension {
-            "docx" => Some(Self::Docx),
-            "pptx" => Some(Self::Pptx),
-            "xlsx" | "xlsm" | "xls" | "ods" => Some(Self::Spreadsheet),
-            _ => None,
-        }
-    }
-
-    fn detect(url: &Url, content_type: Option<&str>) -> Option<Self> {
-        let media_type = content_type
-            .and_then(|value| value.split(';').next())
-            .map(str::trim)
-            .unwrap_or_default();
-        if let Some(kind) = Self::from_media_type(media_type) {
-            return Some(kind);
-        }
-        // Download endpoints often serve documents as generic binary; trust the
-        // extension only then, never over a specific media type.
-        let generic = media_type.is_empty()
-            || media_type.eq_ignore_ascii_case("application/octet-stream")
-            || media_type.eq_ignore_ascii_case("application/zip");
-        if generic {
-            Self::from_path(url.path())
-        } else {
-            None
         }
     }
 
@@ -111,59 +74,45 @@ impl OfficeKind {
     }
 }
 
-/// Extracts Word, PowerPoint and spreadsheet documents as Markdown.
-pub struct OfficeProcessor;
+/// Converts Word (DOCX), PowerPoint (PPTX) and spreadsheets (XLSX, XLSM, XLSB,
+/// XLS, ODS) to Markdown in-process.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OfficeConverter;
+
+impl OfficeConverter {
+    /// Create the converter.
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 #[async_trait]
-impl ContentProcessor for OfficeProcessor {
-    fn name(&self) -> &'static str {
+impl DocumentConverter for OfficeConverter {
+    fn name(&self) -> &str {
         "office"
     }
 
-    fn matches(&self, url: &Url, content_type: Option<&str>) -> bool {
-        OfficeKind::detect(url, content_type).is_some()
+    fn locality(&self) -> Locality {
+        Locality::Local
     }
 
-    async fn process(
-        &self,
-        input: ContentProcessorInput,
-    ) -> Result<ProcessedContent, ContentProcessorError> {
-        let kind = OfficeKind::detect(&input.url, input.content_type.as_deref())
-            .ok_or_else(|| ContentProcessorError("unsupported Office document".to_string()))?;
+    fn supports(&self, format: DocumentFormat) -> bool {
+        OfficeKind::from_format(format).is_some()
+    }
+
+    async fn convert(&self, input: DocumentInput) -> Result<ConvertedDocument, ConvertError> {
+        let kind = OfficeKind::from_format(input.format)
+            .ok_or_else(|| ConvertError::Unsupported(input.format.to_string()))?;
         let body = input.body;
-        let extracted = run_document_task(DOCUMENT_PROCESSING_LIMIT.clone(), move || {
-            extract(kind, &body)
-        })
-        .await??;
-
-        let content = Some(extracted.markdown).filter(|value| !value.trim().is_empty());
-        let error = content
-            .is_none()
-            .then(|| "Document contains no extractable text".to_string());
-        let metadata = PageMetadata {
+        let extracted = run_document_task(move || extract(kind, &body))
+            .await?
+            .map_err(|error| ConvertError::Failed(error.0))?;
+        Ok(ConvertedDocument {
+            markdown: extracted.markdown,
             title: extracted.title,
-            extraction_method: Some(kind.extraction_method().to_string()),
-            ..Default::default()
-        };
-        let quality = PageQuality {
-            score: if content.is_none() {
-                0.0
-            } else if extracted.warnings.is_empty() {
-                1.0
-            } else {
-                0.8
-            },
             warnings: extracted.warnings,
+            ocr_pages: Vec::new(),
             extraction_method: Some(kind.extraction_method().to_string()),
-            ..Default::default()
-        };
-
-        Ok(ProcessedContent {
-            format: content.as_ref().map(|_| "markdown".to_string()),
-            content,
-            metadata: Some(metadata),
-            quality: Some(quality),
-            error,
         })
     }
 }
@@ -730,7 +679,16 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::content::{ContentFocus, ContentOutputFormat};
+    use crate::content::{
+        ContentFocus, ContentOutputFormat, ContentProcessor, ContentProcessorInput,
+        ProcessedContent,
+    };
+    use crate::documents::{DocumentConversion, DocumentProcessor};
+    use url::Url;
+
+    fn processor() -> DocumentProcessor {
+        DocumentProcessor::new(DocumentConversion::empty().converter(OfficeConverter))
+    }
 
     const DOCX: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     const PPTX: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -751,7 +709,7 @@ mod tests {
     }
 
     async fn process(url: &str, content_type: &str, body: Bytes) -> ProcessedContent {
-        OfficeProcessor
+        processor()
             .process(ContentProcessorInput {
                 url: Url::parse(url).unwrap(),
                 content_type: Some(content_type.to_string()),
@@ -836,7 +794,7 @@ mod tests {
 
     #[test]
     fn matches_media_types_and_generic_downloads_by_extension() {
-        let processor = OfficeProcessor;
+        let processor = processor();
         let page = Url::parse("https://example.com/download").unwrap();
         let xlsx = Url::parse("https://example.com/data.XLSX").unwrap();
         assert!(processor.matches(&page, Some(DOCX)));

@@ -5,7 +5,9 @@
 
 #[cfg(feature = "bot-auth")]
 use crate::bot_auth::BotAuthConfig;
+use crate::content::ContentProcessor;
 use crate::dns::DnsPolicy;
+use crate::documents::DocumentConversion;
 use crate::error::FetchError;
 use crate::fetchers::FetcherRegistry;
 use crate::transport::{HttpTransport, ReqwestTransport};
@@ -57,6 +59,11 @@ pub struct FetchOptions {
     /// validation, DNS policy resolution, redirect following, and content handling;
     /// only the socket-level send is delegated.
     pub transport: Option<Arc<dyn HttpTransport>>,
+    /// Document (PDF, Office) conversion config. `None` uses
+    /// [`DocumentConversion::default`]: built-in local converters only.
+    pub document_conversion: Option<DocumentConversion>,
+    /// Custom content processors, consulted before the built-in ones.
+    pub content_processors: Vec<Arc<dyn ContentProcessor>>,
 }
 
 // Manual Debug: `transport` is a trait object that does not implement Debug.
@@ -86,6 +93,15 @@ impl std::fmt::Debug for FetchOptions {
                 .as_ref()
                 .map(|_| "<custom>")
                 .unwrap_or("None"),
+        )
+        .field("document_conversion", &self.document_conversion)
+        .field(
+            "content_processors",
+            &self
+                .content_processors
+                .iter()
+                .map(|processor| processor.name())
+                .collect::<Vec<_>>(),
         );
         d.finish()
     }
@@ -205,8 +221,8 @@ pub async fn fetch(req: FetchRequest) -> Result<FetchResponse, FetchError> {
 
 /// Fetch a URL with custom options
 ///
-/// Uses the default fetcher registry with all built-in fetchers.
-/// For custom fetcher configuration, use [`FetcherRegistry`] directly.
+/// Uses all built-in fetchers, with content processors and document conversion
+/// taken from `options`. For custom fetchers, use [`FetcherRegistry`] directly.
 pub async fn fetch_with_options(
     mut req: FetchRequest,
     options: FetchOptions,
@@ -221,8 +237,7 @@ pub async fn fetch_with_options(
         return crate::crawl::crawl_fetch_with_options(req, options).await;
     }
 
-    // Use registry with default fetchers
-    let registry = FetcherRegistry::with_defaults();
+    let registry = FetcherRegistry::for_options(&options);
     registry.fetch(req, options).await
 }
 
@@ -292,7 +307,7 @@ pub async fn batch_fetch_with_options(
             .map(|(idx, req)| {
                 let options = Arc::clone(&options);
                 async move {
-                    let registry = FetcherRegistry::with_defaults();
+                    let registry = FetcherRegistry::for_options(&options);
                     let result = registry.fetch(req, (*options).clone()).await;
                     (idx, result)
                 }

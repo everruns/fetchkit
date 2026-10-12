@@ -465,6 +465,7 @@ async fn test_pdf_content_processor_returns_markdown() {
     assert!(resp.error.is_none());
 }
 
+#[cfg(feature = "docs-office")]
 fn docx_with_paragraph(text: &str) -> Vec<u8> {
     use std::io::Write;
 
@@ -484,6 +485,7 @@ fn docx_with_paragraph(text: &str) -> Vec<u8> {
     buffer.into_inner()
 }
 
+#[cfg(feature = "docs-office")]
 #[tokio::test]
 async fn test_docx_content_processor_returns_markdown() {
     let mock_server = MockServer::start().await;

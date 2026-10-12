@@ -2,6 +2,7 @@
 
 ## 2026-10-12
 
+* **Document conversion**: Replaced the PDF and Office processors with one `DocumentProcessor` running a configurable, per-format `DocumentConverter` chain; added feature-gated converters (`docs-pdf`, `docs-office`, `docs-cloudflare`, `docs-http`), a separate 25 MB document cap, remote-converter opt-in, and threats TM-LEAK-006/007.
 * **Office documents**: Added the local Office processor (DOCX, PPTX, XLSX, XLS, ODS) to the fetchers and tool contract, its zip-bomb threat TM-DOS-008, and the Markdown-first `Accept` header.
 
 ## 2026-08-08

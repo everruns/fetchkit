@@ -163,6 +163,13 @@ impl FetcherRegistry {
         Self::with_content_processors(ContentProcessorRegistry::with_defaults())
     }
 
+    /// Create the default fetchers with content processors built from `options`
+    /// (custom processors, then [`DocumentConversion`](crate::DocumentConversion),
+    /// then HTML).
+    pub fn for_options(options: &FetchOptions) -> Self {
+        Self::with_content_processors(ContentProcessorRegistry::for_options(options))
+    }
+
     /// Create the default fetcher registry with a custom content processor registry.
     pub fn with_content_processors(content_processors: ContentProcessorRegistry) -> Self {
         let mut registry = Self::new();

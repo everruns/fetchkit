@@ -46,16 +46,59 @@ requests.
 
 - `HtmlProcessor` - metadata and focused-content extraction followed by native
   Markdown or text conversion; accepts a custom `HtmlToMarkdownConverter`
-- `PdfProcessor` - text-based PDF classification and Markdown extraction via
-  [`pdf-inspector`](https://github.com/firecrawl/pdf-inspector); scanned or
-  image-only pages are reported as requiring OCR
-- `OfficeProcessor` - Word (DOCX), PowerPoint (PPTX) and spreadsheet (XLSX, XLS,
-  ODS) documents to Markdown, parsed locally with zip-bomb limits
+- `DocumentProcessor` - PDF and Office documents to Markdown through a
+  configurable chain of document converters (see [Document conversion](#document-conversion))
 
-Custom processors implement `ContentProcessor` and can be registered in a
-`ContentProcessorRegistry`. Pass that registry to
-`FetcherRegistry::with_content_processors` to retain the built-in fetchers while
-customizing post-download processing.
+Custom processors implement `ContentProcessor` and are added with
+`ToolBuilder::content_processor` (checked before the built-ins) or registered in a
+`ContentProcessorRegistry` passed to `FetcherRegistry::with_content_processors`.
+
+## Document Conversion
+
+Documents are always downloaded by fetchkit itself, under the same URL policy,
+DNS pinning, transport and timeouts as any other fetch. `DocumentProcessor` then
+detects the format (Content-Type, then file extension for generic binary types,
+confirmed by magic bytes) and runs an ordered chain of `DocumentConverter`
+backends. The next converter runs when one fails, does not support the input, or
+returns nothing usable (for example a scanned PDF that needs OCR).
+
+| Converter | Cargo feature | Default | Where it runs | Formats |
+| --- | --- | --- | --- | --- |
+| `PdfInspectorConverter` (`pdf-inspector`) | `docs-pdf` | on | local | PDF (text layer; reports OCR-only pages) |
+| `OfficeConverter` (`office`) | `docs-office` | on | local | DOCX, PPTX, XLSX, XLSM, XLSB, XLS, ODS |
+| `CloudflareConverter` (`cloudflare`) | `docs-cloudflare` | off | remote | PDF, DOCX, XLSX, XLSB, XLS, ODT, ODS |
+| `HttpConverter` (any name) | `docs-http` | off | remote (configurable) | any format your service accepts |
+
+`docs-all` enables every backend. Remote converters upload document bytes to a
+third party, so they only run when remote conversion is explicitly allowed, and
+never under `ToolBuilder::hardened()`.
+
+```rust
+use fetchkit::documents::CloudflareConverter;
+use fetchkit::{DocumentConversion, DocumentFormat, ToolBuilder};
+
+let tool = ToolBuilder::new()
+    .document_conversion(
+        DocumentConversion::default()                 // pdf-inspector + office
+            .converter(CloudflareConverter::new(account_id, api_token))
+            .allow_remote(true)                       // opt in to uploads
+            .chain(DocumentFormat::Pdf, ["pdf-inspector", "cloudflare"])
+            .formats([DocumentFormat::Pdf, DocumentFormat::Docx, DocumentFormat::Xlsx])
+            .max_document_bytes(25 * 1024 * 1024),    // separate from max_body_size
+    )
+    .build();
+```
+
+Extension points: implement `DocumentConverter` for a new backend,
+`FormatDetector` to change format detection, `ConverterClient` to route remote
+uploads through your own egress, or `ContentProcessor` to bypass the chain.
+
+CLI and MCP server flags: `--convert pdf,docx`, `--converter office,cloudflare`,
+`--allow-remote-conversion`, `--max-document-bytes`. The Cloudflare converter
+reads `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (build with
+`--features docs-cloudflare`). Python: `FetchkitTool(document_formats=...,
+converters=..., allow_remote_conversion=..., max_document_bytes=...,
+cloudflare_account_id=..., cloudflare_api_token=...)`.
 
 ## Installation
 
@@ -336,14 +379,16 @@ Partial content is returned on body timeout or body-size limit with `truncated: 
 
 ### PDF And Binary Content
 
-When Markdown is requested, text-based PDFs are downloaded within the configured
-body limit and converted to Markdown. PDF parsing runs locally; no OCR service or
+When Markdown is requested, text-based PDFs are downloaded within the document
+size limit (25 MB default) and converted to Markdown. PDF parsing runs locally; no OCR service or
 additional network request is used. Scanned/image-only PDFs report `use_ocr` as the
 suggested next action.
 
 Office documents are converted the same way, locally: Word headings, lists and
 tables, one section per PowerPoint slide, and one Markdown table per spreadsheet
-sheet (DOCX, PPTX, XLSX, XLS, ODS). Legacy DOC and PPT files are not supported.
+sheet (DOCX, PPTX, XLSX, XLSM, XLSB, XLS, ODS). Legacy DOC and PPT files are not
+converted by the built-in local converters; route them to a remote or custom
+converter if needed.
 
 Other binary content returns metadata only:
 - Images, audio, video, fonts

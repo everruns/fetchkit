@@ -11,7 +11,13 @@ categories.workspace = true
 readme = "../../README.md"
 
 [features]
-default = []
+default = ["docs-pdf", "docs-office"]
+# Document conversion backends (see knowledge/foundations/fetchers.md)
+docs-pdf = ["dep:pdf-inspector"]
+docs-office = ["dep:calamine", "dep:zip", "dep:quick-xml"]
+docs-cloudflare = []
+docs-http = []
+docs-all = ["docs-pdf", "docs-office", "docs-cloudflare", "docs-http"]
 bot-auth = ["dep:ed25519-dalek", "dep:base64", "dep:sha2", "dep:rand"]
 live-tests = []
 render-rakers = ["dep:rakers"]
@@ -30,10 +36,10 @@ futures = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
-pdf-inspector = { workspace = true }
-calamine = { workspace = true }
-zip = { workspace = true }
-quick-xml = { workspace = true }
+pdf-inspector = { workspace = true, optional = true }
+calamine = { workspace = true, optional = true }
+zip = { workspace = true, optional = true }
+quick-xml = { workspace = true, optional = true }
 libc = { workspace = true }
 rakers = { workspace = true, optional = true }
 

@@ -56,9 +56,14 @@ Each content processor must implement:
    requested output, and content focus.
    Input bytes have already passed fetchkit's timeout and decompressed-size limits.
 
+6. **`max_input_bytes()`** - Optional download cap overriding `max_body_size` for
+   matched responses. `None` is the default.
+
 `ContentProcessorRegistry` is ordered and uses the first matching processor. It provides
-`new()`, `with_defaults()`, `register()`, `find()`, and `find_for_output()`. Processors do not perform network
-requests. `FetcherRegistry::with_content_processors()` retains the built-in fetchers while
+`new()`, `with_defaults()`, `with_document_conversion()`, `for_options()`, `register()`,
+`find()`, and `find_for_output()`. Custom processors from `FetchOptions::content_processors`
+(`ToolBuilder::content_processor`) are consulted before the built-ins. Processors other
+than remote document converters do not perform network requests. `FetcherRegistry::with_content_processors()` retains the built-in fetchers while
 allowing callers to replace the default content processor registry.
 
 #### HtmlProcessor
@@ -76,31 +81,63 @@ allowing callers to replace the default content processor registry.
 - Accepts truncated input and returns useful partial content with truncation signals.
 - Runs after optional rendering; it performs no rendering or network requests.
 
-#### PdfProcessor
+#### DocumentProcessor and document converters
 
-- Matches PDF response media types, including extensionless download URLs. A `.pdf`
-  suffix is a fallback only for missing Content-Type or `application/octet-stream`.
-- Uses `pdf-inspector` to classify and extract Markdown from bounded in-memory bytes.
-- Runs CPU work through `spawn_blocking`, with at most two PDF documents processed
-  concurrently per process. The blocking task owns its concurrency permit, so caller
+`DocumentProcessor` (name `document`) is the single content processor for binary
+documents. It delegates to an ordered chain of `DocumentConverter` backends
+configured by `DocumentConversion`.
+
+- **Detection**: `FormatDetector` maps Content-Type to a `DocumentFormat`; the URL
+  extension is used only for missing or generic binary types (`application/octet-stream`,
+  `application/zip`, download types). After download the format is confirmed by magic
+  bytes (`%PDF-`, ZIP, OLE2, RTF); a mismatch is an error and no converter runs.
+- **Chain**: per-format order by converter name (`chain(format, names)`), otherwise
+  registration order. Converters that do not support the format are skipped. The next
+  converter runs on `Unsupported`, `TooLarge`, `Failed`, or a result with no text or
+  OCR-required pages. The first partial result is returned when nothing does better.
+  Later converters add a `fallback_converter` quality warning.
+- **Remote gating**: converters report `Locality`. `Remote` converters run only with
+  `allow_remote(true)`; `ToolBuilder::hardened()` forces it off at build time.
+- **Limits**: `max_document_bytes` (default 25 MB) replaces `max_body_size` as the
+  download cap for responses `DocumentProcessor` matches, via
+  `ContentProcessor::max_input_bytes`. Output is still capped by `max_body_size`;
+  truncated downloads are never converted. A converter may declare its own
+  `max_input_bytes`.
+- **Concurrency**: local converters share one blocking-task path with at most two
+  documents parsed per process; the blocking task owns its permit so caller
   cancellation cannot admit replacement work while parsing continues.
-- Does not perform OCR. Responses identify OCR-required or encoding-problem pages
-  through quality warnings and `suggested_next_action: "use_ocr"`.
-- Extracted output is capped by the same configured `max_body_size`; partial PDF input
-  is not passed to the parser.
+- **Configuration**: `ToolBuilder::document_conversion`, `FetchOptions::document_conversion`,
+  `DocumentConversionSettings` (string form used by CLI, MCP and Python), and
+  `ContentProcessorRegistry::with_document_conversion` / `for_options`.
+  `DocumentConversion::empty()` disables all built-in converters.
 
-#### OfficeProcessor
+Built-in converters (Cargo features):
 
-- Matches Word (DOCX), PowerPoint (PPTX) and spreadsheet (XLSX, XLSM, XLS, ODS) media
-  types. The file extension is a fallback only for missing Content-Type,
-  `application/octet-stream` or `application/zip`.
-- Parses locally: DOCX and PPTX XML parts with `quick-xml`, spreadsheets with
-  `calamine`. Documents never leave the process; there is no hosted converter.
-- Zip containers are checked against an entry-count and total uncompressed-size
-  budget from the central directory before any part is inflated, and each part it
-  reads itself is read through a size cap (TM-DOS-008).
-- Shares the PDF processor's blocking-task path and two-document concurrency cap.
-- Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet, then `max_body_size`.
+| Converter | Feature | Default | Locality | Formats |
+| --- | --- | --- | --- | --- |
+| `pdf-inspector` (`PdfInspectorConverter`) | `docs-pdf` | on | local | PDF |
+| `office` (`OfficeConverter`) | `docs-office` | on | local | DOCX, PPTX, XLSX/XLSM, XLSB, XLS, ODS |
+| `cloudflare` (`CloudflareConverter`) | `docs-cloudflare` | off | remote | PDF, DOCX, XLSX, XLSB, XLS, ODT, ODS |
+| any name (`HttpConverter`) | `docs-http` | off | remote unless set local | configured |
+
+- `pdf-inspector`: classifies and extracts Markdown from bounded in-memory bytes; no
+  OCR. OCR-required pages produce `pdf_requires_ocr` and `suggested_next_action: "use_ocr"`
+  unless a later converter returns usable text.
+- `office`: DOCX and PPTX XML parts via `quick-xml`, spreadsheets via `calamine`. Zip
+  containers are checked against an entry-count and total uncompressed-size budget
+  before any part is inflated, and each part is read through a size cap (TM-DOS-008).
+  Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet.
+- `cloudflare`: Workers AI `toMarkdown` REST endpoint, one multipart file per request,
+  bearer token held in `SecretString`. Images are not routed (billed by Cloudflare).
+- `HttpConverter`: multipart upload to an operator-configured URL; Markdown from the raw
+  body or a JSON pointer. Covers self-hosted services such as Docling or MarkItDown.
+- Remote uploads go through `ConverterClient` (default `ReqwestConverterClient`:
+  redirects off, proxy env ignored unless enabled, response capped at 32 MB), not
+  `HttpTransport`, which stays GET/HEAD for user URLs. Converter endpoints are operator
+  configuration and are never derived from fetched content (TM-LEAK-006).
+
+When no converter is enabled for a recognised document format, the binary rejection
+error names the format and says conversion is not enabled.
 
 ### Built-in Fetchers
 
@@ -404,8 +441,15 @@ Both built-in fetchers integrate resolve-then-check DNS validation:
 
 ```
 crates/fetchkit/src/
-├── content.rs           # ContentProcessor trait, registry, PDF processor
-├── office.rs            # Office (DOCX, PPTX, XLSX, XLS, ODS) processor
+├── content.rs           # ContentProcessor trait, registry, HTML processor
+├── documents/           # DocumentProcessor, DocumentConverter chain and config
+│   ├── mod.rs           # formats, detection, chain, DocumentConversion
+│   ├── settings.rs      # string settings for CLI, MCP, Python
+│   ├── pdf_inspector.rs # local PDF converter (docs-pdf)
+│   ├── office.rs        # local DOCX/PPTX/spreadsheet converter (docs-office)
+│   ├── remote.rs        # ConverterClient, multipart, SecretString
+│   ├── cloudflare.rs    # Cloudflare toMarkdown converter (docs-cloudflare)
+│   └── http.rs          # generic HTTP converter (docs-http)
 ├── dns.rs               # DnsPolicy - SSRF prevention via resolve-then-check
 ├── file_saver.rs        # FileSaver trait, LocalFileSaver, SaveResult, FileSaveError
 ├── fetchers/

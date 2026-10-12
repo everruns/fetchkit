@@ -23,7 +23,7 @@ pub(crate) async fn crawl_fetch_with_options(
         .unwrap_or(DEFAULT_CRAWL_MAX_PAGES)
         .clamp(1, MAX_CRAWL_MAX_PAGES);
 
-    let registry = FetcherRegistry::with_defaults();
+    let registry = FetcherRegistry::for_options(&options);
     let mut seed_request = request.clone();
     seed_request.crawl = None;
     seed_request.max_pages = None;

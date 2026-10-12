@@ -12,7 +12,10 @@
 //! print(response.content)
 //! ```
 
-use fetchkit::{FetchError, FetchRequest, FetchResponse, HttpMethod, Tool, ToolBuilder};
+use fetchkit::{
+    DocumentConversionSettings, FetchError, FetchRequest, FetchResponse, HttpMethod, Tool,
+    ToolBuilder,
+};
 use pyo3::exceptions::{PyDeprecationWarning, PyValueError};
 use pyo3::prelude::*;
 
@@ -214,7 +217,13 @@ impl PyFetchkitTool {
         allowed_ports=None,
         blocked_hosts=None,
         same_host_redirects_only=None,
-        hardened=false
+        hardened=false,
+        document_formats=None,
+        converters=None,
+        allow_remote_conversion=false,
+        max_document_bytes=None,
+        cloudflare_account_id=None,
+        cloudflare_api_token=None
     ))]
     fn new(
         enable_markdown: bool,
@@ -229,6 +238,12 @@ impl PyFetchkitTool {
         blocked_hosts: Option<Vec<String>>,
         same_host_redirects_only: Option<bool>,
         hardened: bool,
+        document_formats: Option<Vec<String>>,
+        converters: Option<Vec<String>>,
+        allow_remote_conversion: bool,
+        max_document_bytes: Option<usize>,
+        cloudflare_account_id: Option<String>,
+        cloudflare_api_token: Option<String>,
     ) -> PyResult<Self> {
         let mut builder = ToolBuilder::new()
             .enable_markdown(enable_markdown)
@@ -277,6 +292,20 @@ impl PyFetchkitTool {
                     builder.block_host(host)
                 };
             }
+        }
+
+        let documents = DocumentConversionSettings {
+            formats: document_formats,
+            converters,
+            allow_remote: allow_remote_conversion,
+            max_document_bytes,
+            cloudflare_account_id,
+            cloudflare_api_token,
+            respect_proxy_env,
+        };
+        if !documents.is_default() {
+            builder =
+                builder.document_conversion(documents.build().map_err(PyValueError::new_err)?);
         }
 
         let runtime = tokio::runtime::Runtime::new()
@@ -406,6 +435,12 @@ fn deprecated_fetch_kit_tool(
         blocked_hosts,
         same_host_redirects_only,
         hardened,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
     )
 }
 
@@ -423,7 +458,8 @@ fn fetch(
     max_pages: Option<usize>,
 ) -> PyResult<PyFetchResponse> {
     let tool = PyFetchkitTool::new(
-        true, true, None, None, None, None, true, false, None, None, None, false,
+        true, true, None, None, None, None, true, false, None, None, None, false, None, None,
+        false, None, None, None,
     )?;
     tool.fetch(
         url,

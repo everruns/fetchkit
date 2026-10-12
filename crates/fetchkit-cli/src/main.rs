@@ -13,8 +13,8 @@
 
 mod mcp;
 
-use clap::{Parser, Subcommand, ValueEnum};
-use fetchkit::{CrawlPage, FetchRequest, Tool, TOOL_LLMTXT};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use fetchkit::{CrawlPage, DocumentConversionSettings, FetchRequest, Tool, TOOL_LLMTXT};
 use std::io::{self, Write};
 
 /// Output format for fetch subcommand
@@ -25,6 +25,41 @@ enum OutputFormat {
     Md,
     /// JSON format
     Json,
+}
+
+/// Document (PDF, Office) conversion options shared by `fetch` and `mcp`.
+#[derive(Args, Debug, Default, Clone)]
+struct DocumentArgs {
+    /// Document formats to convert, comma-separated (e.g. pdf,docx,xlsx)
+    #[arg(long = "convert", value_delimiter = ',')]
+    formats: Option<Vec<String>>,
+
+    /// Converter order, comma-separated (pdf-inspector, office, cloudflare). Cloudflare
+    /// reads CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.
+    #[arg(long = "converter", value_delimiter = ',')]
+    converters: Option<Vec<String>>,
+
+    /// Allow converters that upload documents to a third-party service
+    #[arg(long)]
+    allow_remote_conversion: bool,
+
+    /// Maximum document download size in bytes (default 25 MB)
+    #[arg(long)]
+    max_document_bytes: Option<usize>,
+}
+
+impl DocumentArgs {
+    fn settings(&self, respect_proxy_env: bool) -> DocumentConversionSettings {
+        DocumentConversionSettings {
+            formats: self.formats.clone(),
+            converters: self.converters.clone(),
+            allow_remote: self.allow_remote_conversion,
+            max_document_bytes: self.max_document_bytes,
+            cloudflare_account_id: std::env::var("CLOUDFLARE_ACCOUNT_ID").ok(),
+            cloudflare_api_token: std::env::var("CLOUDFLARE_API_TOKEN").ok(),
+            respect_proxy_env,
+        }
+    }
 }
 
 /// Fetchkit - AI-friendly web content fetching tool
@@ -59,6 +94,9 @@ enum Commands {
         /// Agent FQDN for Signature-Agent header (requires --bot-auth-key)
         #[arg(long)]
         bot_auth_agent: Option<String>,
+
+        #[command(flatten)]
+        documents: DocumentArgs,
     },
     /// Fetch URL and output as markdown with metadata frontmatter
     Fetch {
@@ -104,6 +142,9 @@ enum Commands {
         /// Render HTML with the rakers backend before conversion
         #[arg(long)]
         render_rakers: bool,
+
+        #[command(flatten)]
+        documents: DocumentArgs,
     },
 }
 
@@ -123,6 +164,7 @@ async fn main() {
             allow_env_proxy,
             bot_auth_key,
             bot_auth_agent,
+            documents,
         }) => {
             mcp::run_server(build_tool(
                 None,
@@ -131,6 +173,7 @@ async fn main() {
                 bot_auth_key,
                 bot_auth_agent,
                 false,
+                &documents,
             ))
             .await;
         }
@@ -146,8 +189,10 @@ async fn main() {
             crawl,
             max_pages,
             render_rakers,
+            documents,
         }) => {
             let options = FetchCommandOptions {
+                documents,
                 output,
                 user_agent,
                 hardened,
@@ -177,8 +222,18 @@ fn build_tool(
     bot_auth_key: Option<String>,
     bot_auth_agent: Option<String>,
     render_rakers: bool,
+    documents: &DocumentArgs,
 ) -> Tool {
     let mut builder = Tool::builder().enable_markdown(true);
+
+    let settings = documents.settings(allow_env_proxy);
+    if !settings.is_default() {
+        let conversion = settings.build().unwrap_or_else(|e| {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        });
+        builder = builder.document_conversion(conversion);
+    }
 
     if hardened {
         builder = builder.hardened();
@@ -229,6 +284,7 @@ fn build_tool(
 }
 
 struct FetchCommandOptions {
+    documents: DocumentArgs,
     output: OutputFormat,
     user_agent: Option<String>,
     hardened: bool,
@@ -260,6 +316,7 @@ async fn run_fetch(url: &str, options: FetchCommandOptions) {
         options.bot_auth_key,
         options.bot_auth_agent,
         options.render_rakers,
+        &options.documents,
     );
 
     // Execute request
