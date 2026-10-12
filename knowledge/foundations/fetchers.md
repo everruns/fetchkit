@@ -89,6 +89,19 @@ allowing callers to replace the default content processor registry.
 - Extracted output is capped by the same configured `max_body_size`; partial PDF input
   is not passed to the parser.
 
+#### OfficeProcessor
+
+- Matches Word (DOCX), PowerPoint (PPTX) and spreadsheet (XLSX, XLSM, XLS, ODS) media
+  types. The file extension is a fallback only for missing Content-Type,
+  `application/octet-stream` or `application/zip`.
+- Parses locally: DOCX and PPTX XML parts with `quick-xml`, spreadsheets with
+  `calamine`. Documents never leave the process; there is no hosted converter.
+- Zip containers are checked against an entry-count and total uncompressed-size
+  budget from the central directory before any part is inflated, and each part it
+  reads itself is read through a size cap (TM-DOS-008).
+- Shares the PDF processor's blocking-task path and two-document concurrency cap.
+- Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet, then `max_body_size`.
+
 ### Built-in Fetchers
 
 #### DefaultFetcher (lowest priority)
@@ -392,6 +405,7 @@ Both built-in fetchers integrate resolve-then-check DNS validation:
 ```
 crates/fetchkit/src/
 ├── content.rs           # ContentProcessor trait, registry, PDF processor
+├── office.rs            # Office (DOCX, PPTX, XLSX, XLS, ODS) processor
 ├── dns.rs               # DnsPolicy - SSRF prevention via resolve-then-check
 ├── file_saver.rs        # FileSaver trait, LocalFileSaver, SaveResult, FileSaveError
 ├── fetchers/

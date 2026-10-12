@@ -298,6 +298,7 @@ to protect against changes between validation and write.
 | TM-DOS-005 | DNS resolution delay | Low | DNS resolution uses system resolver; no explicit timeout on DNS lookup | **ACCEPTED** |
 | TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
 | TM-DOS-007 | CPU/memory exhaustion from adversarial PDF parsing | Medium | Bounded input/output, blocking-task isolation, and a cancellation-safe two-document concurrency cap; parser-internal expansion remains possible | **ACCEPTED** |
+| TM-DOS-008 | Zip bomb or adversarial Office document | Medium | Central-directory entry and uncompressed-size budget before inflating, size-capped part reads, per-sheet output caps, shared two-document blocking cap | MITIGATED |
 
 ### Mitigation Details
 
@@ -328,6 +329,16 @@ parser-internal object-stream expansion or prolonged CPU work.
 Operators handling hostile, high-volume PDFs should isolate the process and apply outer
 request CPU/memory limits. Accepted because the in-process Rust parser has no reliable
 cancellation boundary once a blocking parse begins.
+
+**TM-DOS-008 — Zip bomb or adversarial Office document (MITIGATED):**
+Office documents are zip archives (except legacy XLS), so a body within `max_body_size`
+can declare gigabytes of content. Before any part is inflated, the Office processor
+rejects archives with more than 10,000 entries or more than 200 MB of declared
+uncompressed content, and every XML part it reads itself is read through a 64 MB cap,
+since declared sizes can lie. Spreadsheet output is capped at 1,000 rows and 50 columns
+per sheet before the `max_body_size` output cap. Parsing shares the PDF processor's
+blocking path and two-document concurrency cap. `calamine` inflates sheet parts itself;
+the declared-size budget bounds those as well.
 
 ## 5. Information Leakage (TM-LEAK)
 

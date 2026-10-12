@@ -55,6 +55,9 @@ tower = { version = "0.5", features = ["util"] }
 
 # Binary document extraction
 pdf-inspector = "0.1.7"
+calamine = { version = "0.36", default-features = false }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+quick-xml = "0.41"
 
 # Platform filesystem flags
 libc = "0.2"

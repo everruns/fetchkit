@@ -85,6 +85,7 @@ mod dns;
 mod error;
 pub mod fetchers;
 pub mod file_saver;
+mod office;
 mod tool;
 pub mod transport;
 mod types;
@@ -107,6 +108,7 @@ pub use fetchers::{
     RSSFeedFetcher, StackOverflowFetcher, TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
+pub use office::OfficeProcessor;
 pub use tool::{
     Tool, ToolBuilder, ToolExecution, ToolImage, ToolOutput, ToolOutputMetadata, ToolService,
     ToolStatus,
@@ -128,7 +130,7 @@ pub const DEFAULT_USER_AGENT: &str = "Everruns Fetchkit/1.0";
 
 /// Backward-compatible full description string with file-saving enabled.
 pub const TOOL_DESCRIPTION: &str =
-    "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses or save bytes to file.";
+    "Fetch URL content as text or markdown, including text-based PDFs and Office documents; return metadata for unsupported binary responses or save bytes to file.";
 
 /// Backward-compatible help document with file-saving enabled.
 pub static TOOL_LLMTXT: std::sync::LazyLock<String> =

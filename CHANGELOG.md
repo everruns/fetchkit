@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a pluggable post-download `ContentProcessor` registry and built-in
   `PdfProcessor` that extracts Markdown from text-based PDFs with local
   `pdf-inspector` processing and explicit OCR guidance for unsupported pages.
+- Add a built-in `OfficeProcessor` that converts Word (DOCX), PowerPoint (PPTX)
+  and spreadsheet (XLSX, XLSM, XLS, ODS) documents to Markdown locally, with
+  zip-bomb limits checked before any part is inflated.
 - Discover agent-facing resources from HTTP and HTML declarations plus bounded
   conventional probes, including `llms.txt`, `auth.md`, OAuth metadata, MCP
   server cards, A2A agent cards, and Agent Skills indexes. Markdown responses
@@ -27,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Markdown requests now ask for `text/markdown` first in the `Accept` header, so
+  sites that serve Markdown on request return it instead of HTML.
 - `ContentProcessorInput` now includes the requested output format and HTML
   content focus. Custom processors constructing this public input must populate
   the new fields.

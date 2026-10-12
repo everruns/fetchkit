@@ -969,15 +969,15 @@ fn display_name(locale: &str) -> &'static str {
 fn description(locale: &str, enable_save_to_file: bool) -> String {
     if is_ukrainian(locale) {
         if enable_save_to_file {
-            "Завантажити URL як текст або markdown, включно з текстовими PDF; повернути метадані для непідтримуваного бінарного вмісту або зберегти байти через save_to_file.".to_string()
+            "Завантажити URL як текст або markdown, включно з текстовими PDF і документами Office; повернути метадані для непідтримуваного бінарного вмісту або зберегти байти через save_to_file.".to_string()
         } else {
-            "Завантажити URL як текст або markdown, включно з текстовими PDF; повернути метадані для непідтримуваного бінарного вмісту."
+            "Завантажити URL як текст або markdown, включно з текстовими PDF і документами Office; повернути метадані для непідтримуваного бінарного вмісту."
                 .to_string()
         }
     } else if enable_save_to_file {
-        "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses or save bytes with save_to_file.".to_string()
+        "Fetch URL content as text or markdown, including text-based PDFs and Office documents; return metadata for unsupported binary responses or save bytes with save_to_file.".to_string()
     } else {
-        "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses.".to_string()
+        "Fetch URL content as text or markdown, including text-based PDFs and Office documents; return metadata for unsupported binary responses.".to_string()
     }
 }
 

@@ -216,7 +216,7 @@ Provide a builder to configure tool options, including:
 - Expose a single `web_fetch` tool over MCP.
 - Input schema: derived from `FetchRequest` via tool builder (disabled options omitted).
 - Output: Markdown with YAML frontmatter (same format as CLI `--output md`).
-- Tool description: "Fetch URL content as text or markdown, including text-based PDFs; return metadata for unsupported binary responses or save bytes to file."
+- Tool description: "Fetch URL content as text or markdown, including text-based PDFs and Office documents; return metadata for unsupported binary responses or save bytes to file."
 
 ### Python Bindings
 
@@ -270,7 +270,8 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
 - Ambient proxy environment variables are ignored by default.
   - Opt in via `ToolBuilder::respect_proxy_env(true)` or CLI `--allow-env-proxy`.
 - Accept header:
-  - Markdown: `text/html, text/markdown, text/plain, */*;q=0.8`
+  - Markdown: `text/markdown, text/html;q=0.9, text/plain;q=0.8, */*;q=0.7`, so sites
+    that serve Markdown on request (Markdown for Agents) return it instead of HTML
   - Text: `text/html, text/plain, */*;q=0.8`
   - Raw: `*/*`
 - HEAD requests use HTTP HEAD method, return metadata only.
@@ -320,7 +321,8 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
 - Detect binary by Content-Type prefix:
   - `image/`, `audio/`, `video/`, `application/octet-stream`, `application/pdf`, `application/x-pdf`,
     `application/zip`, `application/gzip`, `application/x-tar`, `application/x-rar`,
-    `application/x-7z`, `application/vnd.ms-`, `application/vnd.openxmlformats`, `font/`.
+    `application/x-7z`, `application/vnd.ms-`, `application/vnd.openxmlformats`,
+    `application/vnd.oasis.opendocument`, `font/`.
 - When `as_markdown` is requested, a matching registered content processor runs
   on the bounded response body before the generic binary response is returned.
 - The built-in PDF processor:
@@ -332,6 +334,20 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
     `pdf_requires_ocr` quality warnings and suggest `use_ocr`.
   - Runs on a bounded blocking pool path, and both PDF input and extracted output
     honor `max_body_size`. Partial PDF inputs are not parsed.
+- The built-in Office processor:
+  - Matches DOCX, PPTX, XLSX/XLSM, XLS and ODS media types, or those file
+    extensions when served as `application/octet-stream`, `application/zip` or
+    without Content-Type.
+  - Returns `format: "markdown"`: Word headings, lists and tables; one
+    `## Slide N: title` section per slide in presentation order; one `## sheet`
+    Markdown table per spreadsheet sheet (first row as header, at most 1,000 rows
+    and 50 columns, with a `sheet_truncated` warning beyond that).
+  - Reports `office_docx`, `office_pptx` or `office_spreadsheet` as the extraction
+    method and `dc:title` from the document properties as the title.
+  - Performs no network requests. Zip containers are checked against an entry and
+    uncompressed-size budget before inflating (TM-DOS-008); shares the PDF
+    processor's blocking pool and two-document concurrency cap. Partial inputs are
+    not parsed.
 - For binary without a matching processor:
   - Return metadata (`content_type`, `size`, `filename`, `last_modified`)
   - Include `error: "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."`
