@@ -6,7 +6,9 @@
 #[cfg(feature = "bot-auth")]
 use crate::bot_auth::BotAuthConfig;
 use crate::client::{fetch_with_options, FetchOptions};
+use crate::content::ContentProcessor;
 use crate::dns::DnsPolicy;
+use crate::documents::DocumentConversion;
 use crate::error::{FetchError, ToolError};
 use crate::fetchers::FetcherRegistry;
 use crate::file_saver::FileSaver;
@@ -151,6 +153,12 @@ pub struct ToolBuilder {
     bot_auth: Option<BotAuthConfig>,
     /// Pluggable HTTP transport. None => default ReqwestTransport.
     transport: Option<Arc<dyn HttpTransport>>,
+    /// Document conversion config. None => DocumentConversion::default().
+    document_conversion: Option<DocumentConversion>,
+    /// Custom content processors, consulted before built-in ones.
+    content_processors: Vec<Arc<dyn ContentProcessor>>,
+    /// Set by `hardened()`: remote document converters never run.
+    deny_remote_conversion: bool,
 }
 
 // Manual Debug: `transport` is a trait object that does not implement Debug
@@ -181,6 +189,15 @@ impl std::fmt::Debug for ToolBuilder {
                 .as_ref()
                 .map(|_| "<custom>")
                 .unwrap_or("None"),
+        )
+        .field("document_conversion", &self.document_conversion)
+        .field(
+            "content_processors",
+            &self
+                .content_processors
+                .iter()
+                .map(|processor| processor.name())
+                .collect::<Vec<_>>(),
         );
         d.finish()
     }
@@ -357,12 +374,41 @@ impl ToolBuilder {
         self
     }
 
+    /// Configure document (PDF, Office) conversion: formats, converter backends,
+    /// per-format chain order, size cap, and whether remote converters may run.
+    ///
+    /// ```
+    /// use fetchkit::{DocumentConversion, DocumentFormat, ToolBuilder};
+    ///
+    /// let tool = ToolBuilder::new()
+    ///     .document_conversion(
+    ///         DocumentConversion::default()
+    ///             .formats([DocumentFormat::Pdf])
+    ///             .max_document_bytes(5 * 1024 * 1024),
+    ///     )
+    ///     .build();
+    /// # let _ = tool;
+    /// ```
+    pub fn document_conversion(mut self, conversion: DocumentConversion) -> Self {
+        self.document_conversion = Some(conversion);
+        self
+    }
+
+    /// Add a custom content processor. Custom processors are consulted before the
+    /// built-in document and HTML processors, in registration order.
+    pub fn content_processor(mut self, processor: Arc<dyn ContentProcessor>) -> Self {
+        self.content_processors.push(processor);
+        self
+    }
+
     /// Apply a production-oriented hardening profile.
     ///
     /// This preset keeps private IP blocking enabled, ignores ambient proxy
     /// environment variables, restricts outbound traffic to ports 80 and 443,
-    /// blocks common internal DNS suffixes, and only follows same-host redirects.
+    /// blocks common internal DNS suffixes, only follows same-host redirects, and
+    /// never runs remote document converters.
     pub fn hardened(mut self) -> Self {
+        self.deny_remote_conversion = true;
         self = self
             .block_private_ips(true)
             .use_env_proxy(false)
@@ -400,6 +446,17 @@ impl ToolBuilder {
             #[cfg(feature = "bot-auth")]
             bot_auth: self.bot_auth.clone(),
             transport: self.transport.clone(),
+            document_conversion: self.resolved_document_conversion(),
+            content_processors: self.content_processors.clone(),
+        }
+    }
+
+    fn resolved_document_conversion(&self) -> Option<DocumentConversion> {
+        let conversion = self.document_conversion.clone();
+        if self.deny_remote_conversion {
+            Some(conversion.unwrap_or_default().allow_remote(false))
+        } else {
+            conversion
         }
     }
 
@@ -468,6 +525,8 @@ pub struct Tool {
     #[cfg(feature = "bot-auth")]
     bot_auth: Option<BotAuthConfig>,
     transport: Option<Arc<dyn HttpTransport>>,
+    document_conversion: Option<DocumentConversion>,
+    content_processors: Vec<Arc<dyn ContentProcessor>>,
 }
 
 // Manual Debug: `transport` is a trait object that does not implement Debug
@@ -501,6 +560,15 @@ impl std::fmt::Debug for Tool {
                 .as_ref()
                 .map(|_| "<custom>")
                 .unwrap_or("None"),
+        )
+        .field("document_conversion", &self.document_conversion)
+        .field(
+            "content_processors",
+            &self
+                .content_processors
+                .iter()
+                .map(|processor| processor.name())
+                .collect::<Vec<_>>(),
         );
         d.finish()
     }
@@ -649,7 +717,7 @@ impl Tool {
             let saver = saver.ok_or(FetchError::SaverNotAvailable)?;
 
             let options = self.build_options();
-            let registry = FetcherRegistry::with_defaults();
+            let registry = FetcherRegistry::for_options(&options);
             registry.fetch_to_file(req, options, saver).await
         } else {
             self.execute(req).await
@@ -677,6 +745,8 @@ impl Tool {
             // None => default ReqwestTransport; hosts inject a custom transport via
             // ToolBuilder::transport and every Tool execution path honors it.
             transport: self.transport.clone(),
+            document_conversion: self.document_conversion.clone(),
+            content_processors: self.content_processors.clone(),
         }
     }
 }

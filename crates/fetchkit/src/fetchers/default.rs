@@ -16,6 +16,7 @@ use crate::convert::{
     classify_agent_resource, filter_excessive_newlines, is_html, is_markdown_content_type,
     is_plain_text_content_type,
 };
+use crate::documents::{DefaultFormatDetector, FormatDetector};
 use crate::error::FetchError;
 use crate::fetchers::Fetcher;
 use crate::file_saver::FileSaver;
@@ -86,6 +87,8 @@ const BINARY_PREFIXES: &[&str] = &[
     "application/vnd.ms-",
     "application/vnd.openxmlformats",
     "application/vnd.oasis.opendocument",
+    "application/msword",
+    "application/epub+zip",
     "font/",
 ];
 
@@ -544,6 +547,7 @@ impl Fetcher for DefaultFetcher {
         // Check for unsupported binary content
         if let Some(ref ct) = meta.content_type {
             if metadata_processor.is_none() && is_binary_content_type(ct) {
+                let error = unsupported_binary_message(&parsed_final_url, ct);
                 return Ok(FetchResponse {
                     url: final_url,
                     status_code,
@@ -553,10 +557,7 @@ impl Fetcher for DefaultFetcher {
                     etag: meta.etag,
                     filename: meta.filename,
                     redirect_chain,
-                    error: Some(
-                        "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."
-                            .to_string(),
-                    ),
+                    error: Some(error),
                     quality: Some(binary_quality_signal()),
                     ..Default::default()
                 });
@@ -565,8 +566,13 @@ impl Fetcher for DefaultFetcher {
 
         // THREAT[TM-DOS-001]: Read body with timeout and size limit
         // THREAT[TM-DOS-003]: Size limit also protects against compressed content bombs
+        // Document processors may raise the download cap (e.g. 25 MB documents);
+        // conversion output is still capped by max_body_size below.
+        let input_limit = metadata_processor
+            .and_then(|processor| processor.max_input_bytes())
+            .unwrap_or(max_body_size);
         let (body, input_truncated) =
-            read_body_with_timeout(response, BODY_TIMEOUT, max_body_size).await?;
+            read_body_with_timeout(response, BODY_TIMEOUT, input_limit).await?;
         let size = body.len() as u64;
 
         // Convert to string
@@ -1195,6 +1201,21 @@ impl Drop for DenyProxy {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+const UNSUPPORTED_BINARY_MESSAGE: &str =
+    "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched.";
+
+/// Rejection message, naming the document format when one was recognised so
+/// operators know conversion can be enabled.
+fn unsupported_binary_message(url: &Url, content_type: &str) -> String {
+    match DefaultFormatDetector.detect(url, Some(content_type)) {
+        Some(format) => format!(
+            "{UNSUPPORTED_BINARY_MESSAGE} {} conversion is not enabled in this fetchkit configuration; enable a document converter to convert it.",
+            format.as_str().to_ascii_uppercase()
+        ),
+        None => UNSUPPORTED_BINARY_MESSAGE.to_string(),
     }
 }
 

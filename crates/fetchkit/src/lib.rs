@@ -82,10 +82,10 @@ pub mod content;
 mod convert;
 mod crawl;
 mod dns;
+pub mod documents;
 mod error;
 pub mod fetchers;
 pub mod file_saver;
-mod office;
 mod tool;
 pub mod transport;
 mod types;
@@ -93,7 +93,7 @@ mod types;
 pub use client::{batch_fetch, batch_fetch_with_options, fetch, fetch_with_options, FetchOptions};
 pub use content::{
     ContentFocus, ContentOutputFormat, ContentProcessor, ContentProcessorError,
-    ContentProcessorInput, ContentProcessorRegistry, HtmlProcessor, PdfProcessor, ProcessedContent,
+    ContentProcessorInput, ContentProcessorRegistry, HtmlProcessor, ProcessedContent,
 };
 pub use convert::{
     extract_headings, extract_metadata, extract_readable_content, html_to_markdown,
@@ -101,6 +101,11 @@ pub use convert::{
     BuiltinHtmlToMarkdownConverter, HtmlToMarkdownConverter,
 };
 pub use dns::DnsPolicy;
+pub use documents::{
+    ConvertError, ConvertedDocument, DefaultFormatDetector, DocumentConversion,
+    DocumentConversionSettings, DocumentConverter, DocumentFormat, DocumentInput,
+    DocumentProcessor, FormatDetector, Locality,
+};
 pub use error::{FetchError, ToolError};
 pub use fetchers::{
     ArXivFetcher, DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
@@ -108,7 +113,6 @@ pub use fetchers::{
     RSSFeedFetcher, StackOverflowFetcher, TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
-pub use office::OfficeProcessor;
 pub use tool::{
     Tool, ToolBuilder, ToolExecution, ToolImage, ToolOutput, ToolOutputMetadata, ToolService,
     ToolStatus,

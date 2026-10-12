@@ -95,3 +95,21 @@ For Internet-facing fetching from untrusted input:
 - only opt in to `respect_proxy_env(true)` when the proxy is deliberate and hardened
 
 If you must fetch nonstandard ports or internal-looking public domains, start from `.hardened()` and then add the narrowest exception you need.
+
+## Document conversion
+
+PDF and Office documents are converted by a chain of document converters. The
+default converters (`pdf-inspector`, `office`) run in-process and make no network
+requests. Remote converters (`CloudflareConverter`, `HttpConverter`) upload the
+downloaded document to another service:
+
+- They run only when `DocumentConversion::allow_remote(true)` (CLI:
+  `--allow-remote-conversion`) is set, and never under `ToolBuilder::hardened()`.
+- Their endpoint is operator configuration; fetched content can never choose it.
+- Route uploads through your egress boundary by passing your own
+  `ConverterClient`, or enable proxy environment variables for them with
+  `ReqwestConverterClient::respect_proxy_env(true)`.
+- Documents are downloaded up to `max_document_bytes` (25 MB default), separate
+  from `max_body_size`. Lower it, or restrict `formats`, for tighter budgets.
+- Local parsing of hostile documents is CPU-bound; isolate the process and apply
+  outer CPU and memory limits for high-volume untrusted input (TM-DOS-007/008).

@@ -17,12 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve richer HTML semantics in Markdown, including collision-safe code
   fences, footnotes, math, callouts, highlights, strikethrough, image sources,
   figure captions, task checkboxes, and valid tables with formatted cells.
-- Add a pluggable post-download `ContentProcessor` registry and built-in
-  `PdfProcessor` that extracts Markdown from text-based PDFs with local
-  `pdf-inspector` processing and explicit OCR guidance for unsupported pages.
-- Add a built-in `OfficeProcessor` that converts Word (DOCX), PowerPoint (PPTX)
-  and spreadsheet (XLSX, XLSM, XLS, ODS) documents to Markdown locally, with
-  zip-bomb limits checked before any part is inflated.
+- Add a pluggable post-download `ContentProcessor` registry.
+- Add pluggable document conversion: `DocumentProcessor` runs an ordered,
+  per-format chain of `DocumentConverter` backends configured with
+  `DocumentConversion` (formats, chain order, 25 MB document cap, remote opt-in)
+  through `ToolBuilder`, the CLI/MCP flags `--convert`, `--converter`,
+  `--allow-remote-conversion`, `--max-document-bytes`, and Python keyword arguments.
+- Built-in converters behind Cargo features: `pdf-inspector` for text-based PDFs
+  (`docs-pdf`, default) and `office` for Word (DOCX), PowerPoint (PPTX) and
+  spreadsheets (XLSX, XLSM, XLSB, XLS, ODS) with zip-bomb limits (`docs-office`,
+  default), plus opt-in remote `CloudflareConverter` (Workers AI `toMarkdown`,
+  `docs-cloudflare`) and generic `HttpConverter` (`docs-http`). Remote converters
+  run only when explicitly allowed and never under `ToolBuilder::hardened()`.
+- `ToolBuilder::content_processor` adds custom processors ahead of the built-ins,
+  and `FetchOptions` carries `document_conversion` and `content_processors`.
 - Discover agent-facing resources from HTTP and HTML declarations plus bounded
   conventional probes, including `llms.txt`, `auth.md`, OAuth metadata, MCP
   server cards, A2A agent cards, and Agent Skills indexes. Markdown responses

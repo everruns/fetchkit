@@ -322,35 +322,36 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
   - `image/`, `audio/`, `video/`, `application/octet-stream`, `application/pdf`, `application/x-pdf`,
     `application/zip`, `application/gzip`, `application/x-tar`, `application/x-rar`,
     `application/x-7z`, `application/vnd.ms-`, `application/vnd.openxmlformats`,
-    `application/vnd.oasis.opendocument`, `font/`.
+    `application/vnd.oasis.opendocument`, `application/msword`, `application/epub+zip`, `font/`.
 - When `as_markdown` is requested, a matching registered content processor runs
   on the bounded response body before the generic binary response is returned.
-- The built-in PDF processor:
-  - Matches `application/pdf`, `application/x-pdf`, or a `.pdf` URL served as
-    `application/octet-stream`/without Content-Type.
-  - Uses `pdf-inspector` on in-memory bytes and returns `format: "markdown"` for
-    PDFs with an extractable text layer.
-  - Performs no network requests and no OCR. Scanned/image-only pages produce
-    `pdf_requires_ocr` quality warnings and suggest `use_ocr`.
-  - Runs on a bounded blocking pool path, and both PDF input and extracted output
-    honor `max_body_size`. Partial PDF inputs are not parsed.
-- The built-in Office processor:
-  - Matches DOCX, PPTX, XLSX/XLSM, XLS and ODS media types, or those file
-    extensions when served as `application/octet-stream`, `application/zip` or
-    without Content-Type.
-  - Returns `format: "markdown"`: Word headings, lists and tables; one
-    `## Slide N: title` section per slide in presentation order; one `## sheet`
-    Markdown table per spreadsheet sheet (first row as header, at most 1,000 rows
-    and 50 columns, with a `sheet_truncated` warning beyond that).
-  - Reports `office_docx`, `office_pptx` or `office_spreadsheet` as the extraction
-    method and `dc:title` from the document properties as the title.
-  - Performs no network requests. Zip containers are checked against an entry and
-    uncompressed-size budget before inflating (TM-DOS-008); shares the PDF
-    processor's blocking pool and two-document concurrency cap. Partial inputs are
-    not parsed.
+  Custom processors (`ToolBuilder::content_processor`) run before the built-ins.
+- The built-in `DocumentProcessor` converts documents through the configured
+  converter chain (see [Fetcher System](fetchers.md)):
+  - Detects the format from Content-Type, or from the URL extension for missing or
+    generic binary types, and confirms it by magic bytes after download.
+  - Downloads up to `max_document_bytes` (25 MB default); output honors
+    `max_body_size`. Partial inputs are never converted.
+  - Default converters (`docs-pdf`, `docs-office`): `pdf-inspector` for text PDFs
+    (`pdf_inspector`; OCR-only pages produce `pdf_requires_ocr` and `use_ocr`) and
+    `office` for DOCX/PPTX/XLSX/XLSM/XLSB/XLS/ODS (`office_docx`, `office_pptx`,
+    `office_spreadsheet`; Word headings, lists and tables; one `## Slide N: title`
+    per slide; one `## sheet` table per sheet capped at 1,000 rows and 50 columns
+    with `sheet_truncated`). Titles come from document properties.
+  - Remote converters (`cloudflare` -> `cloudflare_tomarkdown`, `HttpConverter`) run
+    only when remote conversion is allowed and never under `hardened()`.
+  - Converter fallthrough adds `fallback_converter`; quality score is 1.0 clean,
+    0.8 with warnings, 0.6 with OCR or encoding issues, 0.0 without text.
+- Configuration surfaces: `ToolBuilder::document_conversion`, CLI/MCP
+  `--convert`, `--converter`, `--allow-remote-conversion`, `--max-document-bytes`
+  (Cloudflare credentials from `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`),
+  Python `document_formats`, `converters`, `allow_remote_conversion`,
+  `max_document_bytes`, `cloudflare_account_id`, `cloudflare_api_token`.
 - For binary without a matching processor:
   - Return metadata (`content_type`, `size`, `filename`, `last_modified`)
-  - Include `error: "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."`
+  - Include `error: "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."`,
+    followed by `"<FORMAT> conversion is not enabled in this fetchkit configuration; enable a document converter to convert it."`
+    when a document format was recognised
   - Omit `content`, `format`, `truncated`
 
 #### HEAD

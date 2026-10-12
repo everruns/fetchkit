@@ -12,6 +12,11 @@ publish = false
 name = "fetchkit_py"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+docs-cloudflare = ["fetchkit/docs-cloudflare"]
+docs-all = ["fetchkit/docs-all"]
+
 [dependencies]
 fetchkit = { path = "../fetchkit" }
 pyo3 = { version = "0.29", features = ["extension-module"] }

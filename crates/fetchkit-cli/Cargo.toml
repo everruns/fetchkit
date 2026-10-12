@@ -20,6 +20,9 @@ doc = false
 default = []
 bot-auth = ["fetchkit/bot-auth"]
 render-rakers = ["fetchkit/render-rakers"]
+docs-cloudflare = ["fetchkit/docs-cloudflare"]
+docs-http = ["fetchkit/docs-http"]
+docs-all = ["fetchkit/docs-all"]
 
 [dependencies]
 fetchkit = { path = "../fetchkit", version = "0.5.0" }
