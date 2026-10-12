@@ -4,7 +4,10 @@
 use super::{DocumentConversion, DocumentFormat};
 
 /// Built-in converter names accepted by [`DocumentConversionSettings`].
-pub const BUILTIN_CONVERTERS: &[&str] = &["pdf-inspector", "office", "cloudflare"];
+///
+/// `office` is the deprecated in-crate Office converter (`docs-office` feature);
+/// `markkit` is the default Office backend.
+pub const BUILTIN_CONVERTERS: &[&str] = &["pdf-inspector", "markkit", "office", "cloudflare"];
 
 /// Plain settings resolved into a [`DocumentConversion`].
 ///
@@ -13,7 +16,7 @@ pub const BUILTIN_CONVERTERS: &[&str] = &["pdf-inspector", "office", "cloudflare
 pub struct DocumentConversionSettings {
     /// Accepted formats (e.g. `["pdf", "docx"]`). `None` keeps every supported format.
     pub formats: Option<Vec<String>>,
-    /// Converter order applied to every format (e.g. `["office", "cloudflare"]`).
+    /// Converter order applied to every format (e.g. `["markkit", "cloudflare"]`).
     /// `None` keeps the built-in local converters in their default order.
     pub converters: Option<Vec<String>>,
     /// Allow converters that send documents to another service.
@@ -90,11 +93,18 @@ impl DocumentConversionSettings {
                     Err("converter `pdf-inspector` requires the docs-pdf feature".to_string())
                 }
             }
+            "markkit" => {
+                if cfg!(feature = "docs-markkit") {
+                    Ok(conversion)
+                } else {
+                    Err("converter `markkit` requires the docs-markkit feature".to_string())
+                }
+            }
             "office" => {
                 if cfg!(feature = "docs-office") {
                     Ok(conversion)
                 } else {
-                    Err("converter `office` requires the docs-office feature".to_string())
+                    Err("converter `office` (deprecated; use `markkit`) requires the docs-office feature".to_string())
                 }
             }
             "cloudflare" => self.cloudflare(conversion),
@@ -185,6 +195,51 @@ mod tests {
         let conversion = settings.build().unwrap();
         assert_eq!(conversion.chain_for(DocumentFormat::Docx).len(), 1);
         assert!(conversion.chain_for(DocumentFormat::Pptx).is_empty());
+    }
+
+    #[cfg(feature = "docs-markkit")]
+    #[test]
+    fn markkit_converter_is_selectable_by_name() {
+        let settings = DocumentConversionSettings {
+            converters: Some(vec!["markkit".into()]),
+            ..Default::default()
+        };
+        let conversion = settings.build().unwrap();
+        let names = |format| {
+            conversion
+                .chain_for(format)
+                .iter()
+                .map(|converter| converter.name().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(DocumentFormat::Docx), ["markkit"]);
+        assert_eq!(names(DocumentFormat::Xlsx), ["markkit"]);
+        assert!(names(DocumentFormat::Pdf).is_empty());
+    }
+
+    #[cfg(not(feature = "docs-markkit"))]
+    #[test]
+    fn markkit_without_feature_is_explained() {
+        let settings = DocumentConversionSettings {
+            converters: Some(vec!["markkit".into()]),
+            ..Default::default()
+        };
+        assert!(settings
+            .build()
+            .unwrap_err()
+            .contains("requires the docs-markkit feature"));
+    }
+
+    #[cfg(not(feature = "docs-office"))]
+    #[test]
+    fn office_without_feature_points_to_markkit() {
+        let settings = DocumentConversionSettings {
+            converters: Some(vec!["office".into()]),
+            ..Default::default()
+        };
+        let error = settings.build().unwrap_err();
+        assert!(error.contains("docs-office feature"), "{error}");
+        assert!(error.contains("markkit"), "{error}");
     }
 
     #[cfg(not(feature = "docs-cloudflare"))]

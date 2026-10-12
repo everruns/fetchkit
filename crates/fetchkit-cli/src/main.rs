@@ -34,7 +34,7 @@ struct DocumentArgs {
     #[arg(long = "convert", value_delimiter = ',')]
     formats: Option<Vec<String>>,
 
-    /// Converter order, comma-separated (pdf-inspector, office, cloudflare). Cloudflare
+    /// Converter order, comma-separated (pdf-inspector, markkit, office, cloudflare). Cloudflare
     /// reads CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.
     #[arg(long = "converter", value_delimiter = ',')]
     converters: Option<Vec<String>>,

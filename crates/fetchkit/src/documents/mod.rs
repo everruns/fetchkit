@@ -23,6 +23,8 @@
 mod cloudflare;
 #[cfg(feature = "docs-http")]
 mod http;
+#[cfg(feature = "docs-markkit")]
+mod markkit;
 #[cfg(feature = "docs-office")]
 mod office;
 #[cfg(feature = "docs-pdf")]
@@ -46,11 +48,17 @@ use crate::content::{
 };
 use crate::{PageMetadata, PageQuality};
 
+#[cfg(feature = "docs-markkit")]
+pub use self::markkit::MarkkitConverter;
+/// markkit types for configuring [`MarkkitConverter`] limits.
+#[cfg(feature = "docs-markkit")]
+pub use ::markkit::{Markkit, MarkkitBuilder};
 #[cfg(feature = "docs-cloudflare")]
 pub use cloudflare::CloudflareConverter;
 #[cfg(feature = "docs-http")]
 pub use http::HttpConverter;
 #[cfg(feature = "docs-office")]
+#[allow(deprecated)]
 pub use office::OfficeConverter;
 #[cfg(feature = "docs-pdf")]
 pub use pdf_inspector::PdfInspectorConverter;
@@ -266,12 +274,20 @@ fn media_type(content_type: &str) -> &str {
 
 // Document parsers are CPU-bound (pdf-inspector also uses Rayon internally); bound
 // concurrent local conversions so batch fetches cannot multiply parser work.
-#[cfg(any(feature = "docs-pdf", feature = "docs-office"))]
+#[cfg(any(
+    feature = "docs-pdf",
+    feature = "docs-markkit",
+    feature = "docs-office"
+))]
 static DOCUMENT_PROCESSING_LIMIT: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
     std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
 /// Run CPU-bound conversion on the blocking pool under the shared document limit.
-#[cfg(any(feature = "docs-pdf", feature = "docs-office"))]
+#[cfg(any(
+    feature = "docs-pdf",
+    feature = "docs-markkit",
+    feature = "docs-office"
+))]
 pub(crate) async fn run_document_task<T, F>(task: F) -> Result<T, ConvertError>
 where
     T: Send + 'static,
@@ -280,7 +296,11 @@ where
     run_limited(Arc::clone(&DOCUMENT_PROCESSING_LIMIT), task).await
 }
 
-#[cfg(any(feature = "docs-pdf", feature = "docs-office"))]
+#[cfg(any(
+    feature = "docs-pdf",
+    feature = "docs-markkit",
+    feature = "docs-office"
+))]
 async fn run_limited<T, F>(limit: Arc<tokio::sync::Semaphore>, task: F) -> Result<T, ConvertError>
 where
     T: Send + 'static,
@@ -449,9 +469,12 @@ pub trait DocumentConverter: Send + Sync {
 
 /// Which formats are converted, by which backends, in what order.
 ///
-/// The default contains the built-in local converters enabled by Cargo features
-/// (`docs-pdf` adds `PdfInspectorConverter`, `docs-office` adds `OfficeConverter`)
-/// and accepts every format they support.
+/// The default contains the built-in local converters enabled by Cargo features, in
+/// this order: `docs-pdf` adds `PdfInspectorConverter`, `docs-markkit` adds
+/// `MarkkitConverter` (the default Office backend), and the deprecated
+/// `docs-office` adds `OfficeConverter` last, so with both Office features enabled
+/// markkit runs first and `office` is the fallback (and the only PPTX/XLSB backend).
+/// It accepts every format they support.
 #[derive(Clone)]
 pub struct DocumentConversion {
     converters: Vec<Arc<dyn DocumentConverter>>,
@@ -467,7 +490,10 @@ impl Default for DocumentConversion {
         let conversion = Self::empty();
         #[cfg(feature = "docs-pdf")]
         let conversion = conversion.converter(PdfInspectorConverter::new());
+        #[cfg(feature = "docs-markkit")]
+        let conversion = conversion.converter(MarkkitConverter::new());
         #[cfg(feature = "docs-office")]
+        #[allow(deprecated)]
         let conversion = conversion.converter(OfficeConverter::new());
         conversion
     }
@@ -1025,7 +1051,11 @@ mod tests {
         assert!(error.to_string().contains("converter limit is 2"));
     }
 
-    #[cfg(any(feature = "docs-pdf", feature = "docs-office"))]
+    #[cfg(any(
+        feature = "docs-pdf",
+        feature = "docs-markkit",
+        feature = "docs-office"
+    ))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancelled_caller_does_not_release_running_task_permit() {
         use std::sync::mpsc;

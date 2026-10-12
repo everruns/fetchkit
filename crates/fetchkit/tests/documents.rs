@@ -275,3 +275,126 @@ async fn cloudflare_backend_converts_downloaded_docx() {
         .windows(4)
         .any(|window| window == b"PK\x03\x04"));
 }
+
+#[cfg(feature = "docs-markkit")]
+mod markkit_default {
+    use std::io::Write;
+
+    use super::*;
+
+    fn zip(parts: &[(&str, &str)]) -> Vec<u8> {
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(&mut buffer);
+        for (name, body) in parts {
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(body.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+        buffer.into_inner()
+    }
+
+    fn docx() -> Vec<u8> {
+        zip(&[(
+            "word/document.xml",
+            r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Roadmap</w:t></w:r></w:p><w:p><w:r><w:t>Markkit converts this.</w:t></w:r></w:p></w:body></w:document>"#,
+        )])
+    }
+
+    fn xlsx() -> Vec<u8> {
+        zip(&[
+            (
+                "_rels/.rels",
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/workbook.xml",
+                r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Q3" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Item</t></is></c><c r="B1" t="inlineStr"><is><t>Units</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Widgets</t></is></c><c r="B2"><v>42</v></c></row></sheetData></worksheet>"#,
+            ),
+        ])
+    }
+
+    async fn serve(path_: &str, content_type: &str, body: Vec<u8>) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(path_))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", content_type)
+                    .set_body_bytes(body),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn default_tool_converts_docx_with_markkit() {
+        let server = serve("/files/roadmap.docx", DOCX, docx()).await;
+        let response = builder()
+            .build()
+            .execute(
+                FetchRequest::new(format!("{}/files/roadmap.docx", server.uri())).as_markdown(),
+            )
+            .await
+            .unwrap();
+
+        assert!(response.error.is_none(), "{:?}", response.error);
+        let content = response.content.unwrap();
+        assert!(content.contains("Roadmap"), "{content}");
+        assert!(content.contains("Markkit converts this."), "{content}");
+        let metadata = response.metadata.unwrap();
+        assert_eq!(metadata.extraction_method.as_deref(), Some("markkit_docx"));
+        assert_eq!(metadata.title.as_deref(), Some("Roadmap"));
+    }
+
+    #[tokio::test]
+    async fn default_tool_converts_generic_xlsx_download_with_markkit() {
+        let server = serve("/export/q3.xlsx", "application/octet-stream", xlsx()).await;
+        let response = builder()
+            .build()
+            .execute(FetchRequest::new(format!("{}/export/q3.xlsx", server.uri())).as_markdown())
+            .await
+            .unwrap();
+
+        let content = response.content.unwrap();
+        assert!(content.contains("| Widgets | 42 |"), "{content}");
+        assert_eq!(
+            response.metadata.unwrap().extraction_method.as_deref(),
+            Some("markkit_xlsx")
+        );
+    }
+
+    #[tokio::test]
+    async fn markkit_limits_flow_through_tool_builder() {
+        use fetchkit::documents::{Markkit, MarkkitConverter};
+
+        let server = serve("/export/q3.xlsx", "application/octet-stream", xlsx()).await;
+        let tight = MarkkitConverter::with_markkit(Markkit::builder().max_sheet_cols(1).build());
+        let response = builder()
+            .document_conversion(DocumentConversion::default().converter(tight))
+            .build()
+            .execute(FetchRequest::new(format!("{}/export/q3.xlsx", server.uri())).as_markdown())
+            .await
+            .unwrap();
+
+        let content = response.content.unwrap();
+        assert!(content.contains("Widgets"), "{content}");
+        assert!(!content.contains("42"), "{content}");
+        let quality = response.quality.unwrap();
+        assert!(
+            quality.warnings.iter().any(|w| w.starts_with("truncated")),
+            "{:?}",
+            quality.warnings
+        );
+    }
+}

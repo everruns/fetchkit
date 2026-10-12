@@ -11,13 +11,17 @@ categories.workspace = true
 readme = "../../README.md"
 
 [features]
-default = ["docs-pdf", "docs-office"]
+default = ["docs-pdf", "docs-markkit"]
 # Document conversion backends (see knowledge/foundations/fetchers.md)
 docs-pdf = ["dep:pdf-inspector"]
+# Office documents (DOCX, XLSX/XLSM, XLS, ODS) via markkit.
+docs-markkit = ["dep:markkit"]
+# Deprecated in-crate Office converter (DOCX, PPTX, spreadsheets); use docs-markkit.
 docs-office = ["dep:calamine", "dep:zip", "dep:quick-xml"]
 docs-cloudflare = []
 docs-http = []
-docs-all = ["docs-pdf", "docs-office", "docs-cloudflare", "docs-http"]
+# Every supported backend; excludes the deprecated docs-office.
+docs-all = ["docs-pdf", "docs-markkit", "docs-cloudflare", "docs-http"]
 bot-auth = ["dep:ed25519-dalek", "dep:base64", "dep:sha2", "dep:rand"]
 live-tests = []
 render-rakers = ["dep:rakers"]
@@ -37,6 +41,7 @@ bytes = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
 pdf-inspector = { workspace = true, optional = true }
+markkit = { workspace = true, optional = true }
 calamine = { workspace = true, optional = true }
 zip = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
@@ -59,3 +64,5 @@ base64 = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
 mira-eval = "0.3"
+# Builds in-memory DOCX/XLSX fixtures for document tests.
+zip = { workspace = true, features = ["deflate"] }

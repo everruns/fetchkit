@@ -16,6 +16,10 @@
 //!   without limit. Spreadsheet output is capped per sheet (rows and columns) and the
 //!   caller caps the final Markdown at `max_body_size`. Parsing runs on a blocking
 //!   task under the same two-document concurrency cap as PDFs.
+//! - Deprecated in favour of `MarkkitConverter` (`docs-markkit`), the default Office
+//!   backend. Kept behind the non-default `docs-office` feature for one release; it
+//!   is the only built-in PPTX and XLSB converter.
+#![allow(deprecated)]
 
 use std::borrow::Cow;
 use std::io::{Cursor, Read};
@@ -76,6 +80,11 @@ impl OfficeKind {
 
 /// Converts Word (DOCX), PowerPoint (PPTX) and spreadsheets (XLSX, XLSM, XLSB,
 /// XLS, ODS) to Markdown in-process.
+///
+/// Deprecated: use `MarkkitConverter` (`docs-markkit` feature), the default Office
+/// backend. This converter remains available behind the non-default `docs-office`
+/// feature and is the only built-in PPTX and XLSB backend.
+#[deprecated(note = "use MarkkitConverter (docs-markkit)")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OfficeConverter;
 
