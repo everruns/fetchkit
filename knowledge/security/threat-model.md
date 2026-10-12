@@ -298,7 +298,7 @@ to protect against changes between validation and write.
 | TM-DOS-005 | DNS resolution delay | Low | DNS resolution uses system resolver; no explicit timeout on DNS lookup | **ACCEPTED** |
 | TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
 | TM-DOS-007 | CPU/memory exhaustion from adversarial PDF parsing | Medium | Bounded input/output, blocking-task isolation, and a cancellation-safe two-document concurrency cap; parser-internal expansion remains possible | **ACCEPTED** |
-| TM-DOS-008 | Zip bomb or adversarial Office document | Medium | Central-directory entry and uncompressed-size budget before inflating, size-capped part reads, per-sheet output caps, shared two-document blocking cap | MITIGATED |
+| TM-DOS-008 | Zip bomb or adversarial Office document | Medium | markkit archive entry/size budgets and cell-grid pre-scan before inflating (deprecated `office`: own budget and capped part reads), per-sheet output caps, shared two-document blocking cap | MITIGATED |
 
 ### Mitigation Details
 
@@ -332,8 +332,18 @@ cancellation boundary once a blocking parse begins.
 
 **TM-DOS-008 — Zip bomb or adversarial Office document (MITIGATED):**
 Office documents are zip archives (except legacy XLS), so a body within `max_document_bytes`
-can declare gigabytes of content. Before any part is inflated, the Office processor
-(`office` converter) rejects archives with more than 10,000 entries or more than 200 MB of declared
+can declare gigabytes of content. The default `markkit` converter relies on markkit's
+limits: at most 10,000 zip entries, 64 MiB per decompressed entry and 256 MiB total
+(enforced while inflating, not only from declared sizes), XLS/ODS cell-grid pre-scan
+capped at 4,000,000 cells, and 10,000 rows by 256 columns rendered per sheet. Hidden
+sheets are skipped by default. markkit is built without its HTTP client and receives
+only the bounded bytes. Operators can tighten these via `MarkkitConverter::with_markkit`.
+Parsing runs on the shared blocking path under the two-document concurrency cap, and the
+final Markdown is capped at `max_body_size`. A markkit parser panic is contained by the
+blocking task (`JoinError` becomes a converter failure) unless the embedding binary uses
+`panic = "abort"`.
+
+The deprecated `office` converter (`docs-office`) rejects archives with more than 10,000 entries or more than 200 MB of declared
 uncompressed content, and every XML part it reads itself is read through a 64 MB cap,
 since declared sizes can lie. Spreadsheet output is capped at 1,000 rows and 50 columns
 per sheet before the `max_body_size` output cap. Parsing shares the local converters'

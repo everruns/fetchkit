@@ -65,11 +65,19 @@ returns nothing usable (for example a scanned PDF that needs OCR).
 | Converter | Cargo feature | Default | Where it runs | Formats |
 | --- | --- | --- | --- | --- |
 | `PdfInspectorConverter` (`pdf-inspector`) | `docs-pdf` | on | local | PDF (text layer; reports OCR-only pages) |
-| `OfficeConverter` (`office`) | `docs-office` | on | local | DOCX, PPTX, XLSX, XLSM, XLSB, XLS, ODS |
+| `MarkkitConverter` (`markkit`) | `docs-markkit` | on | local | DOCX, XLSX, XLSM, XLS, ODS (via [markkit](https://crates.io/crates/markkit)) |
+| `OfficeConverter` (`office`), deprecated | `docs-office` | off | local | DOCX, PPTX, XLSX, XLSM, XLSB, XLS, ODS |
 | `CloudflareConverter` (`cloudflare`) | `docs-cloudflare` | off | remote | PDF, DOCX, XLSX, XLSB, XLS, ODT, ODS |
 | `HttpConverter` (any name) | `docs-http` | off | remote (configurable) | any format your service accepts |
 
-`docs-all` enables every backend. Remote converters upload document bytes to a
+`markkit` is the default Office backend. The in-crate `office` converter is
+deprecated and kept for one release behind the non-default `docs-office` feature;
+it is still the only built-in PPTX and XLSB converter. With both features enabled,
+`markkit` runs first and `office` is the fallback. `docs-all` enables every
+backend except the deprecated `docs-office`. Tune markkit limits (rows and
+columns per sheet, hidden sheets, archive budgets) by registering
+`MarkkitConverter::with_markkit(Markkit::builder()...build())`, which replaces the
+default `markkit` converter in place. Remote converters upload document bytes to a
 third party, so they only run when remote conversion is explicitly allowed, and
 never under `ToolBuilder::hardened()`.
 
@@ -79,7 +87,7 @@ use fetchkit::{DocumentConversion, DocumentFormat, ToolBuilder};
 
 let tool = ToolBuilder::new()
     .document_conversion(
-        DocumentConversion::default()                 // pdf-inspector + office
+        DocumentConversion::default()                 // pdf-inspector + markkit
             .converter(CloudflareConverter::new(account_id, api_token))
             .allow_remote(true)                       // opt in to uploads
             .chain(DocumentFormat::Pdf, ["pdf-inspector", "cloudflare"])
@@ -93,7 +101,7 @@ Extension points: implement `DocumentConverter` for a new backend,
 `FormatDetector` to change format detection, `ConverterClient` to route remote
 uploads through your own egress, or `ContentProcessor` to bypass the chain.
 
-CLI and MCP server flags: `--convert pdf,docx`, `--converter office,cloudflare`,
+CLI and MCP server flags: `--convert pdf,docx`, `--converter markkit,cloudflare`,
 `--allow-remote-conversion`, `--max-document-bytes`. The Cloudflare converter
 reads `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (build with
 `--features docs-cloudflare`). Python: `FetchkitTool(document_formats=...,

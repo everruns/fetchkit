@@ -35,6 +35,7 @@ fn test_tool_with_save() -> Tool {
         .build()
 }
 
+#[cfg(feature = "docs-pdf")]
 fn text_pdf(text: &str) -> Vec<u8> {
     let escaped = text
         .replace('\\', "\\\\")
@@ -436,6 +437,7 @@ async fn test_binary_content() {
     );
 }
 
+#[cfg(feature = "docs-pdf")]
 #[tokio::test]
 async fn test_pdf_content_processor_returns_markdown() {
     let mock_server = MockServer::start().await;
@@ -465,7 +467,7 @@ async fn test_pdf_content_processor_returns_markdown() {
     assert!(resp.error.is_none());
 }
 
-#[cfg(feature = "docs-office")]
+#[cfg(feature = "docs-markkit")]
 fn docx_with_paragraph(text: &str) -> Vec<u8> {
     use std::io::Write;
 
@@ -485,7 +487,7 @@ fn docx_with_paragraph(text: &str) -> Vec<u8> {
     buffer.into_inner()
 }
 
-#[cfg(feature = "docs-office")]
+#[cfg(feature = "docs-markkit")]
 #[tokio::test]
 async fn test_docx_content_processor_returns_markdown() {
     let mock_server = MockServer::start().await;
@@ -509,11 +511,11 @@ async fn test_docx_content_processor_returns_markdown() {
     assert_eq!(resp.format.as_deref(), Some("markdown"));
     assert_eq!(
         resp.content.as_deref(),
-        Some("## Minutes\n\nShip the release on Friday.")
+        Some("## Minutes\n\nShip the release on Friday.\n")
     );
     assert_eq!(
         resp.metadata.unwrap().extraction_method.as_deref(),
-        Some("office_docx")
+        Some("markkit_docx")
     );
     assert!(resp.error.is_none());
 }

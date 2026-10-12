@@ -332,12 +332,18 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
     generic binary types, and confirms it by magic bytes after download.
   - Downloads up to `max_document_bytes` (25 MB default); output honors
     `max_body_size`. Partial inputs are never converted.
-  - Default converters (`docs-pdf`, `docs-office`): `pdf-inspector` for text PDFs
+  - Default converters (`docs-pdf`, `docs-markkit`): `pdf-inspector` for text PDFs
     (`pdf_inspector`; OCR-only pages produce `pdf_requires_ocr` and `use_ocr`) and
-    `office` for DOCX/PPTX/XLSX/XLSM/XLSB/XLS/ODS (`office_docx`, `office_pptx`,
-    `office_spreadsheet`; Word headings, lists and tables; one `## Slide N: title`
-    per slide; one `## sheet` table per sheet capped at 1,000 rows and 50 columns
-    with `sheet_truncated`). Titles come from document properties.
+    `markkit` for DOCX/XLSX/XLSM/XLS/ODS (`markkit_docx`, `markkit_xlsx`,
+    `markkit_xls`, `markkit_ods`; Word headings, lists and tables with the title
+    from core properties or the Title style; one table per visible sheet capped at
+    10,000 rows and 256 columns by default, warnings `truncated_sheet`,
+    `hidden_sheet_skipped`, `sheet_error`). PPTX and XLSB are not converted by
+    default.
+  - Deprecated `office` converter (`docs-office`, off by default; fallback after
+    `markkit` when enabled): DOCX/PPTX/XLSX/XLSM/XLSB/XLS/ODS (`office_docx`,
+    `office_pptx`, `office_spreadsheet`; one `## Slide N: title` per slide; sheets
+    capped at 1,000 rows and 50 columns with `sheet_truncated`).
   - Remote converters (`cloudflare` -> `cloudflare_tomarkdown`, `HttpConverter`) run
     only when remote conversion is allowed and never under `hardened()`.
   - Converter fallthrough adds `fallback_converter`; quality score is 1.0 clean,
