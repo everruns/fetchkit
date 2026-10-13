@@ -344,6 +344,12 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
     `markkit` when enabled): DOCX/PPTX/XLSX/XLSM/XLSB/XLS/ODS (`office_docx`,
     `office_pptx`, `office_spreadsheet`; one `## Slide N: title` per slide; sheets
     capped at 1,000 rows and 50 columns with `sheet_truncated`).
+  - Both local DOCX backends reject tables above 1,000 rows, 50 columns or
+    50,000 padded cells before rendering. markkit's admission also counts source
+    cells, merged-cell spans and nested tables across an XML part. The deprecated
+    Office backend additionally admits all DOCX Markdown into a 10 MiB buffer
+    before allocation; a smaller response cap is still applied afterwards.
+    Exceeding these limits yields a converter failure and normal chain fallthrough.
   - Remote converters (`cloudflare` -> `cloudflare_tomarkdown`, `HttpConverter`) run
     only when remote conversion is allowed and never under `hardened()`.
   - Converter fallthrough adds `fallback_converter`; quality score is 1.0 clean,

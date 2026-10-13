@@ -9,6 +9,8 @@
 //!   fetchkit adds the blocking-pool two-document concurrency cap and caps the final
 //!   Markdown at `max_body_size`. Callers tune markkit limits through
 //!   [`MarkkitConverter::with_markkit`].
+//! - DOCX tables pass Fetchkit's archive preflight before markkit parses them:
+//!   sheet limits in markkit do not apply to DOCX padding (TM-DOS-008).
 //! - The confirmed fetchkit format's canonical media type is passed as the hint, so
 //!   markkit parses the same format fetchkit detected and magic-checked.
 //! - markkit warnings are `code: detail`; only the stable code is surfaced as a
@@ -107,20 +109,25 @@ impl DocumentConverter for MarkkitConverter {
         }
         let markkit = Arc::clone(&self.markkit);
         let media_type = input.format.media_type();
+        let is_docx = input.format == DocumentFormat::Docx;
         let DocumentInput {
             body, file_name, ..
         } = input;
         let extraction = run_document_task(move || {
-            markkit.extract_document_sync(
-                &body,
-                DocumentHint {
-                    content_type: Some(media_type),
-                    file_name: Some(&file_name),
-                },
-            )
+            if is_docx {
+                super::tables::check_archive(&body, markkit.config())?;
+            }
+            markkit
+                .extract_document_sync(
+                    &body,
+                    DocumentHint {
+                        content_type: Some(media_type),
+                        file_name: Some(&file_name),
+                    },
+                )
+                .map_err(map_error)
         })
-        .await?
-        .map_err(map_error)?;
+        .await??;
 
         let mut warnings: Vec<String> = Vec::new();
         for warning in &extraction.warnings {
@@ -277,6 +284,26 @@ mod tests {
         assert!(converted.markdown.contains("Ship on Friday."));
         assert!(converted.markdown.contains("| Ann | Release |"));
         assert!(converted.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn converts_docx_with_relationship_selected_main_part() {
+        let body = zip(&[
+            (
+                "_rels/.rels",
+                r#"<Relationships><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="./parts/custom.data"/></Relationships>"#,
+            ),
+            (
+                "parts/custom.data",
+                r#"<w:document xmlns:w="w"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Owner</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>Ann</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#,
+            ),
+            ("word/media/image.png", "ordinary binary fixture"),
+        ]);
+        let converted = MarkkitConverter::new()
+            .convert(input(DocumentFormat::Docx, body))
+            .await
+            .unwrap();
+        assert!(converted.markdown.contains("| Owner |\n| --- |\n| Ann |"));
     }
 
     #[tokio::test]

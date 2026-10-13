@@ -15,7 +15,7 @@ default = ["docs-pdf", "docs-markkit"]
 # Document conversion backends (see knowledge/foundations/fetchers.md)
 docs-pdf = ["dep:pdf-inspector"]
 # Office documents (DOCX, XLSX/XLSM, XLS, ODS) via markkit.
-docs-markkit = ["dep:markkit"]
+docs-markkit = ["dep:markkit", "dep:zip", "dep:quick-xml"]
 # Deprecated in-crate Office converter (DOCX, PPTX, spreadsheets); use docs-markkit.
 docs-office = ["dep:calamine", "dep:zip", "dep:quick-xml"]
 docs-cloudflare = []

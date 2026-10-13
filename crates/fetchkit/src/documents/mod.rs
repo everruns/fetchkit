@@ -32,6 +32,8 @@ mod pdf_inspector;
 #[cfg(any(feature = "docs-cloudflare", feature = "docs-http"))]
 mod remote;
 mod settings;
+#[cfg(any(feature = "docs-markkit", feature = "docs-office"))]
+mod tables;
 
 use std::collections::BTreeMap;
 use std::fmt;

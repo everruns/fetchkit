@@ -141,10 +141,22 @@ Built-in converters (Cargo features):
   sheet, cell grid, hidden sheets) are markkit's defaults, tunable with
   `MarkkitConverter::with_markkit` (`fetchkit::documents::{Markkit, MarkkitBuilder}`).
   Spreadsheet titles are not reported (markkit returns none).
+  DOCX gets a Fetchkit archive/XML preflight because markkit's sheet limits do
+  not constrain Word tables: 1,000 rows, 50 columns and a cumulative 50,000
+  source/padded cells per XML part, including nested tables and merged-cell spans.
+  The standard main part and all internal `officeDocument` relationship targets
+  are checked, including nonstandard paths. The preflight honors tighter configured archive budgets and
+  caps them at markkit's defaults. It admits padding bytes before backend rendering;
+  other markkit output remains bounded by its input/archive controls and the final
+  response cap, rather than an incremental output writer.
 - `office` (deprecated, "not necessarily correct"; kept one release): DOCX and PPTX XML parts via `quick-xml`, spreadsheets via `calamine`. Zip
   containers are checked against an entry-count and total uncompressed-size budget
   before any part is inflated, and each part is read through a size cap (TM-DOS-008).
-  Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet.
+  Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet. DOCX uses the same
+  table dimensions plus 50,000 source/padded cells per table. Paragraph/cell text
+  and cumulative Markdown are capped at 10 MiB. A single output buffer admits
+  exact UTF-8/escaped bytes, padding and block separators before reservation;
+  limit failures are converter errors, not silent table truncation.
 - `cloudflare`: Workers AI `toMarkdown` REST endpoint, one multipart file per request,
   bearer token held in `SecretString`. Images are not routed (billed by Cloudflare).
 - `HttpConverter`: multipart upload to an operator-configured URL; Markdown from the raw
