@@ -13,8 +13,9 @@
 //!   inflated, the central directory is checked against an entry-count and a total
 //!   uncompressed-size budget, and every part fetchkit reads itself is read through a
 //!   size-capped reader, so a small zip bomb within `max_body_size` cannot expand
-//!   without limit. Spreadsheet output is capped per sheet (rows and columns) and the
-//!   caller caps the final Markdown at `max_body_size`. Parsing runs on a blocking
+//!   without limit. DOCX tables reuse the sheet dimensions and a checked padded-cell
+//!   budget. DOCX Markdown is admitted into one 10 MiB buffer before escaping or
+//!   padding; the caller may apply a smaller `max_body_size`. Parsing runs on a blocking
 //!   task under the same two-document concurrency cap as PDFs.
 //! - Deprecated in favour of `MarkkitConverter` (`docs-markkit`), the default Office
 //!   backend. Kept behind the non-default `docs-office` feature for one release; it
@@ -29,6 +30,7 @@ use calamine::{open_workbook_auto_from_rs, Data, Reader};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
 
+use super::tables::{TableLimits as DocxLimits, TABLE_LIMITS as DOCX_LIMITS};
 use super::{
     run_document_task, ConvertError, ConvertedDocument, DocumentConverter, DocumentFormat,
     DocumentInput, Locality,
@@ -44,9 +46,9 @@ const MAX_PART_BYTES: u64 = 64 * 1024 * 1024;
 /// Maximum slides read from one presentation.
 const MAX_SLIDES: usize = 1_000;
 /// Maximum rows rendered per spreadsheet sheet.
-const MAX_SHEET_ROWS: usize = 1_000;
+const MAX_SHEET_ROWS: usize = DOCX_LIMITS.rows;
 /// Maximum columns rendered per spreadsheet sheet.
-const MAX_SHEET_COLUMNS: usize = 50;
+const MAX_SHEET_COLUMNS: usize = DOCX_LIMITS.columns;
 
 /// Office document kinds with distinct extraction paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,16 +289,19 @@ struct DocxParagraph {
 }
 
 impl DocxParagraph {
-    fn render(self) -> Option<String> {
+    fn render(self, limit: usize) -> Result<Option<String>, ContentProcessorError> {
         let text = self.text.trim();
         if text.is_empty() {
-            return None;
+            return Ok(None);
         }
-        Some(match (self.heading, self.list_level) {
-            (Some(level), _) => format!("{} {text}", "#".repeat(level)),
-            (None, Some(level)) => format!("{}- {text}", "  ".repeat(level)),
-            (None, None) => text.to_string(),
-        })
+        let prefix = match (self.heading, self.list_level) {
+            (Some(level), _) => format!("{} ", "#".repeat(level)),
+            (None, Some(level)) => format!("{}- ", "  ".repeat(level)),
+            (None, None) => String::new(),
+        };
+        let mut rendered = prefix;
+        append_bounded(&mut rendered, text, limit)?;
+        Ok(Some(rendered))
     }
 }
 
@@ -316,15 +321,25 @@ fn heading_level(style: &str) -> Option<usize> {
 }
 
 fn docx_to_markdown(xml: &str) -> Result<String, ContentProcessorError> {
+    docx_to_markdown_with_limits(xml, DOCX_LIMITS)
+}
+
+fn docx_to_markdown_with_limits(
+    xml: &str,
+    limits: DocxLimits,
+) -> Result<String, ContentProcessorError> {
     let mut reader = XmlReader::from_str(xml);
-    let mut blocks: Vec<String> = Vec::new();
+    let mut output = String::new();
     let mut paragraph: Option<DocxParagraph> = None;
     let mut in_text = false;
     // Tables: rows of cells, each cell a list of paragraph texts. Nested tables are
     // flattened into their parent cell.
     let mut table_depth = 0usize;
     let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut cell: Option<Vec<String>> = None;
+    let mut cell: Option<String> = None;
+    let mut width = 0;
+    let mut source_cells = 0;
+    let mut table_text_bytes = 0;
 
     loop {
         match reader.read_event().map_err(xml_error)? {
@@ -335,45 +350,80 @@ fn docx_to_markdown(xml: &str) -> Result<String, ContentProcessorError> {
                     table_depth += 1;
                     if table_depth == 1 {
                         rows.clear();
+                        width = 0;
+                        source_cells = 0;
+                        table_text_bytes = 0;
                     }
                 }
-                b"tr" if table_depth == 1 => rows.push(Vec::new()),
-                b"tc" if table_depth == 1 => cell = Some(Vec::new()),
-                _ => docx_property(&start, &mut paragraph),
+                b"tr" if table_depth == 1 => {
+                    check_table_shape(rows.len() + 1, width, limits)?;
+                    rows.push(Vec::new());
+                }
+                b"tc" if table_depth > 0 => {
+                    source_cells = checked_size(source_cells, 1, limits.cells)?;
+                    if table_depth == 1 {
+                        width = width.max(rows.last().map_or(1, |row| row.len() + 1));
+                        check_table_shape(rows.len(), width, limits)?;
+                        cell = Some(String::new());
+                    }
+                }
+                _ => docx_property(&start, &mut paragraph, limits.output_bytes)?,
             },
             // Self-closing elements never open a container: an empty `<w:p/>` or
             // `<w:t/>` has no matching End event.
-            Event::Empty(start) => docx_property(&start, &mut paragraph),
+            Event::Empty(start) => docx_property(&start, &mut paragraph, limits.output_bytes)?,
             Event::Text(text) if in_text => {
                 let text = text.xml10_content().map_err(|e| xml_error(e.into()))?;
-                push_paragraph_text(&mut paragraph, &text);
+                if let Some(p) = &mut paragraph {
+                    append_bounded(&mut p.text, &text, limits.output_bytes)?;
+                }
             }
             Event::GeneralRef(reference) if in_text => {
                 if let Some(p) = &mut paragraph {
-                    push_reference(&mut p.text, &reference);
+                    let mut text = String::new();
+                    push_reference(&mut text, &reference);
+                    append_bounded(&mut p.text, &text, limits.output_bytes)?;
                 }
             }
             Event::End(end) => match end.local_name().as_ref() {
                 b"t" => in_text = false,
                 b"p" => {
-                    if let Some(rendered) = paragraph.take().and_then(DocxParagraph::render) {
+                    if let Some(rendered) = paragraph
+                        .take()
+                        .map(|p| p.render(limits.output_bytes))
+                        .transpose()?
+                        .flatten()
+                    {
                         match &mut cell {
-                            Some(cell) => cell.push(rendered),
-                            None => blocks.push(rendered),
+                            Some(cell) => {
+                                let separator = if cell.is_empty() { "" } else { "<br>" };
+                                table_text_bytes = checked_size(
+                                    table_text_bytes,
+                                    separator.len(),
+                                    limits.output_bytes,
+                                )?;
+                                table_text_bytes = checked_size(
+                                    table_text_bytes,
+                                    rendered.len(),
+                                    limits.output_bytes,
+                                )?;
+                                append_bounded(cell, separator, limits.output_bytes)?;
+                                append_bounded(cell, &rendered, limits.output_bytes)?;
+                            }
+                            None => append_block(&mut output, &rendered, limits.output_bytes)?,
                         }
                     }
                 }
                 b"tc" if table_depth == 1 => {
                     if let (Some(done), Some(row)) = (cell.take(), rows.last_mut()) {
-                        row.push(done.join("<br>"));
+                        row.push(done);
                     }
                 }
                 b"tbl" => {
                     table_depth = table_depth.saturating_sub(1);
                     if table_depth == 0 {
-                        if let Some(table) = markdown_table(&std::mem::take(&mut rows)) {
-                            blocks.push(table);
-                        }
+                        append_table(&rows, &mut output, limits)?;
+                        rows.clear();
                     }
                 }
                 _ => {}
@@ -382,13 +432,17 @@ fn docx_to_markdown(xml: &str) -> Result<String, ContentProcessorError> {
             _ => {}
         }
     }
-    Ok(blocks.join("\n\n"))
+    Ok(output)
 }
 
 /// Paragraph properties and inline breaks, which may be self-closing.
-fn docx_property(start: &BytesStart<'_>, paragraph: &mut Option<DocxParagraph>) {
+fn docx_property(
+    start: &BytesStart<'_>,
+    paragraph: &mut Option<DocxParagraph>,
+    limit: usize,
+) -> Result<(), ContentProcessorError> {
     let Some(p) = paragraph else {
-        return;
+        return Ok(());
     };
     match start.local_name().as_ref() {
         b"pStyle" => {
@@ -405,16 +459,11 @@ fn docx_property(start: &BytesStart<'_>, paragraph: &mut Option<DocxParagraph>) 
                 .unwrap_or(0usize);
             p.list_level = Some(level.min(8));
         }
-        b"tab" => p.text.push('\t'),
-        b"br" | b"cr" => p.text.push('\n'),
+        b"tab" => append_bounded(&mut p.text, "\t", limit)?,
+        b"br" | b"cr" => append_bounded(&mut p.text, "\n", limit)?,
         _ => {}
     }
-}
-
-fn push_paragraph_text(paragraph: &mut Option<DocxParagraph>, text: &str) {
-    if let Some(p) = paragraph {
-        p.text.push_str(text);
-    }
+    Ok(())
 }
 
 /// Slide part names in presentation order, read from `ppt/presentation.xml`
@@ -601,7 +650,7 @@ fn spreadsheet_to_markdown(body: &[u8]) -> Result<Extracted, ContentProcessorErr
             .take(MAX_SHEET_ROWS)
             .map(|row| row.iter().take(MAX_SHEET_COLUMNS).map(cell_text).collect())
             .collect();
-        let Some(table) = markdown_table(&rows) else {
+        let Some(table) = markdown_table(&rows)? else {
             continue;
         };
         let mut section = format!("## {name}\n\n{table}");
@@ -647,11 +696,85 @@ fn cell_text(cell: &Data) -> String {
 
 /// Render rows as a Markdown table, the first row as the header. Rows are padded
 /// to the widest row; fully empty rows and trailing empty columns are dropped.
-fn markdown_table(rows: &[Vec<String>]) -> Option<String> {
-    let rows: Vec<&Vec<String>> = rows
-        .iter()
-        .filter(|row| row.iter().any(|cell| !cell.trim().is_empty()))
-        .collect();
+fn markdown_table(rows: &[Vec<String>]) -> Result<Option<String>, ContentProcessorError> {
+    let mut output = String::new();
+    append_table(rows, &mut output, DOCX_LIMITS)?;
+    Ok((!output.is_empty()).then_some(output))
+}
+
+fn limit_error() -> ContentProcessorError {
+    ContentProcessorError("Office table or DOCX output exceeds the conversion limit".into())
+}
+
+fn checked_size(
+    current: usize,
+    extra: usize,
+    limit: usize,
+) -> Result<usize, ContentProcessorError> {
+    current
+        .checked_add(extra)
+        .filter(|size| *size <= limit)
+        .ok_or_else(limit_error)
+}
+
+fn check_table_shape(
+    rows: usize,
+    width: usize,
+    limits: DocxLimits,
+) -> Result<(), ContentProcessorError> {
+    if rows > limits.rows
+        || width > limits.columns
+        || rows
+            .checked_mul(width)
+            .is_none_or(|cells| cells > limits.cells)
+    {
+        return Err(limit_error());
+    }
+    Ok(())
+}
+
+fn reserve_bounded(
+    out: &mut String,
+    extra: usize,
+    limit: usize,
+) -> Result<(), ContentProcessorError> {
+    let size = checked_size(out.len(), extra, limit)?;
+    if size > out.capacity() {
+        let capacity = out.capacity().saturating_mul(2).max(size).min(limit);
+        out.try_reserve_exact(capacity - out.len())
+            .map_err(|_| limit_error())?;
+    }
+    Ok(())
+}
+
+fn append_bounded(out: &mut String, text: &str, limit: usize) -> Result<(), ContentProcessorError> {
+    reserve_bounded(out, text.len(), limit)?;
+    out.push_str(text);
+    Ok(())
+}
+
+fn append_block(out: &mut String, block: &str, limit: usize) -> Result<(), ContentProcessorError> {
+    let separator = if out.is_empty() { "" } else { "\n\n" };
+    reserve_bounded(
+        out,
+        checked_size(block.len(), separator.len(), limit)?,
+        limit,
+    )?;
+    out.push_str(separator);
+    out.push_str(block);
+    Ok(())
+}
+
+fn nonempty_row(row: &&Vec<String>) -> bool {
+    row.iter().any(|cell| !cell.trim().is_empty())
+}
+
+fn append_table(
+    rows: &[Vec<String>],
+    out: &mut String,
+    limits: DocxLimits,
+) -> Result<(), ContentProcessorError> {
+    let count = rows.iter().filter(nonempty_row).count();
     let width = rows
         .iter()
         .map(|row| {
@@ -660,25 +783,90 @@ fn markdown_table(rows: &[Vec<String>]) -> Option<String> {
                 .map_or(0, |last| last + 1)
         })
         .max()
-        .filter(|width| *width > 0)?;
-    let render_row = |row: &Vec<String>| {
-        let cells: Vec<String> = (0..width)
-            .map(|index| escape_cell(row.get(index).map(String::as_str).unwrap_or("")))
-            .collect();
-        format!("| {} |", cells.join(" | "))
-    };
-    let mut lines = vec![render_row(rows[0])];
-    lines.push(format!("|{}", " --- |".repeat(width)));
-    lines.extend(rows[1..].iter().map(|row| render_row(row)));
-    Some(lines.join("\n"))
+        .unwrap_or(0);
+    check_table_shape(rows.len(), width, limits)?;
+    if width == 0 {
+        return Ok(());
+    }
+    let mut bytes = if out.is_empty() { 0 } else { 2 };
+    // Admission precedes all escaping, padding and allocation. Include every
+    // delimiter, newline and UTF-8 byte in the single output buffer.
+    for row in rows.iter().filter(nonempty_row) {
+        bytes = checked_size(
+            bytes,
+            width
+                .checked_mul(3)
+                .and_then(|n| n.checked_add(1))
+                .ok_or_else(limit_error)?,
+            limits.output_bytes,
+        )?;
+        for cell in row.iter().take(width) {
+            visit_escaped_cell(cell, |piece| {
+                bytes = checked_size(bytes, piece.len(), limits.output_bytes)?;
+                Ok(())
+            })?;
+        }
+    }
+    bytes = checked_size(
+        bytes,
+        width
+            .checked_mul(6)
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(limit_error)?,
+        limits.output_bytes,
+    )?;
+    bytes = checked_size(bytes, count, limits.output_bytes)?;
+    reserve_bounded(out, bytes, limits.output_bytes)?;
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    for (index, row) in rows.iter().filter(nonempty_row).enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        out.push_str("| ");
+        for column in 0..width {
+            if column > 0 {
+                out.push_str(" | ");
+            }
+            visit_escaped_cell(row.get(column).map(String::as_str).unwrap_or(""), |piece| {
+                out.push_str(piece);
+                Ok(())
+            })?;
+        }
+        out.push_str(" |");
+        if index == 0 {
+            out.push_str("\n|");
+            for _ in 0..width {
+                out.push_str(" --- |");
+            }
+        }
+    }
+    Ok(())
 }
 
-fn escape_cell(cell: &str) -> String {
-    cell.trim()
-        .replace('\\', "\\\\")
-        .replace('|', "\\|")
-        .replace("\r\n", "<br>")
-        .replace(['\n', '\r'], "<br>")
+fn visit_escaped_cell(
+    cell: &str,
+    mut visit: impl FnMut(&str) -> Result<(), ContentProcessorError>,
+) -> Result<(), ContentProcessorError> {
+    let mut chars = cell.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        let mut utf8 = [0; 4];
+        let piece = match ch {
+            '\\' => "\\\\",
+            '|' => "\\|",
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                "<br>"
+            }
+            '\n' => "<br>",
+            other => other.encode_utf8(&mut utf8),
+        };
+        visit(piece)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -747,6 +935,80 @@ mod tests {
 
     const CORE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Q3 &amp; outlook</dc:title></cp:coreProperties>"#;
+
+    fn small_table() -> &'static str {
+        r#"<w:document xmlns:w="w"><w:body><w:tbl>
+<w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>D</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl></w:body></w:document>"#
+    }
+
+    #[test]
+    fn docx_table_limits_admit_before_rendering() {
+        for limits in [
+            DocxLimits {
+                rows: 1,
+                ..DOCX_LIMITS
+            },
+            DocxLimits {
+                columns: 2,
+                ..DOCX_LIMITS
+            },
+            DocxLimits {
+                cells: 5,
+                ..DOCX_LIMITS
+            },
+            DocxLimits {
+                output_bytes: 32,
+                ..DOCX_LIMITS
+            },
+        ] {
+            let error = docx_to_markdown_with_limits(small_table(), limits).unwrap_err();
+            assert!(error.0.contains("limit"), "{error}");
+        }
+    }
+
+    #[test]
+    fn docx_table_limits_preserve_ordinary_padding() {
+        let expected = "| A | B | C |\n| --- | --- | --- |\n| D |  |  |";
+        let limits = DocxLimits {
+            rows: 2,
+            columns: 3,
+            cells: 6,
+            output_bytes: expected.len(),
+        };
+        assert_eq!(
+            docx_to_markdown_with_limits(small_table(), limits).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn docx_table_bytes_include_escaping_and_document_blocks() {
+        let rows = vec![vec![" é|\\\r\nZ\nY\rQ ".into(), "".into()], vec!["".into()]];
+        let expected = "intro\n\n| é\\|\\\\<br>Z<br>Y<br>Q |\n| --- |";
+        let limits = DocxLimits {
+            output_bytes: expected.len(),
+            ..DOCX_LIMITS
+        };
+        let mut output = "intro".to_string();
+        append_table(&rows, &mut output, limits).unwrap();
+        assert_eq!(output, expected);
+        let before = output.clone();
+        assert!(append_table(&rows, &mut output, limits).is_err());
+        assert_eq!(output, before);
+        let mut short = "intro".to_string();
+        assert!(append_table(
+            &rows,
+            &mut short,
+            DocxLimits {
+                output_bytes: expected.len() - 1,
+                ..limits
+            }
+        )
+        .is_err());
+        assert_eq!(short, "intro");
+    }
 
     #[tokio::test]
     async fn docx_becomes_markdown_with_headings_lists_and_tables() {

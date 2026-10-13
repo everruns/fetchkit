@@ -298,7 +298,7 @@ to protect against changes between validation and write.
 | TM-DOS-005 | DNS resolution delay | Low | DNS resolution uses system resolver; no explicit timeout on DNS lookup | **ACCEPTED** |
 | TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
 | TM-DOS-007 | CPU/memory exhaustion from adversarial PDF parsing | Medium | Bounded input/output, blocking-task isolation, and a cancellation-safe two-document concurrency cap; parser-internal expansion remains possible | **ACCEPTED** |
-| TM-DOS-008 | Zip bomb or adversarial Office document | Medium | markkit archive entry/size budgets and cell-grid pre-scan before inflating (deprecated `office`: own budget and capped part reads), per-sheet output caps, shared two-document blocking cap | MITIGATED |
+| TM-DOS-008 | Zip bomb or adversarial Office document | Medium | Archive/part budgets, DOCX dimension and padded-cell admission before rendering, legacy DOCX incremental byte admission, per-sheet output caps, shared two-document blocking cap | MITIGATED |
 
 ### Mitigation Details
 
@@ -343,12 +343,29 @@ final Markdown is capped at `max_body_size`. A markkit parser panic is contained
 blocking task (`JoinError` becomes a converter failure) unless the embedding binary uses
 `panic = "abort"`.
 
+markkit's sheet caps do not constrain DOCX. Fetchkit therefore preflights all
+internal main-part candidates from DOCX relationships before calling markkit, with checked row/column
+counts (1,000/50), merged-cell spans, nesting (at most 50 levels), and cumulative source/padded cell
+work (50,000 per XML part). Padding bytes are admitted before backend rendering.
+The preflight honors tighter markkit archive settings and uses its default
+archive ceilings. This bounds table padding amplification; it does not claim an
+incremental byte limit for markkit's other text/markup allocations.
+
 The deprecated `office` converter (`docs-office`) rejects archives with more than 10,000 entries or more than 200 MB of declared
 uncompressed content, and every XML part it reads itself is read through a 64 MB cap,
 since declared sizes can lie. Spreadsheet output is capped at 1,000 rows and 50 columns
 per sheet before the `max_body_size` output cap. Parsing shares the local converters'
 blocking path and two-document concurrency cap. `calamine` inflates sheet parts itself;
 the declared-size budget bounds those as well.
+
+Legacy DOCX tables reuse the sheet dimensions and reject more than 50,000
+collected/padded cells per table before collecting rows/cells. Each rendered
+table, including spreadsheet tables, has a 10 MiB conversion ceiling. Retained table text,
+paragraphs and cumulative Markdown have a 10 MiB conversion ceiling. Rendering
+admits exact escaped UTF-8 bytes, separators and padding before bounded buffer
+reservation; it no longer retains all rendered rows and joins a second copy.
+Tiny ordinary fixtures exercise lower injected limits, exact byte boundaries,
+escaping and unchanged normal tables; no resource-exhaustion payload is needed.
 
 ## 5. Information Leakage (TM-LEAK)
 

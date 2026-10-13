@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content focus. Custom processors constructing this public input must populate
   the new fields.
 
+### Fixed
+
+- Bound DOCX table dimensions and padded cell work before local conversion,
+  including the default markkit backend. The deprecated Office renderer admits
+  Markdown bytes before escaping or padding into one capped buffer.
+
 ## [0.5.0] - 2026-07-14
 
 ### Highlights
