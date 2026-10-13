@@ -343,7 +343,8 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
   - Deprecated `office` converter (`docs-office`, off by default; fallback after
     `markkit` when enabled): DOCX/PPTX/XLSX/XLSM/XLSB/XLS/ODS (`office_docx`,
     `office_pptx`, `office_spreadsheet`; one `## Slide N: title` per slide; sheets
-    capped at 1,000 rows and 50 columns with `sheet_truncated`).
+    capped at 1,000 rows and 50 columns with `sheet_truncated`; each rendered
+    table has a 10 MiB conversion ceiling).
   - Both local DOCX backends reject tables above 1,000 rows, 50 columns or
     50,000 padded cells before rendering. markkit's admission also counts source
     cells, merged-cell spans and nested tables across an XML part. The deprecated

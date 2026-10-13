@@ -345,7 +345,7 @@ blocking task (`JoinError` becomes a converter failure) unless the embedding bin
 
 markkit's sheet caps do not constrain DOCX. Fetchkit therefore preflights all
 internal main-part candidates from DOCX relationships before calling markkit, with checked row/column
-counts (1,000/50), merged-cell spans, nesting, and cumulative source/padded cell
+counts (1,000/50), merged-cell spans, nesting (at most 50 levels), and cumulative source/padded cell
 work (50,000 per XML part). Padding bytes are admitted before backend rendering.
 The preflight honors tighter markkit archive settings and uses its default
 archive ceilings. This bounds table padding amplification; it does not claim an
@@ -359,7 +359,8 @@ blocking path and two-document concurrency cap. `calamine` inflates sheet parts 
 the declared-size budget bounds those as well.
 
 Legacy DOCX tables reuse the sheet dimensions and reject more than 50,000
-source/padded cells per table before collecting rows/cells. Retained table text,
+collected/padded cells per table before collecting rows/cells. Each rendered
+table, including spreadsheet tables, has a 10 MiB conversion ceiling. Retained table text,
 paragraphs and cumulative Markdown have a 10 MiB conversion ceiling. Rendering
 admits exact escaped UTF-8 bytes, separators and padding before bounded buffer
 reservation; it no longer retains all rendered rows and joins a second copy.

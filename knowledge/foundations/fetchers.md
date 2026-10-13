@@ -143,7 +143,8 @@ Built-in converters (Cargo features):
   Spreadsheet titles are not reported (markkit returns none).
   DOCX gets a Fetchkit archive/XML preflight because markkit's sheet limits do
   not constrain Word tables: 1,000 rows, 50 columns and a cumulative 50,000
-  source/padded cells per XML part, including nested tables and merged-cell spans.
+  source/padded cells per XML part, including nested tables (at most 50 levels)
+  and merged-cell spans.
   The standard main part and all internal `officeDocument` relationship targets
   are checked, including nonstandard paths. The preflight honors tighter configured archive budgets and
   caps them at markkit's defaults. It admits padding bytes before backend rendering;
@@ -153,7 +154,8 @@ Built-in converters (Cargo features):
   containers are checked against an entry-count and total uncompressed-size budget
   before any part is inflated, and each part is read through a size cap (TM-DOS-008).
   Output caps: 1,000 slides, 1,000 rows and 50 columns per sheet. DOCX uses the same
-  table dimensions plus 50,000 source/padded cells per table. Paragraph/cell text
+  table dimensions plus 50,000 collected/padded cells per table. Every rendered
+  table (including sheets) has a 10 MiB byte ceiling. Paragraph/cell text
   and cumulative Markdown are capped at 10 MiB. A single output buffer admits
   exact UTF-8/escaped bytes, padding and block separators before reservation;
   limit failures are converter errors, not silent table truncation.

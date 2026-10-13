@@ -101,12 +101,13 @@ If you must fetch nonstandard ports or internal-looking public domains, start fr
 Both built-in DOCX backends reject tables exceeding 1,000 rows, 50 columns or
 50,000 padded cells. The default markkit backend preflights archive parts before
 conversion, including merged-cell spans and nested tables; its cell-work budget
-is cumulative within each XML part. These DOCX limits cannot be raised through
+is cumulative within each XML part; table nesting is capped at 50 levels. These DOCX limits cannot be raised through
 markkit's spreadsheet settings. Archive preflight honors tighter markkit archive
 settings and caps entry count and inflated sizes at the defaults.
 
-The deprecated `office` backend also rejects DOCX output over 10 MiB before
-allocating escaped or padded Markdown. Smaller `max_body_size` settings still
+The deprecated `office` backend caps each rendered table at 10 MiB and also
+rejects cumulative DOCX output over 10 MiB before allocating escaped or padded
+Markdown. Smaller `max_body_size` settings still
 truncate the returned output. Limits produce a converter failure; another
 configured backend may handle the document. Normal table padding and escaping
 are preserved. These bounds address table expansion; they are not a process
