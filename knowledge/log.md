@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-10-13
+
+* **Credential redaction**: `DocumentConversionSettings` now redacts present Cloudflare tokens in compact/pretty `Debug`, including clones and after build, independently of backend features. Public string storage remains unchanged; explicit field logging and downstream diagnostic access remain caller responsibilities (TM-LEAK-007).
+
 ## 2026-10-12
 
 * **DOCX table budgets**: Both local backends now admit table dimensions and padded cell work before conversion; the deprecated renderer additionally admits exact Markdown bytes before allocation. Tiny offline fixtures cover limits, escaping and normal output under TM-DOS-008.

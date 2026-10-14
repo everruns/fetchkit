@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Redact Cloudflare API tokens in `DocumentConversionSettings` Debug output,
+  including pretty formatting, cloned settings and settings retained after build,
+  independently of enabled document backends.
+
 - Bound DOCX table dimensions and padded cell work before local conversion,
   including the default markkit backend. The deprecated Office renderer admits
   Markdown bytes before escaping or padding into one capped buffer.
