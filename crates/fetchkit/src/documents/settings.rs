@@ -1,5 +1,9 @@
+// Decisions: Preserve string-based settings across all feature sets; redact only
+// the credential in Debug without changing public storage or build/clone semantics.
 //! String-based document conversion settings shared by the CLI, MCP server and
 //! Python bindings. Libraries can use [`DocumentConversion`] directly instead.
+
+use std::fmt;
 
 use super::{DocumentConversion, DocumentFormat};
 
@@ -12,7 +16,7 @@ pub const BUILTIN_CONVERTERS: &[&str] = &["pdf-inspector", "markkit", "office", 
 /// Plain settings resolved into a [`DocumentConversion`].
 ///
 /// Credentials are passed explicitly; nothing is read from the environment.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct DocumentConversionSettings {
     /// Accepted formats (e.g. `["pdf", "docx"]`). `None` keeps every supported format.
     pub formats: Option<Vec<String>>,
@@ -26,9 +30,28 @@ pub struct DocumentConversionSettings {
     /// Cloudflare account id, required when `converters` names `cloudflare`.
     pub cloudflare_account_id: Option<String>,
     /// Cloudflare API token with Workers AI permission.
+    /// Redacted in settings `Debug`; direct field access still exposes the value.
     pub cloudflare_api_token: Option<String>,
     /// Honour proxy environment variables for remote converter uploads.
     pub respect_proxy_env: bool,
+}
+
+impl fmt::Debug for DocumentConversionSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // THREAT[TM-LEAK-007]: Never format the original credential or a clone of it.
+        f.debug_struct("DocumentConversionSettings")
+            .field("formats", &self.formats)
+            .field("converters", &self.converters)
+            .field("allow_remote", &self.allow_remote)
+            .field("max_document_bytes", &self.max_document_bytes)
+            .field("cloudflare_account_id", &self.cloudflare_account_id)
+            .field(
+                "cloudflare_api_token",
+                &self.cloudflare_api_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("respect_proxy_env", &self.respect_proxy_env)
+            .finish()
+    }
 }
 
 impl DocumentConversionSettings {

@@ -129,3 +129,16 @@ another service:
   from `max_body_size`. Lower it, or restrict `formats`, for tighter budgets.
 - Local parsing of hostile documents is CPU-bound; isolate the process and apply
   outer CPU and memory limits for high-volume untrusted input (TM-DOS-007/008).
+
+`DocumentConversionSettings` redacts `cloudflare_api_token` in compact and pretty
+`Debug` output, including cloned settings and settings retained after `build()`.
+This works even without the `docs-cloudflare` feature. A present token is shown as
+`<redacted>`; an absent token remains `None`. Other settings stay visible.
+Converter credentials also use the redacting `SecretString` wrapper.
+
+Redaction applies to these representations. The public settings token field still
+contains the original string, and building does not clear it. Avoid logging that
+field directly or placing credentials in other settings. Fetchkit does not sanitize
+arbitrary application logs or converter response text. Its CLI/MCP and Python
+configuration paths do not log settings; embedding applications control their own
+diagnostic output and access.

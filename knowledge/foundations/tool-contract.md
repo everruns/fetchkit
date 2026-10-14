@@ -360,6 +360,11 @@ By default, Fetchkit blocks connections to private/reserved IP ranges:
   (Cloudflare credentials from `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`),
   Python `document_formats`, `converters`, `allow_remote_conversion`,
   `max_document_bytes`, `cloudflare_account_id`, `cloudflare_api_token`.
+- `DocumentConversionSettings::Debug` redacts a present Cloudflare token in compact
+  and pretty output, including clones and settings retained after `build()`, with
+  every backend feature configuration. Other settings remain visible; absent tokens
+  are `None`. The public token field remains `Option<String>`: explicit field
+  access/formatting is not redacted, and building does not clear it.
 - For binary without a matching processor:
   - Return metadata (`content_type`, `size`, `filename`, `last_modified`)
   - Include `error: "Binary content is not supported. Only textual content (HTML, text, JSON, etc.) can be fetched."`,

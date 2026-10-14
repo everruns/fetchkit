@@ -377,7 +377,7 @@ escaping and unchanged normal tables; no resource-exhaustion payload is needed.
 | TM-LEAK-004 | User-Agent reveals software version | Info | Default UA `Everruns Fetchkit/1.0` reveals stack; configurable | **BY DESIGN** |
 | TM-LEAK-005 | Timing side-channels (connect time reveals network proximity) | Low | 1-second timeout masks some timing; not fully mitigated | **ACCEPTED** |
 | TM-LEAK-006 | Fetched documents disclosed to a remote converter | Medium | Remote converters off by default, explicit `allow_remote(true)`, forced off by `hardened()`, backend named in `extraction_method` | MITIGATED |
-| TM-LEAK-007 | Remote converter credentials exposed | Medium | Tokens held in `SecretString`, redacted from `Debug`, never echoed in errors or responses | MITIGATED |
+| TM-LEAK-007 | Remote converter credentials exposed | Medium | Converter secrets use `SecretString`; settings `Debug` redacts the token; authentication errors omit credentials | MITIGATED |
 
 ### Mitigation Details
 
@@ -391,9 +391,21 @@ operator configuration, never from fetched content, and the response's
 `ConverterClient`, so a host can route them through its own egress boundary.
 
 **TM-LEAK-007 — Converter credential exposure (MITIGATED):**
-API tokens and configured header values are stored as `SecretString`, which redacts
-itself from `Debug`; authentication failures are reported by status, without the
-token or request headers.
+Converter API tokens and configured header values are stored as `SecretString`,
+which redacts itself from `Debug`; authentication failures are reported by status,
+without the token or request headers. `DocumentConversionSettings` retains its public
+`Option<String>` token field for configuration compatibility, but its custom `Debug`
+formats present tokens (including empty strings) as `<redacted>` and absent tokens
+as `None`. This applies to compact/pretty formatting, clones and the original
+settings after `build()`, independently of backend features. Noncredential fields
+remain visible. Tiny public-API formatting contracts cover these cases.
+
+This is representation redaction, not a global log sanitizer or memory erasure:
+callers can still read/format the token field directly, put secrets in other fields,
+or expose service-controlled response text. `build(&self)` does not clear settings.
+The in-tree CLI/MCP and Python configuration paths do not log settings; exposure
+through configuration diagnostics requires an embedding application's logging sink
+and diagnostic-reader access. No default production diagnostic leak is established.
 
 **TM-LEAK-001 — Error message detail (MITIGATED):**
 Fetchkit's error types (`FetchError`) use generic messages that don't include
