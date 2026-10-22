@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use the patched PDF parser and TLS dependency graph for untrusted document fetching.
+
 - Redact Cloudflare API tokens in `DocumentConversionSettings` Debug output,
   including pretty formatting, cloned settings and settings retained after build,
   independently of enabled document backends.

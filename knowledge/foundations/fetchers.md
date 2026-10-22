@@ -124,6 +124,10 @@ Built-in converters (Cargo features):
 - `pdf-inspector`: classifies and extracts Markdown from bounded in-memory bytes; no
   OCR. OCR-required pages produce `pdf_requires_ocr` and `suggested_next_action: "use_ocr"`
   unless a later converter returns usable text.
+  The backend uses `pdf-inspector` 0.1.8 or newer within the 0.1 line, whose `lopdf`
+  parser bounds nested PDF objects. Deeply nested input must return control to
+  the caller without aborting; the converter regression exercises that boundary
+  in memory, allowing rejection or removal of the invalid nested object.
 - Default registration order: `pdf-inspector`, `markkit`, then `office` when the
   deprecated `docs-office` feature is enabled, so markkit converts Office formats
   first and `office` is the fallback and the only PPTX/XLSB backend. `docs-all`
@@ -575,3 +579,7 @@ Tests real URLs:
 
 - [Fetchkit Tool Contract](tool-contract.md) — shared request, response, and policy behavior
 - [Threat Model](../security/threat-model.md) — network and SSRF requirements applied to every fetcher
+
+The temporary root `markkit` patch pins its security-reviewed main revision while a registry release
+is pending. Cargo dependency patches apply only to this workspace: before Fetchkit publication,
+replace it with the patched registry minimum so downstream users receive the same parser fixes.

@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-10-22
+
+* **Parser security**: Require PDF inspector 0.1.8 with bounded nested-object parsing and preserve ZIP 9 Office lookup compatibility. The exact patched Markkit source revision is temporary until its registry release; Fetchkit publication must first replace the root-only override with a patched registry minimum.
+
 ## 2026-10-13
 
 * **Credential redaction**: `DocumentConversionSettings` now redacts present Cloudflare tokens in compact/pretty `Debug`, including clones and after build, independently of backend features. Public string storage remains unchanged; explicit field logging and downstream diagnostic access remain caller responsibilities (TM-LEAK-007).
