@@ -53,7 +53,7 @@ jobs:
           echo "Version verified: $TAG_VERSION"
 
       - name: Publish fetchkit to crates.io
-        run: cargo publish -p fetchkit
+        run: cargo publish -p fetchkit --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -74,6 +74,6 @@ jobs:
         run: sleep 30
 
       - name: Publish fetchkit-cli to crates.io
-        run: cargo publish -p fetchkit-cli
+        run: cargo publish -p fetchkit-cli --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

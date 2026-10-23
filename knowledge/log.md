@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-10-23
+
+* **Release 0.6.0**: Replace the temporary Markkit git override with registry minimum 0.1.1; require Tokio 1.54.1 for RUSTSEC-2026-0386. Publish both Rust crates with `--locked`. The minor bump reflects public `FetchOptions` changes already accumulated since 0.5.0; see the changelog migration notes.
+
 ## 2026-10-22
 
 * **Parser security**: Require PDF inspector 0.1.8 with bounded nested-object parsing and preserve ZIP 9 Office lookup compatibility. The exact patched Markkit source revision is temporary until its registry release; Fetchkit publication must first replace the root-only override with a patched registry minimum.

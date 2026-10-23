@@ -3,6 +3,25 @@
 Fetchkit is intended to run in agent, server, and cluster environments where URL input may be
 user-controlled.
 
+## Updating to 0.6.0
+
+Fetchkit 0.6.0 requires published Markkit 0.1.1 and Tokio 1.54.1 or later in
+their compatible version lines. Its release lockfile also updates the PDF parser
+and Rust TLS certificate-validation/root dependencies. Applications with existing
+lockfiles should run `cargo update` and audit their resolved dependencies; a
+library upgrade alone does not replace every transitive locked version. The default
+HTTP client uses the platform certificate store via rustls-platform-verifier;
+operators must also keep their OS CA packages current. Cargo root-bundle updates
+do not replace system trust stores. Rebuild
+installed CLI binaries with `cargo install fetchkit-cli --version 0.6.0 --locked`.
+
+`FetchOptions` has new `document_conversion` and `content_processors` fields.
+Use `..Default::default()` in struct literals when default behavior is desired.
+Construct the former unit struct `DefaultFetcher` with `DefaultFetcher::new()`.
+Default Office conversion now uses Markkit for DOCX/XLSX/XLS/ODS; opt into the
+deprecated `docs-office` feature for PPTX/XLSB support. See the
+[release notes](../CHANGELOG.md#060---2026-10-23) for the other accumulated changes.
+
 ## Safe Defaults
 
 - Private and reserved IP ranges are blocked by default via resolve-then-check DNS validation.

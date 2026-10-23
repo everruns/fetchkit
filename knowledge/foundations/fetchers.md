@@ -128,6 +128,10 @@ Built-in converters (Cargo features):
   parser bounds nested PDF objects. Deeply nested input must return control to
   the caller without aborting; the converter regression exercises that boundary
   in memory, allowing rejection or removal of the invalid nested object.
+Markkit is a registry dependency with a patched minimum of 0.1.1. There is no root-only
+Cargo patch: packaged downstream consumers resolve the same published parser source.
+Existing downstream lockfiles still need dependency updates for transitive TLS fixes.
+
 - Default registration order: `pdf-inspector`, `markkit`, then `office` when the
   deprecated `docs-office` feature is enabled, so markkit converts Office formats
   first and `office` is the fallback and the only PPTX/XLSB backend. `docs-all`
@@ -579,7 +583,3 @@ Tests real URLs:
 
 - [Fetchkit Tool Contract](tool-contract.md) — shared request, response, and policy behavior
 - [Threat Model](../security/threat-model.md) — network and SSRF requirements applied to every fetcher
-
-The temporary root `markkit` patch pins its security-reviewed main revision while a registry release
-is pending. Cargo dependency patches apply only to this workspace: before Fetchkit publication,
-replace it with the patched registry minimum so downstream users receive the same parser fixes.
