@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-23
+
+### Highlights
+
+- Fetch and convert PDF and Office documents with bounded, pluggable local converters.
+- Discover agent-facing resources and preserve richer HTML semantics through replaceable content processors.
+- Update PDF/TLS dependencies, require published Markkit 0.1.1 and Tokio 1.54.1, and publish from the tested lockfile.
+
+### Breaking Changes
+
+- `FetchOptions` gained `document_conversion` and `content_processors`. Add the fields or use `..Default::default()` in struct literals.
+- `DefaultFetcher` now stores a processor registry. Replace the unit value `DefaultFetcher` with `DefaultFetcher::new()` or `DefaultFetcher::default()`.
+- Default Office conversion now uses Markkit. Enable deprecated `docs-office` explicitly if PPTX/XLSB conversion is required; those formats are not converted by the default backend.
+- HTML conversion now uses the content processor registry and may produce richer Markdown. Custom processors constructing `ContentProcessorInput` must populate its output-format and content-focus fields.
+
 ### Added
 
 - Replace the specification directory with an indexed OKF v0.2 knowledge
@@ -60,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use the patched PDF parser and TLS dependency graph for untrusted document fetching; require registry Markkit 0.1.1 and Tokio 1.54.1 (RUSTSEC-2026-0386).
+
 - Redact Cloudflare API tokens in `DocumentConversionSettings` Debug output,
   including pretty formatting, cloned settings and settings retained after build,
   independently of enabled document backends.
@@ -67,6 +84,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bound DOCX table dimensions and padded cell work before local conversion,
   including the default markkit backend. The deprecated Office renderer admits
   Markdown bytes before escaping or padding into one capped buffer.
+
+### What's Changed
+
+* chore(release): prepare v0.6.0 ([#186](https://github.com/everruns/fetchkit/pull/186))
+* fix(documents): redact credentials in settings debug ([#185](https://github.com/everruns/fetchkit/pull/185))
+* fix(documents): bound DOCX table rendering ([#184](https://github.com/everruns/fetchkit/pull/184))
+* feat(documents): markkit as default Office converter, deprecate office ([#183](https://github.com/everruns/fetchkit/pull/183))
+* feat(documents): pluggable document conversion with converter chain ([#182](https://github.com/everruns/fetchkit/pull/182))
+* feat(content): convert Office documents to Markdown locally ([#181](https://github.com/everruns/fetchkit/pull/181))
+* fix(fetch): retain PDF permits until parsing completes ([#180](https://github.com/everruns/fetchkit/pull/180))
+* fix(fetch): enforce URL policy on agent probes ([#179](https://github.com/everruns/fetchkit/pull/179))
+* feat(convert)!: add pluggable HTML content processing ([#178](https://github.com/everruns/fetchkit/pull/178))
+* chore(knowledge): migrate specs to OKF ([#177](https://github.com/everruns/fetchkit/pull/177))
+* feat(fetch): process PDF content as markdown ([#176](https://github.com/everruns/fetchkit/pull/176))
+* chore(ship): prompt for PR evidence in the ship skill ([#175](https://github.com/everruns/fetchkit/pull/175))
+* feat(fetch): discover agent resources ([#174](https://github.com/everruns/fetchkit/pull/174))
+* fix(fetchers): enforce release API URL policy ([#173](https://github.com/everruns/fetchkit/pull/173))
+* fix(fetchers): enforce GitLab API URL policy ([#172](https://github.com/everruns/fetchkit/pull/172))
+* fix(fetchers): validate notebook raw URLs ([#171](https://github.com/everruns/fetchkit/pull/171))
+* fix(fetchers): enforce policy on PubMed API requests ([#170](https://github.com/everruns/fetchkit/pull/170))
+* fix(fetchers): validate Crossref API policy ([#169](https://github.com/everruns/fetchkit/pull/169))
+* fix(fetchers): enforce policy for RFC source URLs ([#168](https://github.com/everruns/fetchkit/pull/168))
+* fix(fetchers): enforce policy for API subrequests ([#167](https://github.com/everruns/fetchkit/pull/167))
+* fix(fetchers): enforce GitHub commit API URL policy ([#166](https://github.com/everruns/fetchkit/pull/166))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.5.0...v0.6.0
 
 ## [0.5.0] - 2026-07-14
 
@@ -308,7 +351,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/everruns/fetchkit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/everruns/fetchkit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/everruns/fetchkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/everruns/fetchkit/compare/v0.3.0...v0.4.0

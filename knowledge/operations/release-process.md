@@ -104,7 +104,7 @@ cargo build --workspace --exclude fetchkit-python --release
   - Root `Cargo.toml` on manual dispatch
 - Verify the extracted version matches root `Cargo.toml`
 - Extract release notes for that version from `CHANGELOG.md`
-- Create a GitHub Release tagged `vX.Y.Z`
+- Create a GitHub Release tagged `vX.Y.Z` at the exact triggering commit (`github.sha`)
 - Start the publish workflow after creating the release. GitHub does not fire
   the `release.published` event for releases created via the default
   `GITHUB_TOKEN`, so release.yml dispatches publish.yml explicitly via
@@ -119,6 +119,7 @@ cargo build --workspace --exclude fetchkit-python --release
 - Trigger on GitHub Release `published`
 - Also support `workflow_dispatch` for manual retries
 - Verify the release tag version matches root `Cargo.toml` when a release tag is present
+- Publish with `--locked` so the verified dependency graph is retained.
 - Publish crates in dependency order:
   1. `fetchkit`
   2. `fetchkit-cli`

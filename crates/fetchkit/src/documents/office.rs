@@ -520,8 +520,12 @@ fn slide_parts(archive: &mut Archive<'_>) -> Result<Vec<String>, ContentProcesso
     if let Some(slides) = ordered {
         return Ok(slides);
     }
-    let mut numbered: Vec<(u32, String)> = archive
+    let names = archive
         .file_names()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| ContentProcessorError(format!("invalid Office archive: {error}")))?;
+    let mut numbered: Vec<(u32, String)> = names
+        .into_iter()
         .filter_map(|name| {
             let number = name
                 .strip_prefix("ppt/slides/slide")?

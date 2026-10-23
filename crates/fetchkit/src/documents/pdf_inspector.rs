@@ -52,3 +52,46 @@ impl DocumentConverter for PdfInspectorConverter {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn deeply_nested_pdf_returns_without_aborting() {
+        let nested = format!("{}0{}", "[".repeat(10_000), "]".repeat(10_000));
+        let objects = [
+            format!("<< /Type /Catalog /Pages 2 0 R /Nested {nested} >>"),
+            "<< /Type /Pages /Kids [] /Count 0 >>".to_owned(),
+        ];
+        let mut body = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(body.len());
+            body.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = body.len();
+        body.extend_from_slice(b"xref\n0 3\n0000000000 65535 f \n");
+        for offset in offsets {
+            body.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        body.extend_from_slice(
+            format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+
+        let result = PdfInspectorConverter::new()
+            .convert(DocumentInput {
+                url: "https://example.test/nested.pdf".parse().unwrap(),
+                format: DocumentFormat::Pdf,
+                content_type: Some("application/pdf".to_owned()),
+                file_name: "nested.pdf".to_owned(),
+                body: body.into(),
+            })
+            .await;
+        // The bounded parser may reject the document or discard its invalid
+        // nested object. Either outcome must return control rather than abort.
+        if let Ok(document) = result {
+            assert!(document.markdown.is_empty());
+        }
+    }
+}

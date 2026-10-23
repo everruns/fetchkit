@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 authors = ["Everruns"]
@@ -14,7 +14,7 @@ categories = ["web-programming", "text-processing"]
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 
 # HTTP client
 reqwest = { version = "0.13", features = ["gzip", "brotli", "deflate", "stream", "json"] }
@@ -54,10 +54,10 @@ async-trait = "0.1"
 tower = { version = "0.5", features = ["util"] }
 
 # Binary document extraction
-pdf-inspector = "0.1.7"
-markkit = { version = "0.1", default-features = false, features = ["docx", "spreadsheet"] }
-calamine = { version = "0.36", default-features = false }
-zip = { version = "8", default-features = false, features = ["deflate"] }
+pdf-inspector = "0.1.8"
+markkit = { version = "0.1.1", default-features = false, features = ["docx", "spreadsheet"] }
+calamine = { version = "0.37", default-features = false }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 quick-xml = "0.41"
 
 # Platform filesystem flags
