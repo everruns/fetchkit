@@ -129,8 +129,36 @@ cargo build --workspace --exclude fetchkit-python --release
 
 ### Authentication
 
-- GitHub Actions publishing requires `CARGO_REGISTRY_TOKEN`
+- Both published crates have crates.io GitHub Trusted Publishers bound to owner
+  `everruns`, repository `fetchkit`, workflow `publish.yml`, without an environment.
+- Only the two publishing jobs have `id-token: write`; both retain `contents: read`.
+  The pinned `rust-lang/crates-io-auth-action` exchanges their OIDC identities for
+  short-lived credentials and revokes them when the jobs finish.
+- `CARGO_REGISTRY_TOKEN` is populated from the auth step's output, not from a
+  repository secret. Existing legacy secrets are unused; this change does not
+  revoke or replace credentials or require trusted-publishing-only enforcement.
+- Publisher bindings authorize this workflow persistently. Repository maintainers
+  who can change/run it are part of the publishing trust boundary.
 - Manual release preparation may require GitHub CLI auth for PR creation and merge steps
+
+### Retrying an Existing Release
+
+Before retrying, check both crates.io versions and the immutable release tag SHA.
+Never move the tag or increment the version to work around an authentication failure.
+If only the authentication workflow changed after tagging, dispatch the workflow
+from `main` while retaining the original source tag:
+
+```bash
+gh workflow run publish.yml --ref main -f release_tag=v0.6.0
+```
+
+Both publishing jobs check out the supplied release tag. Running the workflow at
+an old tag instead would also select that tag's old authentication implementation.
+After successful upload, verify registry version/checksum/source revision, a fresh
+library consumer, and `cargo install fetchkit-cli --version '=0.6.0' --locked`.
+A GitHub Release or successful package build alone does not prove publication.
+If one crate is already published, do not rerun its upload blindly; resume only the
+remaining failed publishing job after checking the registry state.
 
 ### Operator Responsibilities
 

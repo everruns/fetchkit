@@ -141,7 +141,7 @@ Workflows:
 - `.github/workflows/publish.yml` - Publishes to crates.io on GitHub Release or manual dispatch
 
 Requirements:
-- `CARGO_REGISTRY_TOKEN` secret must be configured in repo settings
+- Configure crates.io Trusted Publishing for both crates: GitHub owner `everruns`, repository `fetchkit`, workflow `publish.yml`, no environment. Publishing jobs exchange OIDC for short-lived tokens; no repository publisher secret is used.
 
 Note: `fetchkit-python` is not published to crates.io (`publish = false`). Python release automation is not configured in this repo yet.
 

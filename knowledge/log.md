@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-10-25
+
+* **Publishing authentication**: Bind both Rust crates to GitHub OIDC in `publish.yml`; publishing jobs use short-lived tokens from a pinned official auth action, with no legacy secret fallback. Document recovery from current main with the original immutable release source tag and actual registry consumer verification.
+
 ## 2026-10-23
 
 * **Release 0.6.0**: Replace the temporary Markkit git override with registry minimum 0.1.1; require Tokio 1.54.1 for RUSTSEC-2026-0386. Publish both Rust crates with `--locked`. The minor bump reflects public `FetchOptions` changes already accumulated since 0.5.0; see the changelog migration notes.

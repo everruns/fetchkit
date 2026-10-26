@@ -44,6 +44,7 @@ Verified in this review:
 | TM-LEAK | Information Leakage | Error messages, metadata exposure, timing |
 | TM-CONV | Content Conversion | HTML parsing abuse, injection via converted content |
 | TM-AUTH | Bot Authentication | Signing key exposure, replay, signature scope |
+| TM-RELEASE | Release Authentication | Publisher credential leakage and workflow identity |
 
 ### Managing Threat IDs
 
@@ -541,6 +542,25 @@ None — all previously open threats have been mitigated.
 | Signature nonce + timestamps | TM-AUTH | 32-byte random nonce + created/expires per signature prevents replay |
 | Authority-scoped signatures | TM-AUTH | Signature covers `@authority`; per-host binding |
 | Graceful signing failure | TM-AUTH | Signing errors logged, request proceeds unsigned |
+
+## Release Authentication (TM-RELEASE-001)
+
+**Threat**: A leaked long-lived CI publisher secret permits unauthorized crate
+publication outside the intended repository workflow.
+
+**Mitigation**: Both crates trust only GitHub repository `everruns/fetchkit`, workflow
+`publish.yml`, without an environment. Only its two publish jobs request an OIDC
+identity, exchanged by a pinned official action for a short-lived crates.io token.
+The action revokes that token when the job completes; the old repository secret
+is not read. Publishing retains the release-tag source checkout and `--locked`.
+
+**Trust boundary**: Maintainers able to modify/run that workflow retain publishing
+authority. Existing crate ownership, API-token policy, and credentials are unchanged;
+trusted-publishing-only enforcement is not enabled by this change.
+
+**Verification**: Workflow lint, exact-head CI, registry metadata/source checks, and
+consumer/CLI installation after publication. An auth failure must stop publication;
+there is no fallback to an unrelated credential.
 
 ## References
 
