@@ -115,7 +115,7 @@ mod live_github_code {
     #[tokio::test]
     async fn fetches_source_file() {
         let Some(resp) =
-            fetch_or_skip("https://github.com/rust-lang/rust/blob/master/README.md").await
+            fetch_or_skip("https://github.com/rust-lang/rust/blob/main/README.md").await
         else {
             return;
         };
@@ -358,15 +358,15 @@ mod live_default {
 
     #[tokio::test]
     async fn fetches_plain_html() {
-        let Some(resp) = fetch_markdown_or_skip("https://example.com").await else {
+        let Some(resp) = fetch_markdown_or_skip("https://httpbin.org/html").await else {
             return;
         };
 
         assert_eq!(resp.status_code, 200);
         let content = resp.content.expect("should have content");
         assert!(
-            content.contains("Example Domain"),
-            "example.com should contain 'Example Domain'"
+            content.contains("Herman Melville - Moby-Dick"),
+            "httpbin HTML fixture should contain its Moby-Dick heading"
         );
         assert_eq!(resp.format, Some("markdown".to_string()));
     }
