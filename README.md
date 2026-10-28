@@ -30,12 +30,15 @@ fetchers match first; the default fetcher handles everything else.
 - `StackOverflowFetcher` - Stack Overflow and Stack Exchange question URLs
 - `PackageRegistryFetcher` - PyPI, crates.io, and npm package pages
 - `WikipediaFetcher` - Wikipedia article URLs
-- `YouTubeFetcher` - YouTube watch and `youtu.be` URLs
+- `YouTubeFetcher` - YouTube watch, Shorts, live, embed, and `youtu.be` URLs
+- `SocialMediaFetcher` - TikTok and Vimeo videos; SoundCloud tracks and playlists
 - `ArXivFetcher` - arXiv abstract and PDF URLs
 - `HackerNewsFetcher` - Hacker News item threads
 - `RSSFeedFetcher` - RSS and Atom feed URLs
 - `DocsSiteFetcher` - docs sites with `llms.txt`/`llms-full.txt` support
 - `DefaultFetcher` - all remaining HTTP/HTTPS URLs with HTML conversion, streaming, timeout handling, and binary detection
+
+See [Social media fetching](docs/social-media.md) for supported URLs and metadata limits.
 
 ## Built-in Content Processors
 

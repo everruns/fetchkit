@@ -371,3 +371,46 @@ mod live_default {
         assert_eq!(resp.format, Some("markdown".to_string()));
     }
 }
+
+// Matches social_media.rs for changed-fetcher CI selection.
+mod live_social_media {
+    use super::*;
+
+    async fn metadata(url: &str, format: &str) {
+        let Some(response) = fetch_or_skip(url).await else {
+            return;
+        };
+        if response.error.is_some() {
+            eprintln!("UNAVAILABLE: {url} — HTTP {}", response.status_code);
+            assert!(!(200..300).contains(&response.status_code));
+            assert!(response.content.is_none());
+            return;
+        }
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.format.as_deref(), Some(format));
+        assert!(response.content.unwrap().contains("Public metadata only"));
+    }
+
+    #[tokio::test]
+    async fn tiktok() {
+        metadata(
+            "https://www.tiktok.com/@scout2015/video/6718335390845095173",
+            "tiktok_video",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn vimeo() {
+        metadata("https://vimeo.com/863362136", "vimeo_video").await;
+    }
+
+    #[tokio::test]
+    async fn soundcloud() {
+        metadata(
+            "https://soundcloud.com/forss/flickermood",
+            "soundcloud_track",
+        )
+        .await;
+    }
+}

@@ -20,6 +20,7 @@ mod jupyter_notebook;
 mod package_registry;
 mod pubmed;
 mod rss_feed;
+mod social_media;
 mod stackoverflow;
 mod twitter;
 mod wikipedia;
@@ -42,6 +43,7 @@ pub use jupyter_notebook::JupyterNotebookFetcher;
 pub use package_registry::PackageRegistryFetcher;
 pub use pubmed::PubMedFetcher;
 pub use rss_feed::RSSFeedFetcher;
+pub use social_media::SocialMediaFetcher;
 pub use stackoverflow::StackOverflowFetcher;
 pub use twitter::TwitterFetcher;
 pub use wikipedia::WikipediaFetcher;
@@ -189,6 +191,7 @@ impl FetcherRegistry {
         registry.register(Box::new(PackageRegistryFetcher::new()));
         registry.register(Box::new(WikipediaFetcher::new()));
         registry.register(Box::new(YouTubeFetcher::new()));
+        registry.register(Box::new(SocialMediaFetcher::new()));
         registry.register(Box::new(ArXivFetcher::new()));
         registry.register(Box::new(CrossrefFetcher::new()));
         registry.register(Box::new(IetfRfcFetcher::new()));
@@ -400,15 +403,16 @@ mod tests {
         assert_eq!(registry.fetchers[10].name(), "package_registry");
         assert_eq!(registry.fetchers[11].name(), "wikipedia");
         assert_eq!(registry.fetchers[12].name(), "youtube");
-        assert_eq!(registry.fetchers[13].name(), "arxiv");
-        assert_eq!(registry.fetchers[14].name(), "crossref");
-        assert_eq!(registry.fetchers[15].name(), "ietf_rfc");
-        assert_eq!(registry.fetchers[16].name(), "pubmed");
-        assert_eq!(registry.fetchers[17].name(), "hackernews");
-        assert_eq!(registry.fetchers[18].name(), "rss_feed");
-        assert_eq!(registry.fetchers[19].name(), "docs_site");
-        assert_eq!(registry.fetchers[20].name(), "default");
-        assert_eq!(registry.fetchers.len(), 21);
+        assert_eq!(registry.fetchers[13].name(), "social_media");
+        assert_eq!(registry.fetchers[14].name(), "arxiv");
+        assert_eq!(registry.fetchers[15].name(), "crossref");
+        assert_eq!(registry.fetchers[16].name(), "ietf_rfc");
+        assert_eq!(registry.fetchers[17].name(), "pubmed");
+        assert_eq!(registry.fetchers[18].name(), "hackernews");
+        assert_eq!(registry.fetchers[19].name(), "rss_feed");
+        assert_eq!(registry.fetchers[20].name(), "docs_site");
+        assert_eq!(registry.fetchers[21].name(), "default");
+        assert_eq!(registry.fetchers.len(), 22);
     }
 
     #[test]

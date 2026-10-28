@@ -1,7 +1,7 @@
 //! YouTube video fetcher
 //!
-//! Handles youtube.com/watch and youtu.be URLs, returning video metadata
-//! and transcript text via oEmbed and noembed APIs.
+//! Handles watch, Shorts, live, embed and youtu.be video URLs. Metadata uses
+//! oEmbed; English captions are best-effort through the legacy timedtext API.
 
 use crate::client::FetchOptions;
 use crate::error::FetchError;
@@ -24,7 +24,7 @@ const YOUTUBE_PORT: u16 = 443;
 
 /// YouTube video fetcher
 ///
-/// Matches `youtube.com/watch?v={id}` and `youtu.be/{id}`, returning
+/// Matches watch, Shorts, live, embed and `youtu.be` video URLs, returning
 /// video metadata via oEmbed and transcript when available.
 pub struct YouTubeFetcher;
 
@@ -35,32 +35,36 @@ impl YouTubeFetcher {
 
     /// Extract video ID from YouTube URL
     fn parse_video_id(url: &Url) -> Option<String> {
-        let host = url.host_str()?;
-
-        match host {
-            "youtube.com" | "www.youtube.com" | "m.youtube.com" => {
-                // /watch?v={id}
-                let segments: Vec<&str> =
-                    url.path_segments().map(|s| s.collect()).unwrap_or_default();
-                if segments.first() != Some(&"watch") {
-                    return None;
-                }
-                url.query_pairs()
-                    .find(|(k, _)| k == "v")
-                    .map(|(_, v)| v.to_string())
-                    .filter(|v| !v.is_empty())
-            }
-            "youtu.be" => {
-                // /{id}
-                let segments: Vec<&str> =
-                    url.path_segments().map(|s| s.collect()).unwrap_or_default();
-                segments
-                    .first()
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-            }
-            _ => None,
+        if !matches!(url.scheme(), "http" | "https") {
+            return None;
         }
+        let segments: Vec<_> = url
+            .path()
+            .trim_end_matches('/')
+            .split('/')
+            .skip(1)
+            .collect();
+        let id = match (url.host_str()?, segments.as_slice()) {
+            ("youtube.com" | "www.youtube.com" | "m.youtube.com", ["watch"]) => url
+                .query_pairs()
+                .find(|(key, _)| key == "v")?
+                .1
+                .into_owned(),
+            (
+                "youtube.com" | "www.youtube.com" | "m.youtube.com",
+                ["shorts" | "live" | "embed", id],
+            )
+            | ("youtube-nocookie.com" | "www.youtube-nocookie.com", ["embed", id])
+            | ("youtu.be", [id]) => (*id).to_owned(),
+            _ => return None,
+        };
+        // IDs are interpolated into the timedtext query: reject separators and
+        // encoded query injection before deriving any provider URL.
+        (!id.is_empty()
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte)))
+        .then_some(id)
     }
 }
 
@@ -343,6 +347,38 @@ fn safe_truncate_utf8(input: &str, max_bytes: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_video_variants_and_rejects_query_injection() {
+        for url in [
+            "https://youtube.com/shorts/abc_123-xyz?feature=share",
+            "https://m.youtube.com/live/abc_123-xyz",
+            "https://www.youtube.com/embed/abc_123-xyz",
+            "https://www.youtube-nocookie.com/embed/abc_123-xyz",
+        ] {
+            assert_eq!(
+                YouTubeFetcher::parse_video_id(&Url::parse(url).unwrap()).as_deref(),
+                Some("abc_123-xyz"),
+                "{url}"
+            );
+        }
+        for url in [
+            "https://youtube.com/watch/extra?v=abc",
+            "https://youtu.be/abc/extra",
+            "https://youtube.com/shorts/",
+            "https://youtube.com/live/abc/extra",
+            "https://youtube.com.evil.test/shorts/abc",
+            "https://youtube.com/watch?v=abc%26lang%3Dfr",
+            "https://youtube.com/embed/abc%3Fother",
+            "ftp://youtube.com/watch?v=abc",
+        ] {
+            assert_eq!(
+                YouTubeFetcher::parse_video_id(&Url::parse(url).unwrap()),
+                None,
+                "{url}"
+            );
+        }
+    }
 
     #[test]
     fn test_parse_youtube_watch() {

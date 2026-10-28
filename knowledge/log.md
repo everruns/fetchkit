@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-10-27
+
+* **Social media**: Add public TikTok/Vimeo/SoundCloud oEmbed metadata fetching with fixed endpoints, policy enforcement, bounded output and explicit media limits. Extend YouTube URL matching to Shorts/live/embeds and validate IDs before API query construction.
+
 ## 2026-10-25
 
 * **Publishing authentication**: Bind both Rust crates to GitHub OIDC in `publish.yml`; publishing jobs use short-lived tokens from a pinned official auth action, with no legacy secret fallback. Document recovery from current main with the original immutable release source tag and actual registry consumer verification.
