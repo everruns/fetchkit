@@ -579,3 +579,249 @@ fn dns_policy_populates_pinned_addrs_for_resolved_host() {
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn social_media_registry_returns_metadata_without_loading_embeds() {
+    let body = serde_json::to_vec(&json!({
+        "type": "video", "title": "A public post", "author_name": "Creator",
+        "author_url": "https://example.test/creator", "description": "<p>A <strong>description</strong> &amp; details</p>",
+        "thumbnail_url": "https://example.test/image.jpg",
+        "html": "<script src='http://127.0.0.1/private'>unsafe embed</script>"
+    }))
+    .unwrap();
+    for (url, endpoint, canonical, format) in [
+        (
+            "https://www.tiktok.com/@creator/video/123?tracking=secret",
+            "www.tiktok.com/oembed",
+            "https://www.tiktok.com/@creator/video/123",
+            "tiktok_video",
+        ),
+        (
+            "https://player.vimeo.com/video/123",
+            "vimeo.com/api/oembed.json",
+            "https://vimeo.com/123",
+            "vimeo_video",
+        ),
+        (
+            "https://soundcloud.com/creator/track",
+            "soundcloud.com/oembed",
+            "https://soundcloud.com/creator/track",
+            "soundcloud_track",
+        ),
+        (
+            "https://soundcloud.com/creator/sets/playlist",
+            "soundcloud.com/oembed",
+            "https://soundcloud.com/creator/sets/playlist",
+            "soundcloud_playlist",
+        ),
+    ] {
+        let mock = Arc::new(MockTransport::new().route(endpoint, 200, "application/json", &body));
+        let response = fetchkit::FetcherRegistry::with_defaults()
+            .fetch(FetchRequest::new(url), options_with(mock.clone()))
+            .await
+            .unwrap();
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.format.as_deref(), Some(format));
+        let content = response.content.unwrap();
+        for expected in [
+            "# A public post",
+            "Creator",
+            "A **description** & details",
+            "Public metadata only",
+            canonical,
+        ] {
+            assert!(content.contains(expected), "{content}");
+        }
+        assert!(!content.contains("<script"));
+        assert!(!content.contains("unsafe embed"));
+        assert!(!content.contains("secret"));
+        assert_eq!(response.size, Some(content.len() as u64));
+        let calls = mock.calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "embed and thumbnail URLs must never be fetched"
+        );
+        let api_url = url::Url::parse(&calls[0].0).unwrap();
+        assert_eq!(
+            api_url
+                .query_pairs()
+                .find(|(key, _)| key == "url")
+                .unwrap()
+                .1,
+            canonical
+        );
+    }
+}
+
+#[tokio::test]
+async fn social_media_preserves_errors_and_rejects_invalid_metadata() {
+    for status in [302, 403, 404, 429, 500] {
+        let mock = Arc::new(MockTransport::new().route(
+            "/oembed",
+            status,
+            "text/html",
+            b"private provider details",
+        ));
+        let result = fetchkit::SocialMediaFetcher::new()
+            .fetch(
+                &FetchRequest::new("https://tiktok.com/@creator/video/123"),
+                &options_with(mock.clone()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.status_code, status);
+        assert!(result.error.unwrap().contains(&status.to_string()));
+        assert!(result.content.is_none());
+        assert_eq!(mock.calls().len(), 1);
+    }
+    for body in [
+        "<html>login</html>",
+        "{}",
+        r#"{"type":"link"}"#,
+        r#"{"type":"video","title":4}"#,
+    ] {
+        let mock = Arc::new(MockTransport::new().route(
+            "/oembed",
+            200,
+            "application/json",
+            body.as_bytes(),
+        ));
+        let result = fetchkit::SocialMediaFetcher::new()
+            .fetch(
+                &FetchRequest::new("https://vimeo.com/123"),
+                &options_with(mock),
+            )
+            .await;
+        assert!(matches!(result, Err(FetchError::FetcherError(_))));
+    }
+}
+
+#[tokio::test]
+async fn social_media_enforces_original_and_derived_url_policy_before_transport() {
+    // THREAT[TM-INPUT-007]/[TM-SSRF-010]: all URL policy applies to API requests too.
+    for policy in 0..5 {
+        let mock = Arc::new(MockTransport::new());
+        let mut options = options_with(mock.clone());
+        match policy {
+            0 => options.blocked_hosts = vec!["www.tiktok.com".into()],
+            1 => options.allowed_ports = vec![80],
+            2 => options.block_prefixes = vec!["https://www.tiktok.com/oembed".into()],
+            3 => options.allow_prefixes = vec!["https://tiktok.com/@creator".into()],
+            4 => options.block_prefixes = vec!["https://tiktok.com/@creator".into()],
+            _ => unreachable!(),
+        }
+        let result = fetchkit::SocialMediaFetcher::new()
+            .fetch(
+                &FetchRequest::new("https://tiktok.com/@creator/video/123"),
+                &options,
+            )
+            .await;
+        assert!(
+            matches!(result, Err(FetchError::BlockedUrl)),
+            "policy {policy}: {result:?}"
+        );
+        assert!(mock.calls().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn social_media_handles_minimal_metadata_head_and_size_limits() {
+    let body = br#"{"type":"video"}"#;
+    let mock = Arc::new(MockTransport::new().route("/oembed", 200, "application/json", body));
+    let request = FetchRequest::new("https://tiktok.com/@creator/video/123");
+    let fetcher = fetchkit::SocialMediaFetcher::new();
+    let result = fetcher
+        .fetch(&request, &options_with(mock.clone()))
+        .await
+        .unwrap();
+    assert!(result.content.unwrap().starts_with("# TikTok"));
+    let mut options = options_with(mock.clone());
+    options.max_body_size = Some(40);
+    let result = fetcher.fetch(&request, &options).await.unwrap();
+    assert_eq!(result.truncated, Some(true));
+    assert!(result.content.unwrap().len() <= 40);
+    options.max_body_size = Some(4);
+    assert!(
+        fetcher.fetch(&request, &options).await.is_err(),
+        "truncated JSON must not masquerade as metadata"
+    );
+    let mut head = request;
+    head.method = Some(HttpMethod::Head);
+    let result = fetcher.fetch(&head, &options).await.unwrap();
+    assert_eq!(result.status_code, 200);
+    assert!(result.content.is_none());
+    assert_eq!(mock.calls().last().unwrap().1, TransportMethod::Head);
+
+    let body = br#"{"type":"rich","title":"\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"}"#;
+    let mock = Arc::new(MockTransport::new().route("/oembed", 200, "application/json", body));
+    let mut options = options_with(mock);
+    options.max_body_size = Some(body.len());
+    let result = fetcher
+        .fetch(
+            &FetchRequest::new("https://soundcloud.com/artist/track"),
+            &options,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.truncated, Some(true));
+    assert!(result.content.unwrap().len() <= body.len());
+}
+
+#[tokio::test]
+async fn youtube_video_variants_use_canonical_oembed_and_caption_requests() {
+    for url in [
+        "https://youtube.com/shorts/abc_123",
+        "https://youtube.com/live/abc_123",
+        "https://www.youtube-nocookie.com/embed/abc_123",
+    ] {
+        let mock = Arc::new(
+            MockTransport::new()
+                .route(
+                    "/oembed",
+                    200,
+                    "application/json",
+                    br#"{"title":"Video title","author_name":"Channel"}"#,
+                )
+                .route(
+                    "/api/timedtext",
+                    200,
+                    "text/xml",
+                    b"<transcript><text>Hello captions</text></transcript>",
+                ),
+        );
+        let result = fetchkit::FetcherRegistry::with_defaults()
+            .fetch(FetchRequest::new(url), options_with(mock.clone()))
+            .await
+            .unwrap();
+        assert_eq!(result.format.as_deref(), Some("youtube_video"));
+        let content = result.content.unwrap();
+        assert!(content.contains("# Video title"));
+        assert!(content.contains("Hello captions"));
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 2);
+        let metadata_url = url::Url::parse(&calls[0].0).unwrap();
+        assert_eq!(
+            metadata_url
+                .query_pairs()
+                .find(|(key, _)| key == "url")
+                .unwrap()
+                .1,
+            "https://www.youtube.com/watch?v=abc_123"
+        );
+    }
+}
+
+#[tokio::test]
+async fn social_media_rejects_incomplete_body_even_with_valid_json_prefix() {
+    let body = br#"{"type":"video"} trailing data"#;
+    let mock = Arc::new(MockTransport::new().route("/oembed", 200, "application/json", body));
+    let mut options = options_with(mock);
+    options.max_body_size = Some(br#"{"type":"video"}"#.len());
+    let result = fetchkit::SocialMediaFetcher::new()
+        .fetch(&FetchRequest::new("https://vimeo.com/123"), &options)
+        .await;
+    assert!(
+        matches!(result, Err(FetchError::FetcherError(message)) if message.contains("Incomplete"))
+    );
+}

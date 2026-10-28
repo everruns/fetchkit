@@ -543,6 +543,14 @@ None — all previously open threats have been mitigated.
 | Authority-scoped signatures | TM-AUTH | Signature covers `@authority`; per-host binding |
 | Graceful signing failure | TM-AUTH | Signing errors logged, request proceeds unsigned |
 
+Social media oEmbed requests use fixed TikTok, Vimeo and SoundCloud endpoints,
+validate both the original and complete derived URL against policy (TM-INPUT-007),
+and use DNS-pinned single-hop transport (TM-SSRF-010). Embed HTML is ignored;
+metadata URLs are never followed. Canonical resource URLs omit query parameters
+and userinfo. Body/output limits apply (TM-DOS-001). YouTube video identifiers
+reject query separators before timedtext URL construction. Coverage lives in
+`fetchers/social_media.rs`, `fetchers/youtube.rs`, and `tests/transport.rs`.
+
 ## Release Authentication (TM-RELEASE-001)
 
 **Threat**: A leaked long-lived CI publisher secret permits unauthorized crate

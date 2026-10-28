@@ -300,9 +300,30 @@ error names the format and says conversion is not enabled.
 
 #### YouTubeFetcher
 
-- Matches: `https://youtube.com/watch?v={id}`, `https://youtu.be/{id}`
-- Behavior: Fetches video metadata via oEmbed API
+- Matches watch, Shorts, live, embed and `youtu.be` video URLs; privacy-enhanced `youtube-nocookie.com/embed/{id}` is also supported
+- Video IDs allow only ASCII alphanumerics, `_` and `-`; extra path segments and query-injection characters are rejected
+- Behavior: Fetches video metadata via oEmbed API and best-effort English captions via the legacy timedtext endpoint
 - Response format field: `"youtube_video"`
+
+#### SocialMediaFetcher
+
+- Matches canonical TikTok `@user/video/{id}`, Vimeo `/{id}` and player embed URLs,
+  and SoundCloud `/{user}/{track}` and `/{user}/sets/{playlist}` URLs.
+- Uses fixed official oEmbed endpoints without credentials; no endpoint discovery.
+- Returns provider-supplied title, author, description and thumbnail URL when available; HTML descriptions are converted to Markdown.
+  TikTok may return only embed metadata; this produces a platform heading and canonical URL.
+- Formats: `tiktok_video`, `vimeo_video`, `soundcloud_track`, `soundcloud_playlist`.
+- Always labels output as public metadata only. Does not download media, obtain
+  transcripts, execute embed HTML, or fetch returned thumbnail/author URLs.
+- Query parameters and userinfo are not sent to the oEmbed provider. Short links,
+  profiles, private sharing paths and unsupported routes use the default fetcher.
+- Validates the original and fully constructed API URLs against host/port and
+  prefix policy; uses the shared bounded transport with DNS pinning and no redirects.
+- Preserves non-2xx API status as an error response; invalid/oversized JSON is an
+  error, while rendered output is UTF-8 safely capped with size/truncation metadata.
+- HEAD requests use HEAD on the oEmbed endpoint and return no body.
+- Unit and injected-transport tests cover matching, registration, metadata-only
+  responses, policy denial before transport, provider errors, HEAD and size caps.
 
 #### ArXivFetcher
 

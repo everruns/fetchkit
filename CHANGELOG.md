@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Public TikTok, Vimeo, and SoundCloud metadata fetching through oEmbed, available automatically in the library, CLI, MCP server, and Python bindings.
+- YouTube Shorts, live, embed, and privacy-enhanced embed URL support, with validated video IDs.
+
 ## [0.6.0] - 2026-10-23
 
 ### Highlights

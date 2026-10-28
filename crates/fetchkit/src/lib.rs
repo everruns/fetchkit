@@ -73,6 +73,7 @@
 //! - [`TwitterFetcher`] - Twitter/X tweet content with article metadata
 //! - [`WikipediaFetcher`] - Wikipedia article content via MediaWiki API
 //! - [`YouTubeFetcher`] - YouTube video metadata via oEmbed
+//! - [`SocialMediaFetcher`] - TikTok, Vimeo, and SoundCloud public metadata via oEmbed
 
 #[cfg(feature = "bot-auth")]
 pub mod bot_auth;
@@ -110,7 +111,8 @@ pub use error::{FetchError, ToolError};
 pub use fetchers::{
     ArXivFetcher, DefaultFetcher, DocsSiteFetcher, Fetcher, FetcherRegistry, GitHubCodeFetcher,
     GitHubIssueFetcher, GitHubRepoFetcher, HackerNewsFetcher, PackageRegistryFetcher,
-    RSSFeedFetcher, StackOverflowFetcher, TwitterFetcher, WikipediaFetcher, YouTubeFetcher,
+    RSSFeedFetcher, SocialMediaFetcher, StackOverflowFetcher, TwitterFetcher, WikipediaFetcher,
+    YouTubeFetcher,
 };
 pub use file_saver::{FileSaveError, FileSaver, LocalFileSaver, SaveResult};
 pub use tool::{
