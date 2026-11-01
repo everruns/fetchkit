@@ -11,7 +11,20 @@ categories.workspace = true
 readme = "../../README.md"
 
 [features]
-default = ["docs-pdf", "docs-markkit"]
+default = ["reqwest-tls", "docs-pdf", "docs-markkit"]
+# TLS (rustls, reqwest's default provider), HTTP/2, system proxy discovery and
+# gzip/brotli/deflate decoding for the built-in `ReqwestTransport`. Embedders
+# that route all traffic through their own `HttpTransport` disable default
+# features and leave this off (see knowledge/foundations/fetchers.md).
+reqwest-tls = [
+    "reqwest/default-tls",
+    "reqwest/charset",
+    "reqwest/http2",
+    "reqwest/system-proxy",
+    "reqwest/gzip",
+    "reqwest/brotli",
+    "reqwest/deflate",
+]
 # Document conversion backends (see knowledge/foundations/fetchers.md)
 docs-pdf = ["dep:pdf-inspector"]
 # Office documents (DOCX, XLSX/XLSM, XLS, ODS) via markkit.

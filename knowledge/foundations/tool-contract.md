@@ -180,6 +180,23 @@ Provide a builder to configure tool options, including:
 
 - Binary name: `fetchkit`.
 - CLI provides a convenient interface optimized for LLM consumption.
+- The CLI is a library: `fetchkit_cli::run(args, &dyn CliHost) -> i32` (crate
+  `fetchkit-cli`, lib name `fetchkit_cli`). The binary is a thin wrapper over
+  `run` with `NativeHost`. Embedders (bashkit's `fetchkit` builtin) call the same
+  `run` with their own host, so flags, help, version, errors, output, and exit
+  codes are identical everywhere.
+- `CliHost` owns every process-level effect: stdout/stderr, env lookups
+  (`CLOUDFLARE_*`), MCP stdio (`serve_mcp`, refused by default), and egress policy
+  (`configure_tool`, e.g. a custom `HttpTransport`). `run` never exits the process,
+  prints directly, or reads `std::env`.
+- Hosts may refuse flags via `CliHost::refuse(HostFeature)`: `--allow-env-proxy`,
+  `--render-rakers`, `--bot-auth-key`/`--bot-auth-agent`,
+  `--allow-remote-conversion`. Refused flags still parse and show in help; the
+  command fails before any request with `Error: <flag> <reason>` and exit 1.
+- Exit codes: 0 success / `--help` / `--version` / broken stdout pipe; 1 runtime
+  error or refused flag; 2 usage error (clap).
+- clap is built with default features off (no color, no suggestions), matching
+  bashkit's clap set so feature unification does not change either side's output.
 - Subcommands:
   - `fetch <URL>` - Fetch URL and convert to markdown
   - `mcp` - Run as MCP server over stdio

@@ -407,7 +407,11 @@ checks, bot-auth signing, and body-size/timeout caps; only the socket-level send
 is delegated.
 
 `FetchOptions.transport` selects the implementation (`None` => default
-`ReqwestTransport`). A host application can supply its own transport to route
+`ReqwestTransport`). reqwest is built with default features off; the default
+`reqwest-tls` feature adds rustls (reqwest's default provider), HTTP/2, system
+proxy discovery, and gzip/brotli/deflate decoding for `ReqwestTransport`.
+Embedders that supply their own transport (bashkit: ring-only rustls) disable
+default features so fetchkit adds no second TLS stack or aws-lc-sys. A host application can supply its own transport to route
 fetchkit through a dedicated egress boundary without weakening any security policy.
 When `pinned_addrs` is non-empty a transport MUST connect only to those addresses
 (TM-SSRF-001, TM-SSRF-005).

@@ -128,12 +128,12 @@ pub(super) fn check_archive(
         )
     };
     let mut archive = zip::ZipArchive::new(Cursor::new(body)).map_err(|_| fail())?;
-    if archive.len() > config.max_archive_entries.min(10_000) {
+    if archive.len() > config.limits.max_archive_entries.min(10_000) {
         return Err(fail());
     }
     let mut total = 0u64;
-    let part_limit = config.max_archive_entry_size.min(64 * 1024 * 1024);
-    let total_limit = config.max_archive_total_size.min(256 * 1024 * 1024);
+    let part_limit = config.limits.max_archive_entry_size.min(64 * 1024 * 1024);
+    let total_limit = config.limits.max_archive_total_size.min(256 * 1024 * 1024);
     for index in 0..archive.len() {
         let entry = archive.by_index_raw(index).map_err(|_| fail())?;
         total = total
@@ -207,7 +207,7 @@ pub(super) fn check_archive(
                             parts.join("/")
                         };
                         paths.insert(path);
-                        if paths.len() > config.max_archive_entries.min(10_000) {
+                        if paths.len() > config.limits.max_archive_entries.min(10_000) {
                             return Err(fail());
                         }
                     }

@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Public TikTok, Vimeo, and SoundCloud metadata fetching through oEmbed, available automatically in the library, CLI, MCP server, and Python bindings.
 - YouTube Shorts, live, embed, and privacy-enhanced embed URL support, with validated video IDs.
+- `fetchkit_cli` library: `run(args, &dyn CliHost)` runs the exact `fetchkit` CLI inside another program (used by bashkit's `fetchkit` builtin), with stdout/stderr, environment, MCP, and egress supplied by the host.
+
+### Changed
+
+- **Breaking:** reqwest TLS, HTTP/2, proxy discovery, and body decompression are behind the new default `reqwest-tls` feature. Builds with `default-features = false` must enable it to use the built-in `ReqwestTransport` over HTTPS.
+- Require Markkit 0.2.
+- clap is built without color and suggestions; CLI help and errors are plain text.
 
 ## [0.6.0] - 2026-10-23
 
