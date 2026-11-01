@@ -256,3 +256,11 @@ async fn fetch_error_is_reported_once_with_exit_1() {
     assert_eq!(run_with(&host, &["fetch", "not a url"]).await, 1);
     assert!(host.err().starts_with("Error: "), "{}", host.err());
 }
+
+#[test]
+fn run_future_is_send() {
+    // Embedders run the CLI inside `Send` async contexts (bashkit builtins).
+    fn assert_send<T: Send>(_: T) {}
+    let host = TestHost::default();
+    assert_send(run(["fetchkit", "--help"], &host));
+}
