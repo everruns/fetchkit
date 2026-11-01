@@ -913,7 +913,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetchkit"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "fetchkit-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "fetchkit-python"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "fetchkit",
  "pyo3",
@@ -1742,9 +1742,9 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "markkit"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d8fce8c0d6eda79af05de89944ed828693ca61ac117b19d79030f52e3f23ae8"
+checksum = "688329d19a51cc92a77ae70536ce55e9f5d45d86e542616066134cce8fd03b54"
 dependencies = [
  "calamine",
  "cfb",

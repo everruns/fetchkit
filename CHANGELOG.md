@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-01
+
+### Highlights
+
+- Embed the exact `fetchkit` CLI in another program with `fetchkit_cli::run(args, &dyn CliHost)`; bashkit uses it for a sandboxed `fetchkit` builtin.
+- Fetch public TikTok, Vimeo, and SoundCloud metadata through oEmbed, and YouTube Shorts, live, and embed URLs.
+- Build without a TLS stack when you supply your own `HttpTransport`; require Markkit 0.3.
+
+### Breaking Changes
+
+- reqwest TLS, HTTP/2, proxy discovery, and body decompression are behind the new default `reqwest-tls` feature. Builds with `default-features = false` that use the built-in `ReqwestTransport` over HTTPS must enable `reqwest-tls`. `fetchkit-cli` gained matching `reqwest-tls` and `docs-pdf` features (on by default).
+
 ### Added
 
 - Public TikTok, Vimeo, and SoundCloud metadata fetching through oEmbed, available automatically in the library, CLI, MCP server, and Python bindings.
@@ -15,9 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** reqwest TLS, HTTP/2, proxy discovery, and body decompression are behind the new default `reqwest-tls` feature. Builds with `default-features = false` must enable it to use the built-in `ReqwestTransport` over HTTPS.
-- Require Markkit 0.2.
+- Require Markkit 0.3.
 - clap is built without color and suggestions; CLI help and errors are plain text.
+
+### What's Changed
+
+- feat(cli): embeddable CLI library + optional reqwest TLS ([#189](https://github.com/everruns/fetchkit/pull/189))
+- feat(fetchers): add public social media metadata support ([#188](https://github.com/everruns/fetchkit/pull/188))
+- ci: publish Rust crates with trusted OIDC ([#187](https://github.com/everruns/fetchkit/pull/187))
 
 ## [0.6.0] - 2026-10-23
 
