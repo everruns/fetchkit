@@ -100,7 +100,7 @@ impl DocumentConverter for MarkkitConverter {
     }
 
     fn max_input_bytes(&self) -> Option<usize> {
-        Some(self.markkit.config().max_input_size)
+        Some(self.markkit.config().limits.max_input_size)
     }
 
     async fn convert(&self, input: DocumentInput) -> Result<ConvertedDocument, ConvertError> {
@@ -131,11 +131,7 @@ impl DocumentConverter for MarkkitConverter {
 
         let mut warnings: Vec<String> = Vec::new();
         for warning in &extraction.warnings {
-            let code = warning
-                .split_once(':')
-                .map_or(warning.as_str(), |(code, _)| code)
-                .trim()
-                .to_string();
+            let code = warning.code.as_str().to_string();
             if !code.is_empty() && !warnings.contains(&code) {
                 warnings.push(code);
             }
@@ -373,7 +369,10 @@ mod tests {
             ConvertError::Unsupported(_)
         ));
         assert!(matches!(
-            map_error(markkit::Error::ResourceLimit("too big".into())),
+            map_error(markkit::Error::ResourceLimit(markkit::LimitExceeded::new(
+                markkit::LimitKind::MaxInputSize,
+                "too big",
+            ))),
             ConvertError::Failed(message) if message.contains("too big")
         ));
     }

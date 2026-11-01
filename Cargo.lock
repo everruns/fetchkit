@@ -950,8 +950,11 @@ dependencies = [
 name = "fetchkit-cli"
 version = "0.6.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "clap",
  "fetchkit",
+ "futures",
  "serde",
  "serde_json",
  "tokio",
@@ -1739,25 +1742,16 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "markkit"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04c6e21845c0a20a0001b0688c5d3207201ad7daa4208ab3eb25b556533e22cd"
+checksum = "1d8fce8c0d6eda79af05de89944ed828693ca61ac117b19d79030f52e3f23ae8"
 dependencies = [
- "anyhow",
- "async-trait",
- "base64",
  "calamine",
  "cfb",
- "encoding_rs",
- "futures",
- "mime",
- "quick-xml 0.41.0",
- "regex",
+ "quick-xml 0.42.0",
  "serde",
  "serde_json",
  "thiserror",
- "tokio",
- "unicode-segmentation",
  "zip",
 ]
 
