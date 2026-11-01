@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-11-01
+
+* **Embeddable CLI**: The CLI moved into the `fetchkit_cli` library (`run(args, &dyn CliHost)`) so bashkit can ship a `fetchkit` builtin with the identical interface. Hosts own stdio, env, MCP, and egress, and can refuse host-only flags. reqwest TLS/compression moved behind the default `reqwest-tls` feature; clap default features off; Markkit 0.2.
+
 ## 2026-10-27
 
 * **Social media**: Add public TikTok/Vimeo/SoundCloud oEmbed metadata fetching with fixed endpoints, policy enforcement, bounded output and explicit media limits. Extend YouTube URL matching to Shorts/live/embeds and validate IDs before API query construction.

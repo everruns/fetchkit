@@ -10,6 +10,10 @@ keywords.workspace = true
 categories.workspace = true
 readme = "../../README.md"
 
+[lib]
+name = "fetchkit_cli"
+path = "src/lib.rs"
+
 [[bin]]
 # Keep CLI docs off so rustdoc doesn't collide with the library's `fetchkit` output.
 name = "fetchkit"
@@ -32,6 +36,10 @@ tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }

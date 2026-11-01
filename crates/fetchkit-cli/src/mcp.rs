@@ -3,7 +3,7 @@
 use fetchkit::{CrawlPage, Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
 /// JSON-RPC 2.0 request
 #[derive(Debug, Deserialize)]
@@ -291,20 +291,26 @@ pub async fn run_server(tool: Tool) {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(l) => l,
+    // Lock stdin per line (`Stdin::read_line`), never across the `.await`
+    // below: a held `StdinLock` would make this future `!Send`.
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        match stdin.read_line(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => {}
             Err(e) => {
                 eprintln!("Error reading stdin: {}", e);
                 continue;
             }
-        };
+        }
+        let line = buf.trim_end_matches('\n').trim_end_matches('\r');
 
         if line.is_empty() {
             continue;
         }
 
-        let request: JsonRpcRequest = match serde_json::from_str(&line) {
+        let request: JsonRpcRequest = match serde_json::from_str(line) {
             Ok(req) => req,
             Err(e) => {
                 let response = JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e));
