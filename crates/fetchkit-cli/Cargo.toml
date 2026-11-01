@@ -21,7 +21,11 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = []
+# Same backends as the `fetchkit` crate's defaults. Embedders that supply their
+# own HttpTransport (bashkit) disable default features to drop reqwest's TLS.
+default = ["reqwest-tls", "docs-pdf", "docs-markkit"]
+reqwest-tls = ["fetchkit/reqwest-tls"]
+docs-pdf = ["fetchkit/docs-pdf"]
 bot-auth = ["fetchkit/bot-auth"]
 render-rakers = ["fetchkit/render-rakers"]
 docs-markkit = ["fetchkit/docs-markkit"]
@@ -31,7 +35,7 @@ docs-http = ["fetchkit/docs-http"]
 docs-all = ["fetchkit/docs-all"]
 
 [dependencies]
-fetchkit = { path = "../fetchkit", version = "0.6.0" }
+fetchkit = { path = "../fetchkit", version = "0.7.0", default-features = false }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
