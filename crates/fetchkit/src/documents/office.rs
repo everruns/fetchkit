@@ -236,9 +236,9 @@ fn core_title(archive: &mut Archive<'_>) -> Option<String> {
     let mut title = String::new();
     loop {
         match reader.read_event().ok()? {
-            Event::Start(start) if start.local_name().as_ref() == b"title" => in_title = true,
-            Event::End(end) if end.local_name().as_ref() == b"title" => break,
-            Event::Text(text) if in_title => title.push_str(&text.xml10_content().ok()?),
+            Event::Start(start) if start.local_name().as_ref() == "title" => in_title = true,
+            Event::End(end) if end.local_name().as_ref() == "title" => break,
+            Event::Text(text) if in_title => title.push_str(&text.xml10_content()),
             Event::GeneralRef(reference) if in_title => push_reference(&mut title, &reference),
             Event::Eof => break,
             _ => {}
@@ -253,8 +253,8 @@ fn push_reference(out: &mut String, reference: &quick_xml::events::BytesRef<'_>)
         out.push(character);
         return;
     }
-    let name = reference.decode().unwrap_or(Cow::Borrowed(""));
-    out.push_str(match name.as_ref() {
+    let name: &str = reference.as_ref();
+    out.push_str(match name {
         "amp" => "&",
         "lt" => "<",
         "gt" => ">",
@@ -264,7 +264,7 @@ fn push_reference(out: &mut String, reference: &quick_xml::events::BytesRef<'_>)
     });
 }
 
-fn attribute(start: &BytesStart<'_>, local: &[u8]) -> Option<String> {
+fn attribute(start: &BytesStart<'_>, local: &str) -> Option<String> {
     start.attributes().flatten().find_map(|attr| {
         (attr.key.local_name().as_ref() == local)
             .then(|| {
@@ -344,9 +344,9 @@ fn docx_to_markdown_with_limits(
     loop {
         match reader.read_event().map_err(xml_error)? {
             Event::Start(start) => match start.local_name().as_ref() {
-                b"p" => paragraph = Some(DocxParagraph::default()),
-                b"t" => in_text = true,
-                b"tbl" => {
+                "p" => paragraph = Some(DocxParagraph::default()),
+                "t" => in_text = true,
+                "tbl" => {
                     table_depth += 1;
                     if table_depth == 1 {
                         rows.clear();
@@ -355,11 +355,11 @@ fn docx_to_markdown_with_limits(
                         table_text_bytes = 0;
                     }
                 }
-                b"tr" if table_depth == 1 => {
+                "tr" if table_depth == 1 => {
                     check_table_shape(rows.len() + 1, width, limits)?;
                     rows.push(Vec::new());
                 }
-                b"tc" if table_depth > 0 => {
+                "tc" if table_depth > 0 => {
                     source_cells = checked_size(source_cells, 1, limits.cells)?;
                     if table_depth == 1 {
                         width = width.max(rows.last().map_or(1, |row| row.len() + 1));
@@ -373,7 +373,7 @@ fn docx_to_markdown_with_limits(
             // `<w:t/>` has no matching End event.
             Event::Empty(start) => docx_property(&start, &mut paragraph, limits.output_bytes)?,
             Event::Text(text) if in_text => {
-                let text = text.xml10_content().map_err(|e| xml_error(e.into()))?;
+                let text = text.xml10_content();
                 if let Some(p) = &mut paragraph {
                     append_bounded(&mut p.text, &text, limits.output_bytes)?;
                 }
@@ -386,8 +386,8 @@ fn docx_to_markdown_with_limits(
                 }
             }
             Event::End(end) => match end.local_name().as_ref() {
-                b"t" => in_text = false,
-                b"p" => {
+                "t" => in_text = false,
+                "p" => {
                     if let Some(rendered) = paragraph
                         .take()
                         .map(|p| p.render(limits.output_bytes))
@@ -414,12 +414,12 @@ fn docx_to_markdown_with_limits(
                         }
                     }
                 }
-                b"tc" if table_depth == 1 => {
+                "tc" if table_depth == 1 => {
                     if let (Some(done), Some(row)) = (cell.take(), rows.last_mut()) {
                         row.push(done);
                     }
                 }
-                b"tbl" => {
+                "tbl" => {
                     table_depth = table_depth.saturating_sub(1);
                     if table_depth == 0 {
                         append_table(&rows, &mut output, limits)?;
@@ -445,22 +445,22 @@ fn docx_property(
         return Ok(());
     };
     match start.local_name().as_ref() {
-        b"pStyle" => {
-            if let Some(style) = attribute(start, b"val") {
+        "pStyle" => {
+            if let Some(style) = attribute(start, "val") {
                 p.heading = heading_level(&style);
             }
         }
-        b"numPr" => {
+        "numPr" => {
             p.list_level.get_or_insert(0);
         }
-        b"ilvl" => {
-            let level = attribute(start, b"val")
+        "ilvl" => {
+            let level = attribute(start, "val")
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0usize);
             p.list_level = Some(level.min(8));
         }
-        b"tab" => append_bounded(&mut p.text, "\t", limit)?,
-        b"br" | b"cr" => append_bounded(&mut p.text, "\n", limit)?,
+        "tab" => append_bounded(&mut p.text, "\t", limit)?,
+        "br" | "cr" => append_bounded(&mut p.text, "\n", limit)?,
         _ => {}
     }
     Ok(())
@@ -481,10 +481,10 @@ fn slide_parts(archive: &mut Archive<'_>) -> Result<Vec<String>, ContentProcesso
         loop {
             match reader.read_event().map_err(xml_error)? {
                 Event::Start(start) | Event::Empty(start)
-                    if start.local_name().as_ref() == b"Relationship" =>
+                    if start.local_name().as_ref() == "Relationship" =>
                 {
                     if let (Some(id), Some(target)) =
-                        (attribute(&start, b"Id"), attribute(&start, b"Target"))
+                        (attribute(&start, "Id"), attribute(&start, "Target"))
                     {
                         targets.insert(id, target);
                     }
@@ -498,7 +498,7 @@ fn slide_parts(archive: &mut Archive<'_>) -> Result<Vec<String>, ContentProcesso
         loop {
             match reader.read_event().map_err(xml_error)? {
                 Event::Start(start) | Event::Empty(start)
-                    if start.local_name().as_ref() == b"sldId" =>
+                    if start.local_name().as_ref() == "sldId" =>
                 {
                     if let Some(target) = relationship_id(&start).and_then(|id| targets.get(&id)) {
                         let target = target.trim_start_matches('/');
@@ -544,7 +544,7 @@ fn slide_parts(archive: &mut Archive<'_>) -> Result<Vec<String>, ContentProcesso
 fn relationship_id(start: &BytesStart<'_>) -> Option<String> {
     start.attributes().flatten().find_map(|attr| {
         let key = attr.key.as_ref();
-        (key.ends_with(b":id") && key != b"id")
+        (key.ends_with(":id") && key != "id")
             .then(|| {
                 attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)
                     .ok()
@@ -595,18 +595,18 @@ fn slide_paragraphs(xml: &str) -> Result<Vec<String>, ContentProcessorError> {
     loop {
         match reader.read_event().map_err(xml_error)? {
             Event::Start(start) => match start.local_name().as_ref() {
-                b"p" => current = Some(String::new()),
-                b"t" => in_text = true,
+                "p" => current = Some(String::new()),
+                "t" => in_text = true,
                 _ => {}
             },
-            Event::Empty(start) if start.local_name().as_ref() == b"br" => {
+            Event::Empty(start) if start.local_name().as_ref() == "br" => {
                 if let Some(text) = &mut current {
                     text.push(' ');
                 }
             }
             Event::Text(text) if in_text => {
                 if let Some(current) = &mut current {
-                    current.push_str(&text.xml10_content().map_err(|e| xml_error(e.into()))?);
+                    current.push_str(&text.xml10_content());
                 }
             }
             Event::GeneralRef(reference) if in_text => {
@@ -615,8 +615,8 @@ fn slide_paragraphs(xml: &str) -> Result<Vec<String>, ContentProcessorError> {
                 }
             }
             Event::End(end) => match end.local_name().as_ref() {
-                b"t" => in_text = false,
-                b"p" => {
+                "t" => in_text = false,
+                "p" => {
                     if let Some(text) = current.take() {
                         let text = text.trim();
                         if !text.is_empty() {

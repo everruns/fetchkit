@@ -124,11 +124,11 @@ Built-in converters (Cargo features):
 - `pdf-inspector`: classifies and extracts Markdown from bounded in-memory bytes; no
   OCR. OCR-required pages produce `pdf_requires_ocr` and `suggested_next_action: "use_ocr"`
   unless a later converter returns usable text.
-  The backend uses `pdf-inspector` 0.1.8 or newer within the 0.1 line, whose `lopdf`
-  parser bounds nested PDF objects. Deeply nested input must return control to
+  The backend uses `pdf-inspector` 1.25 or newer within the 1.x line (0.1.8 was the
+  first release whose `lopdf` parser bounds nested PDF objects). Deeply nested input must return control to
   the caller without aborting; the converter regression exercises that boundary
   in memory, allowing rejection or removal of the invalid nested object.
-Markkit is a registry dependency with a patched minimum of 0.1.1. There is no root-only
+Markkit is a registry dependency with a minimum of 0.3.1. There is no root-only
 Cargo patch: packaged downstream consumers resolve the same published parser source.
 Existing downstream lockfiles still need dependency updates for transitive TLS fixes.
 

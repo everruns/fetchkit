@@ -40,7 +40,7 @@ pub(super) fn check_xml(xml: &[u8], limits: TableLimits) -> Result<(), ContentPr
         match event {
             Event::Start(start) | Event::Empty(start) => {
                 let name = start.local_name();
-                if name.as_ref() == b"tbl" {
+                if name.as_ref() == "tbl" {
                     if tables.len() >= MAX_TABLE_DEPTH {
                         return Err(fail());
                     }
@@ -48,22 +48,22 @@ pub(super) fn check_xml(xml: &[u8], limits: TableLimits) -> Result<(), ContentPr
                 }
                 if let Some((rows, width, columns)) = tables.last_mut() {
                     match name.as_ref() {
-                        b"tr" => {
+                        "tr" => {
                             *rows = rows.checked_add(1).ok_or_else(fail)?;
                             *columns = 0;
                         }
-                        b"tc" => {
+                        "tc" => {
                             source_cells = source_cells
                                 .checked_add(1)
                                 .filter(|n| *n <= limits.cells)
                                 .ok_or_else(fail)?;
                             *columns = columns.checked_add(1).ok_or_else(fail)?;
                         }
-                        b"gridSpan" => {
+                        "gridSpan" => {
                             let span = start
                                 .attributes()
                                 .flatten()
-                                .find(|a| a.key.local_name().as_ref() == b"val")
+                                .find(|a| a.key.local_name().as_ref() == "val")
                                 .and_then(|a| {
                                     a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
                                         .ok()?
@@ -86,11 +86,11 @@ pub(super) fn check_xml(xml: &[u8], limits: TableLimits) -> Result<(), ContentPr
                         return Err(fail());
                     }
                 }
-                if empty && name.as_ref() == b"tbl" {
+                if empty && name.as_ref() == "tbl" {
                     tables.pop();
                 }
             }
-            Event::End(end) if end.local_name().as_ref() == b"tbl" => {
+            Event::End(end) if end.local_name().as_ref() == "tbl" => {
                 if let Some((rows, width, _)) = tables.pop() {
                     let cells = rows.checked_mul(width).ok_or_else(fail)?;
                     padded_cells = padded_cells
@@ -174,9 +174,9 @@ pub(super) fn check_archive(
         use quick_xml::events::Event;
         match reader.read_event().map_err(|_| fail())? {
             Event::Start(start) | Event::Empty(start)
-                if start.local_name().as_ref() == b"Relationship" =>
+                if start.local_name().as_ref() == "Relationship" =>
             {
-                let attr = |name: &[u8]| {
+                let attr = |name: &str| {
                     start
                         .attributes()
                         .flatten()
@@ -187,10 +187,10 @@ pub(super) fn check_archive(
                                 .map(|v| v.into_owned())
                         })
                 };
-                if attr(b"Type").is_some_and(|t| t.ends_with("/officeDocument"))
-                    && !attr(b"TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("External"))
+                if attr("Type").is_some_and(|t| t.ends_with("/officeDocument"))
+                    && !attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("External"))
                 {
-                    if let Some(target) = attr(b"Target") {
+                    if let Some(target) = attr("Target") {
                         let path = if let Some(path) = target.strip_prefix('/') {
                             path.to_string()
                         } else {

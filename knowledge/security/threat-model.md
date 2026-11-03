@@ -326,7 +326,7 @@ are rejected before parsing, extracted output is capped again, and synchronous p
 runs off the async runtime with at most two documents active per process. The blocking
 task owns its concurrency permit, preventing cancelled callers from starting replacement
 parses while non-cancellable work continues. The default backend requires `pdf-inspector`
-0.1.8 / `lopdf` 0.42 or newer to bound nested-object recursion (RUSTSEC-2026-0187);
+1.25 (bounded since 0.1.8) / `lopdf` 0.42 or newer to bound nested-object recursion (RUSTSEC-2026-0187);
 `deeply_nested_pdf_returns_without_aborting` covers normal return for a 10,000-level
 array. A crafted PDF may still cause expensive
 parser-internal object-stream expansion or prolonged CPU work.
