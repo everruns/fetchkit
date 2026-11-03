@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Require Markkit 0.3.1.
+- Update PDF parsing to `pdf-inspector` 1.25 (lopdf 0.45); nested-object recursion stays bounded.
+- Update quick-xml 0.42, calamine 0.38, ed25519-dalek 3, base64 0.23 and the Python bindings to PyO3 0.30; refresh the lockfile.
+- CI: move setup-python, upload-artifact and action-gh-release to their Node 24 major versions.
+
 ## [0.7.0] - 2026-11-01
 
 ### Highlights

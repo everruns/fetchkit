@@ -58,7 +58,7 @@ jobs:
           echo "Release notes extracted for v$VERSION"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           target_commitish: ${{ github.sha }}
           tag_name: ${{ steps.version.outputs.tag }}
