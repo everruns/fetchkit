@@ -896,7 +896,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetchkit"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "fetchkit-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -945,7 +945,7 @@ dependencies = [
 
 [[package]]
 name = "fetchkit-python"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "fetchkit",
  "pyo3",

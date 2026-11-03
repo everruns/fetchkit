@@ -7,12 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-03
+
+### Highlights
+
+- Require Markkit 0.3.1, the latest Markkit release.
+- Move PDF extraction to `pdf-inspector` 1.25 (lopdf 0.45) with nested-object recursion still bounded.
+- Dependency maintenance: quick-xml 0.42, calamine 0.38, ed25519-dalek 3, base64 0.23, PyO3 0.30, refreshed lockfile.
+
 ### Changed
 
 - Require Markkit 0.3.1.
 - Update PDF parsing to `pdf-inspector` 1.25 (lopdf 0.45); nested-object recursion stays bounded.
 - Update quick-xml 0.42, calamine 0.38, ed25519-dalek 3, base64 0.23 and the Python bindings to PyO3 0.30; refresh the lockfile.
 - CI: move setup-python, upload-artifact and action-gh-release to their Node 24 major versions.
+
+### What's Changed
+
+- chore(deps): maintenance — markkit 0.3.1, pdf-inspector 1.25, quick-xml 0.42 ([#191](https://github.com/everruns/fetchkit/pull/191))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.7.0...v0.7.1
 
 ## [0.7.0] - 2026-11-01
 
@@ -387,7 +401,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Full Changelog**: https://github.com/everruns/fetchkit/commits/v0.1.0
 
-[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/everruns/fetchkit/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/everruns/fetchkit/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/everruns/fetchkit/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/everruns/fetchkit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/everruns/fetchkit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/everruns/fetchkit/compare/v0.4.0...v0.4.1
