@@ -2,6 +2,8 @@
 
 ## 2026-11-03
 
+* **Release 0.7.1**: patch release of the dependency maintenance pass (Markkit 0.3.1, pdf-inspector 1.25); no public API change.
+
 * **Maintenance**: Markkit minimum 0.3.1; `pdf-inspector` moves to the 1.x line (1.25, `lopdf` 0.45) keeping the nested-object bound; quick-xml 0.42 (string-typed names) for the deprecated `office` converter and DOCX table limits; calamine 0.38, ed25519-dalek 3, base64 0.23, pyo3 0.30. CI actions on Node 24 majors.
 
 ## 2026-11-01

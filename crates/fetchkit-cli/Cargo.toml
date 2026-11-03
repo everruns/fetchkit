@@ -35,7 +35,7 @@ docs-http = ["fetchkit/docs-http"]
 docs-all = ["fetchkit/docs-all"]
 
 [dependencies]
-fetchkit = { path = "../fetchkit", version = "0.7.0", default-features = false }
+fetchkit = { path = "../fetchkit", version = "0.7.1", default-features = false }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
