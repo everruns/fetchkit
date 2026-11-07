@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Readable/agent content focus runs in linear time on hostile nesting (`'<article>' * N + '</article>'` was quadratic) (TM-DOS-009).
+
 ## [0.7.1] - 2026-11-03
 
 ### Highlights

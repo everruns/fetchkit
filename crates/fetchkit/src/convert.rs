@@ -6,6 +6,7 @@
 //! HTML conversion utilities
 
 use crate::types::{AgentResource, PageLink, PageMetadata};
+use std::collections::HashMap;
 use url::Url;
 
 /// Converts HTML into Markdown independently of retrieval and content extraction.
@@ -1554,14 +1555,28 @@ struct ReadableCandidateScore {
     word_count: usize,
 }
 
+// Decision (TM-DOS-006 / TM-CONV-002): readable extraction is linear in the
+// body size. Matching closes for each tag name come from one forward pass
+// (`match_tag_pairs`) instead of a scan per candidate, every substring search
+// resumes from a cached position, and the bytes handed to
+// `score_readable_candidate` are capped at `MAX_SCORED_BYTES_FACTOR` times the
+// document (nested containers would otherwise re-score the same text once per
+// nesting level). `'<article>' * N + '</article>'` was O(N * len).
+
+/// Total candidate bytes scored, as a multiple of the document length.
+const MAX_SCORED_BYTES_FACTOR: usize = 8;
+
 fn collect_best_readable_candidate(html: &str) -> Option<ReadableCandidate> {
     let lower = html.to_ascii_lowercase();
     let mut best = None;
-    let mut scored_count = 0usize;
+    let mut budget = ScanBudget {
+        scored_count: 0,
+        scored_bytes_left: html.len().saturating_mul(MAX_SCORED_BYTES_FACTOR),
+    };
 
     for tag_name in ["article", "main", "section", "div"] {
-        collect_best_tag_candidate(html, &lower, tag_name, &mut best, &mut scored_count);
-        if scored_count >= MAX_READABLE_CANDIDATES {
+        collect_best_tag_candidate(html, &lower, tag_name, &mut best, &mut budget);
+        if budget.exhausted() {
             break;
         }
     }
@@ -1569,34 +1584,90 @@ fn collect_best_readable_candidate(html: &str) -> Option<ReadableCandidate> {
     best
 }
 
+/// Work left for one readable-extraction pass.
+struct ScanBudget {
+    scored_count: usize,
+    scored_bytes_left: usize,
+}
+
+impl ScanBudget {
+    fn exhausted(&self) -> bool {
+        self.scored_count >= MAX_READABLE_CANDIDATES || self.scored_bytes_left == 0
+    }
+}
+
+/// Finds `needle` at or after a position that only moves forward, reusing the
+/// previous hit while it is still ahead, so a run of lookups costs one scan.
+struct ForwardFind<'a> {
+    hay: &'a str,
+    needle: &'a str,
+    // `None`: not searched yet; `Some(None)`: no more hits.
+    cached: Option<Option<usize>>,
+}
+
+impl<'a> ForwardFind<'a> {
+    fn new(hay: &'a str, needle: &'a str) -> Self {
+        Self {
+            hay,
+            needle,
+            cached: None,
+        }
+    }
+
+    fn at_or_after(&mut self, from: usize) -> Option<usize> {
+        match self.cached {
+            Some(None) => return None,
+            Some(Some(hit)) if hit >= from => return Some(hit),
+            _ => {}
+        }
+        let hit = self
+            .hay
+            .get(from..)
+            .and_then(|rest| rest.find(self.needle))
+            .map(|i| from + i);
+        self.cached = Some(hit);
+        hit
+    }
+}
+
+/// Whether the byte after a `<name` prefix ends the tag name.
+fn ends_tag_name(lower: &str, after_name: usize) -> bool {
+    lower[after_name..]
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
+        .unwrap_or(false)
+}
+
 fn collect_best_tag_candidate(
     html: &str,
     lower: &str,
     tag_name: &str,
     best: &mut Option<ReadableCandidate>,
-    scored_count: &mut usize,
+    budget: &mut ScanBudget,
 ) {
     let open_prefix = format!("<{tag_name}");
+    let pairs = match_tag_pairs(lower, tag_name);
+    let mut opens = ForwardFind::new(lower, &open_prefix);
+    let mut gts = ForwardFind::new(lower, ">");
     let mut search_start = 0usize;
 
-    while *scored_count < MAX_READABLE_CANDIDATES {
-        let Some(relative_start) = lower[search_start..].find(&open_prefix) else {
+    while !budget.exhausted() {
+        let Some(tag_start) = opens.at_or_after(search_start) else {
             break;
         };
-        let tag_start = search_start + relative_start;
         let after_name = tag_start + open_prefix.len();
-        let Some(next) = lower[after_name..].chars().next() else {
+        if after_name >= lower.len() {
             break;
-        };
-        if !(next.is_ascii_whitespace() || next == '>' || next == '/') {
+        }
+        if !ends_tag_name(lower, after_name) {
             search_start = after_name;
             continue;
         }
 
-        let Some(open_end_relative) = lower[tag_start..].find('>') else {
+        let Some(open_end) = gts.at_or_after(tag_start) else {
             break;
         };
-        let open_end = tag_start + open_end_relative;
         let open_tag = &html[tag_start + 1..open_end];
 
         if tag_name == "div" && !looks_like_content_container(open_tag) {
@@ -1604,13 +1675,15 @@ fn collect_best_tag_candidate(
             continue;
         }
 
-        let Some(close_start) = find_matching_close(lower, tag_name, tag_start, open_end + 1)
-        else {
-            break;
+        let Some(&close_start) = pairs.get(&tag_start) else {
+            // Self-closing or never closed: no content to score.
+            search_start = open_end + 1;
+            continue;
         };
         let inner = &html[open_end + 1..close_start];
+        budget.scored_bytes_left = budget.scored_bytes_left.saturating_sub(inner.len().max(1));
         if let Some(score) = score_readable_candidate(open_tag, inner) {
-            *scored_count += 1;
+            budget.scored_count += 1;
             let replace_best = best
                 .as_ref()
                 .map(|candidate| score.score > candidate.score)
@@ -1628,54 +1701,48 @@ fn collect_best_tag_candidate(
     }
 }
 
-fn find_matching_close(
-    lower_html: &str,
-    tag_name: &str,
-    tag_start: usize,
-    content_start: usize,
-) -> Option<usize> {
+/// Pairs each `<tag_name ...>` start offset with the offset of its matching
+/// `</tag_name`, in one forward pass with a stack. Self-closing (`/>`) opens
+/// take no part in nesting; unmatched opens get no entry.
+fn match_tag_pairs(lower: &str, tag_name: &str) -> HashMap<usize, usize> {
     let open_prefix = format!("<{tag_name}");
     let close_prefix = format!("</{tag_name}");
-    let mut depth = 1i32;
-    let mut cursor = content_start;
+    let mut opens = ForwardFind::new(lower, &open_prefix);
+    let mut closes = ForwardFind::new(lower, &close_prefix);
+    let mut gts = ForwardFind::new(lower, ">");
+    let mut pairs = HashMap::new();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut cursor = 0usize;
 
-    while cursor < lower_html.len() {
-        let next_open = lower_html[cursor..].find(&open_prefix).map(|i| cursor + i);
-        let next_close = lower_html[cursor..].find(&close_prefix).map(|i| cursor + i);
-
-        match (next_open, next_close) {
-            (Some(open), Some(close)) if open < close => {
+    while let Some(close) = closes.at_or_after(cursor) {
+        match opens.at_or_after(cursor) {
+            Some(open) if open < close => {
                 let after_name = open + open_prefix.len();
-                let is_same_tag = lower_html[after_name..]
-                    .chars()
-                    .next()
-                    .map(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
-                    .unwrap_or(false);
-                if is_same_tag {
-                    let end = lower_html[open..].find('>')?;
-                    let tag = &lower_html[open..open + end + 1];
-                    if !tag.ends_with("/>") {
-                        depth += 1;
+                if ends_tag_name(lower, after_name) {
+                    let Some(end) = gts.at_or_after(open) else {
+                        break;
+                    };
+                    if !lower[open..=end].ends_with("/>") {
+                        stack.push(open);
                     }
-                    cursor = open + end + 1;
+                    cursor = end + 1;
                 } else {
                     cursor = after_name;
                 }
             }
-            (_, Some(close)) => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(close);
+            _ => {
+                if let Some(open) = stack.pop() {
+                    pairs.insert(open, close);
                 }
-                let end = lower_html[close..].find('>')?;
-                cursor = close + end + 1;
+                let Some(end) = gts.at_or_after(close) else {
+                    break;
+                };
+                cursor = end + 1;
             }
-            _ => return None,
         }
     }
 
-    debug_assert!(tag_start < lower_html.len());
-    None
+    pairs
 }
 
 fn looks_like_content_container(open_tag: &str) -> bool {
@@ -2552,6 +2619,41 @@ mod tests {
         let result = extract_readable_content(&html).unwrap();
         assert!(result.contains("Nested Article"));
         assert!(result.contains("bounded extraction text"));
+    }
+
+    // TM-DOS-006: readable extraction stays linear on hostile nesting.
+    #[test]
+    fn test_extract_readable_content_linear_on_hostile_nesting() {
+        let payloads = [
+            format!("{}{}", "<article>".repeat(200_000), "</article>"),
+            format!(
+                "{}{}",
+                "<article>".repeat(100_000),
+                "</article>".repeat(100_000)
+            ),
+            "<article ".repeat(200_000),
+            format!("{}{}", r#"<div class="content">"#.repeat(100_000), "</div>"),
+        ];
+        for html in &payloads {
+            let started = std::time::Instant::now();
+            let _ = extract_readable_content(html);
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < std::time::Duration::from_secs(5),
+                "{} bytes took {elapsed:?}",
+                html.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_match_tag_pairs_nesting_and_self_closing() {
+        let html = "<div><div/><div>a</div><divx></div>b</div>";
+        let pairs = match_tag_pairs(html, "div");
+        // `<divx>` is not a div, so its `</div>` closes the outer one.
+        assert_eq!(pairs.get(&0), Some(&29));
+        assert_eq!(pairs.get(&11), Some(&17));
+        assert!(!pairs.contains_key(&5), "self-closing has no pair");
     }
 
     #[test]
