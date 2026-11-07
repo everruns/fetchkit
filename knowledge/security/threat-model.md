@@ -300,6 +300,7 @@ to protect against changes between validation and write.
 | TM-DOS-006 | Memory exhaustion from large HTML conversion | Medium | Conversion input bounded by `max_body_size` (10 MB default) | MITIGATED |
 | TM-DOS-007 | CPU/memory exhaustion from adversarial PDF parsing | Medium | Bounded input/output, blocking-task isolation, and a cancellation-safe two-document concurrency cap; parser-internal expansion remains possible | **ACCEPTED** |
 | TM-DOS-008 | Zip bomb or adversarial Office document | Medium | Archive/part budgets, DOCX dimension and padded-cell admission before rendering, legacy DOCX incremental byte admission, per-sheet output caps, shared two-document blocking cap | MITIGATED |
+| TM-DOS-009 | Quadratic CPU in readable/agent extraction | Medium | `'<article>' * N + '</article>'` made the readable pass rescan the rest of the body per nested open (O(N x len): 20k opens took 0.7 s debug, 200k extrapolated to minutes). Closes are now matched in one forward pass, substring searches resume from cached positions, and scored candidate bytes are capped at 8x the document. Regression: `test_extract_readable_content_linear_on_hostile_nesting` | MITIGATED |
 
 ### Mitigation Details
 
