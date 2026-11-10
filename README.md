@@ -420,6 +420,13 @@ HTML is automatically converted to markdown:
 - Adds a bounded [Agent resources](docs/agent-discoverability.md) navigation appendix
   when discoverable resources are available
 
+## Ecosystem
+
+fetchkit is part of [Everruns](https://everruns.com/projects/), a free, non-commercial
+community ecosystem of open-source AI projects by
+[Mykhailo Chalyi](https://chaliy.name) and contributors. Questions, ideas and
+research discussion are welcome on [Discord](https://everruns.com/discord).
+
 ## License
 
 MIT. See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for adapted components.
