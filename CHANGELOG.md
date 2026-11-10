@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-10
+
+### Highlights
+
+- Security fix: readable/agent content focus no longer goes quadratic on hostile nesting, so a crafted page cannot burn minutes of CPU past the fetch deadline.
+
 ### Fixed
 
 - Readable/agent content focus runs in linear time on hostile nesting (`'<article>' * N + '</article>'` was quadratic) (TM-DOS-009).
+
+### What's Changed
+
+- fix(convert): make readable extraction linear on hostile nesting ([#193](https://github.com/everruns/fetchkit/pull/193))
+- docs: describe fetchkit as part of the Everruns community ecosystem ([#194](https://github.com/everruns/fetchkit/pull/194))
+
+**Full Changelog**: https://github.com/everruns/fetchkit/compare/v0.7.1...v0.7.2
 
 ## [0.7.1] - 2026-11-03
 
