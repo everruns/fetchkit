@@ -1,5 +1,9 @@
 # Fetchkit Knowledge Update Log
 
+## 2026-11-10
+
+* **Release 0.7.2**: patch release of the linear readable-extraction fix (TM-DOS-009) so bashkit can pick it up; no public API change.
+
 ## 2026-11-07
 
 * **Linear readable extraction**: a bashkit security audit found `--content-focus readable`/`agent` quadratic on `'<article>' * N + '</article>'` (each nested open rescanned the rest of the body, and each nested candidate re-scored the same text). Closes are matched in one stack pass, searches resume from cached positions, and scored bytes are capped at 8x the document. See [Threat Model](security/threat-model.md), TM-DOS-009.
